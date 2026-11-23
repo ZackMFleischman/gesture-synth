@@ -620,7 +620,7 @@ function drawLeadLadder(g, G, s) {
   const side = G.exprSide;
   const ex = (d) => (side === "right" ? G.W - d : d); // distance from the edge -> x
   const top = 176;
-  const bottom = G.H - 92;
+  const bottom = G.H - 100; // down arrow clears the help button when the ladder is on the left (swap)
   const n = 15; // full scale, 2 octaves: A3..A5
   const notes = Array.from({ length: n }, (_, i) => ({ name: SCALE_A[i % 7] + (3 + Math.floor((i + 0) / 7) + (i % 7 >= 2 ? 1 : 0) - (i >= 7 && i % 7 < 2 ? 0 : 0)), chord: [0, 2, 4].includes(i % 7) }));
   // Octave numbering: C# starts the next octave in A major (A3 B3 C#4 ...).

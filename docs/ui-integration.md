@@ -104,7 +104,7 @@ All sizes scale with `handSize` where noted; `hs` below = the hand's on-screen s
   replaced by the note ladder. Held (menu/countdown/pinch): track dims to 40 %, hollow marker at the held value, no
   guide. Return: hollow + solid markers together until they meet.
 - **Lead note ladder** (canvas): replaces the right track. Lines from 8px off the edge inward (scale notes 40px thin
-  ink 55 %; chord notes 54px, 2.5px, mode color). Top line at y=176 (below the filter readout), bottom at h-92.
+  ink 55 %; chord notes 54px, 2.5px, mode color). Top line at y=176 (below the filter readout), bottom at h-100 (the down arrow then clears the help button if the ladder is on the left).
   Up/down outline arrows 24px beyond the ends; 4 octave dots on the inner side of the up arrow.
 - **Mode badge** (DOM `#modeBadge`): row 1, x=110, 26px pill, mode color 15 % fill + 1.5px stroke + dot + name.
   Color switches at the **start** of the countdown (spec). Click → opens the controls panel.
