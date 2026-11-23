@@ -29,6 +29,7 @@ import { createLeadVoice } from "./lead-voice.js";
 import { drawEnergy } from "./chords.js";
 import { MODE_COLORS, COLORS, FONT as THEME_FONT, MOTION, withAlpha, easeOut, confirmPhase, drawLabel, rectsOverlap } from "../ui/theme.js";
 import { createSafeArea } from "../ui/mobile/safe-area.js";
+import { lostAlpha } from "../ui/edge-tracks.js";
 
 // ---- Look: shared tokens from src/ui/theme.js; Lead-specific geometry below ----
 export const LEAD_COLOR = MODE_COLORS.lead;
@@ -874,6 +875,9 @@ const lead = {
 
     // ---- Cursor + note name ----
     const lost = !S.present;
+    // Hand-lost ring + plate: full for MOTION.lostHold, then fade over lostFade, then gone (the ladder stays dim).
+    const lostA = lost ? lostAlpha(now - (S.lostSince ?? -Infinity)) : 1;
+    view.lostAlpha = lost ? lostA : null;
     const idx = S.pinchMode === "note" ? S.playIdx : S.preview;
     let cursorMidi = idx != null ? S.ladder.notes[idx]?.midi : null;
     if (cursorMidi == null && lost) cursorMidi = view.lastPreviewMidi;
@@ -933,6 +937,7 @@ const lead = {
         g.save();
         if (menuHeld) g.globalAlpha = LOOK.dimDuringHold;
         if (lost) {
+          g.globalAlpha *= lostA;
           g.beginPath();
           g.arc(cx, cy, r, 0, Math.PI * 2);
           g.fillStyle = "rgba(0,0,0,0.35)";
@@ -979,7 +984,12 @@ const lead = {
         }
         g.restore();
       }
-      if (lost) reg("lead-lost", "hand", plateLabel(g, "Hand lost", nameX, cy, { size: 13, weight: 700, color: C.warn, align: alignIn, stroke: withAlpha(C.warn, 0.7) }));
+      if (lost && lostA > 0) {
+        g.save();
+        g.globalAlpha *= lostA;
+        reg("lead-lost", "hand", plateLabel(g, "Hand lost", nameX, cy, { size: 13, weight: 700, color: C.warn, align: alignIn, stroke: withAlpha(C.warn, 0.7) }));
+        g.restore();
+      }
     }
 
     // ---- Note-set badge: approach fill, then the confirmed state (pop, ~1 s, fade) ----
@@ -1178,6 +1188,8 @@ const lead = {
       regions: view.regions.map((r) => ({ ...r, rect: { ...r.rect } })),
       // What the last draw() showed (camera-feedback tests): labels, current plate, confirm visuals.
       drawnAt: view.drawnAt,
+      lostSince: S.lostSince,
+      lostAlpha: view.lostAlpha ?? null, // hand-lost ring/plate opacity (null = hand present)
       setChangedAt: S.setChangedAt,
       octaveChangedAt: S.octaveChangedAt,
       labels: view.labels.map((l) => ({ ...l, rect: { ...l.rect } })),

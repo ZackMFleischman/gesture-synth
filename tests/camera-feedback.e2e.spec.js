@@ -14,7 +14,7 @@ import { createScreencast } from "./helpers/screencast.js";
 import { scene, setHands as setHandsOn, openApp, bus, modeId, dbg, ladder, yFor, frames, startRec, overlaps } from "./helpers/m2-lead.js";
 import { stepAnalysis, windowPitches, clickRatio, envelope } from "./helpers/lead-pitch.js";
 import { midiToFreq, SET_HOLD_MS } from "../src/modes/lead-notes.js";
-import { CONFIRM, MODE_COLORS } from "../src/ui/theme.js";
+import { CONFIRM, MODE_COLORS, MOTION } from "../src/ui/theme.js";
 import { filterText } from "../src/ui/hand-overlays.js";
 
 const WAV_DIR = "test-results/audio";
@@ -205,13 +205,16 @@ test.describe("setting confirmed", () => {
     await setNoteSet(page, 2);
     await setHandsOn(page, SC.left(1), shape(SC, 4, 0.5));
     await firstDrawn(page, "set");
-    await page.waitForFunction(() => {
+    // The first frame drawn >= 0.9 s after the confirm (a busy machine may skip frames: only a frame inside
+    // the 1 s hold must be fully opaque; the timeline test above samples every frame).
+    const at1s = await (await page.waitForFunction(() => {
       const d = window.__gsTest.registry.getMode("lead")._debug();
-      return d.drawnAt - d.setChangedAt >= 920;
-    }, null, { polling: "raf" });
-    const d1 = await dbg(page);
+      const since = d.drawnAt - d.setChangedAt;
+      return since >= 900 ? { since, alpha: d.setBadge?.alpha ?? 0 } : null;
+    }, null, { polling: "raf" })).jsonValue();
     await page.screenshot({ path: `${SCREENS_DIR}/feedback-noteset-confirm-1s.png` });
-    expect(d1.setBadge?.alpha, "badge at ~1 s").toBe(1);
+    if (at1s.since <= CONFIRM.holdMs) expect(at1s.alpha, `badge at ${at1s.since.toFixed(0)} ms`).toBe(1);
+    else expect(at1s.alpha, `badge at ${at1s.since.toFixed(0)} ms (fading)`).toBeGreaterThan(0);
     // Octave: pinch on the up arrow and hold.
     const d = await dbg(page);
     const upY = d.geo.upY / d.geo.H;
@@ -397,6 +400,39 @@ for (const [vpName, vp] of [["desktop", DESKTOP], ["mobile", MOBILE]]) {
     });
   });
 }
+
+// =====================================================================================================
+// Hand lost in Lead: the dashed ring + "Hand lost" plate fade out (same timing as the edge tracks)
+// =====================================================================================================
+
+test("Lead hand-lost ring + plate: full for MOTION.lostHold, then fade, then gone; the ladder stays", async ({ synthPage: page }) => {
+  await setHandsOn(page, SC.left(1), SC.preview(0.5));
+  await enterMode(page, "lead");
+  await page.waitForTimeout(300);
+  await setHandsOn(page, SC.left(1)); // the right hand drops out
+  const lostNames = async () => (await dbg(page)).regions.map((r) => r.name).filter((n) => n === "lead-lost");
+  await expect.poll(lostNames, { timeout: 1500 }).toEqual(["lead-lost"]);
+  const samples = await page.evaluate(() => new Promise((res) => {
+    const out = [];
+    const step = () => {
+      const d = window.__gsTest.registry.getMode("lead")._debug();
+      const since = d.drawnAt - d.lostSince;
+      out.push({ since, a: d.lostAlpha, plate: d.regions.some((r) => r.name === "lead-lost") });
+      if (since > 2300) res(out);
+      else requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }));
+  for (const s of samples.filter((x) => x.since <= MOTION.lostHold - 20)) expect(s.a, `full at ${s.since.toFixed(0)} ms`).toBe(1);
+  expect(samples.some((s) => s.a > 0 && s.a < 1), "fades (not a jump)").toBe(true);
+  for (const s of samples.filter((x) => x.since >= MOTION.lostHold + MOTION.lostFade + 20)) {
+    expect(s.a).toBe(0);
+    expect(s.plate).toBe(false);
+  }
+  for (let i = 1; i < samples.length; i++) expect(samples[i].a).toBeLessThanOrEqual(samples[i - 1].a);
+  const d = await dbg(page);
+  expect(d.regions.some((r) => r.name === "lead-ladder"), "ladder still drawn").toBe(true);
+});
 
 // =====================================================================================================
 // Video with sound
