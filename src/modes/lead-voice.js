@@ -5,13 +5,40 @@
 // and every note/on pairs with exactly one note/off of the same id.
 //
 // Levels leave headroom for the resonant filter: lead peak 0.2, pad <= ~0.16 total.
+//
+// Release (pinch opens): a smooth fade over leadConfig.releaseMs (releaseCurve: cubic, slope 0 at the end = exact,
+// click-free silence; -60 dB at 90% of the time). releaseTime() is the one place that picks the length, so an
+// instrument trait (e.g. traits.releaseTailS) can override it later. A new pinch during the fade retriggers via
+// cancelAndHold + the RETRIGGER_DIP_S dip (no click, no stuck note).
+
+import { leadConfig } from "./lead-config.js";
 
 // ---- Tunables ----
 export const LEAD_PEAK = 0.2;
 export const LEAD_SUSTAIN = 0.16;
 export const ATTACK_S = 0.01; // linear attack
 export const DECAY_TAU = 0.08; // peak -> sustain
-export const RELEASE_TAU = 0.03; // ~150 ms to silence
+export const RELEASE_TAU = 0.03; // (legacy; the release now uses releaseCurve over leadConfig.releaseMs)
+export const RELEASE_POINTS = 64;
+
+/**
+ * Release envelope: `points` gain values from `level` to exactly 0, shape (1 - x)^3 (gentle start like an
+ * exponential with tau = T/3, slope 0 at the end so the tail never clicks; -60 dB at x = 0.9).
+ */
+export function releaseCurve(level, points = RELEASE_POINTS) {
+  const c = new Float32Array(points);
+  for (let i = 0; i < points; i++) {
+    const x = i / (points - 1);
+    c[i] = level * (1 - x) * (1 - x) * (1 - x);
+  }
+  return c;
+}
+
+/** Release length in seconds (live: leadConfig.releaseMs; clamped 10 ms .. 1.5 s, the graph outlives it on stop). */
+export function releaseTime() {
+  const ms = Number(leadConfig.releaseMs);
+  return Math.max(0.01, Math.min(1.5, Number.isFinite(ms) ? ms / 1000 : 0.25));
+}
 export const RETRIGGER_DIP_S = 0.008; // a new pinch on a sounding voice dips to 0 first (audible onset, no click)
 // Moving to another note while pinched steps the pitch (lead decision after the real-camera session: the 70 ms
 // portamento sounded like a slide guitar). The step is a 3 ms exponential ramp, not a jump to the new value
@@ -135,8 +162,15 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
     const n = nodes;
     if (!n || soundingFreq == null) return;
     const t = n.ac.currentTime;
-    hold(n.env.gain, t);
-    n.env.gain.setTargetAtTime(0, t, RELEASE_TAU);
+    const g = n.env.gain;
+    hold(g, t);
+    const level = g.value;
+    try {
+      if (level > 1e-4) g.setValueCurveAtTime(releaseCurve(level), t, releaseTime());
+      else g.setValueAtTime(0, t);
+    } catch {
+      g.setTargetAtTime(0, t, releaseTime() / 6.9); // overlapping automation (should not happen): exp. to -60 dB
+    }
     emit("note/off", soundingFreq, t, soundingId);
     soundingFreq = null;
     soundingId = null;
