@@ -4,9 +4,19 @@
 // Landmark indices: 0 wrist, 1-4 thumb (cmc, mcp, ip, tip),
 // 5-8 index, 9-12 middle, 13-16 ring, 17-20 pinky (mcp, pip, dip, tip).
 
+import { makeView } from "../../src/input/hand-input.js";
+
 const FINGER_ORDER = ["index", "middle", "ring", "pinky"];
 const MCP_X_OFFSET = { index: -0.06, middle: -0.02, ring: 0.02, pinky: 0.06 };
 const TILT_TRAVEL = 0.12; // must match MAX_TRAVEL in getHandHorizontalTilt
+const PALM = [0, 5, 9, 13, 17]; // palm-center landmarks (must match hand-input.js)
+
+/**
+ * The view the app uses in the default Playwright setup: the fake camera is 640x480,
+ * the canvas 1280x800 (cover crop). Pass `view` to `hand()` when `pos` must land exactly.
+ */
+export const DESKTOP_VIEW = makeView(640, 480, 1280, 800);
+export const IDENTITY_VIEW = makeView();
 
 /**
  * @param {object} opts
@@ -14,23 +24,38 @@ const TILT_TRAVEL = 0.12; // must match MAX_TRAVEL in getHandHorizontalTilt
  * @param {string[]} opts.fingers  extended fingers, any of index/middle/ring/pinky
  * @param {boolean} opts.thumb  thumb extended
  * @param {number} opts.tilt  desired output of getHandHorizontalTilt, -1..1
- * @param {number} opts.volume  desired output of getVolumeFromHeight, 0..1
+ * @param {number} opts.volume  desired output of getVolumeFromHeight, 0..1 (ignored if `pos` given)
+ * @param {boolean} opts.fist  tightly closed hand (index..pinky curled into the palm); thumb still follows `thumb`
+ * @param {boolean|number} opts.pinch  thumb tip on the index tip; a number = desired pinchDistance
+ *   (thumb-index distance / hand size), `true` = 0.1. Fingers default to middle+ring+pinky (an "OK" sign).
+ * @param {{x:number,y:number}} opts.pos  palm center in DISPLAY space (0..1 of the canvas, mirrored)
+ * @param {object} opts.view  display mapping for `pos` (default IDENTITY_VIEW: x mirrored, y unchanged)
+ * @param {number} opts.scale  hand size multiplier (1 = default, ~0.15 wrist->middle MCP)
  */
 export function hand({
   handedness = "Left",
-  fingers = [],
+  fingers,
   thumb = false,
   tilt = 0,
   volume = 0.5,
+  fist = false,
+  pinch = false,
+  pos,
+  view = IDENTITY_VIEW,
+  scale = 1,
 } = {}) {
+  if (fingers === undefined) fingers = pinch ? ["middle", "ring", "pinky"] : [];
+  if (fist) fingers = [];
+
   const cx = handedness === "Left" ? 0.3 : 0.7;
   const wristY = 0.95 - volume * 0.9;
-  const mcpY = wristY - 0.15;
+  const s = scale;
+  const mcpY = wristY - 0.15 * s;
 
   // getHandHorizontalTilt flips the sign for right hands.
   const rawTilt = handedness === "Right" ? -tilt : tilt;
-  const minX = cx + MCP_X_OFFSET.middle;
-  const maxX = cx + MCP_X_OFFSET.ring;
+  const minX = cx + MCP_X_OFFSET.middle * s;
+  const maxX = cx + MCP_X_OFFSET.ring * s;
   let wristX = cx;
   if (rawTilt > 0) wristX = maxX + rawTilt * TILT_TRAVEL;
   if (rawTilt < 0) wristX = minX + rawTilt * TILT_TRAVEL;
@@ -39,17 +64,42 @@ export function hand({
   const lm = [pt(wristX, wristY)];
 
   // Thumb: "extended" means tip is outward of the IP joint (direction depends on hand).
-  const ipX = cx - 0.09;
+  const ipX = cx - 0.09 * s;
   const outward = handedness === "Right" ? 1 : -1;
-  const tipX = thumb ? ipX + outward * 0.04 : ipX - outward * 0.03;
-  lm.push(pt(cx - 0.05, wristY - 0.03), pt(cx - 0.07, wristY - 0.06), pt(ipX, wristY - 0.09), pt(tipX, wristY - 0.11));
+  const tipX = thumb ? ipX + outward * 0.04 * s : ipX - outward * 0.03 * s;
+  lm.push(
+    pt(cx - 0.05 * s, wristY - 0.03 * s),
+    pt(cx - 0.07 * s, wristY - 0.06 * s),
+    pt(ipX, wristY - 0.09 * s),
+    pt(tipX, wristY - 0.11 * s)
+  );
 
   for (const name of FINGER_ORDER) {
-    const x = cx + MCP_X_OFFSET[name];
+    const x = cx + MCP_X_OFFSET[name] * s;
     const extended = fingers.includes(name);
-    const pipY = mcpY - 0.06;
-    const tipY = extended ? mcpY - 0.12 : mcpY - 0.03; // curled tip sits below the pip
+    const pipY = mcpY - 0.06 * s;
+    // curled tip sits below the pip; in a fist it is tucked down by the knuckles
+    const tipY = extended ? mcpY - 0.12 * s : fist ? mcpY + 0.01 * s : mcpY - 0.03 * s;
     lm.push(pt(x, mcpY), pt(x, pipY), pt(x, (pipY + tipY) / 2), pt(x, tipY));
+  }
+
+  if (pinch) {
+    // Thumb tip sits `d` hand sizes below the index tip.
+    const d = pinch === true ? 0.1 : pinch;
+    const handSize = Math.hypot(lm[9].x - lm[0].x, lm[9].y - lm[0].y);
+    lm[4] = pt(lm[8].x, lm[8].y + d * handSize);
+  }
+
+  if (pos) {
+    // Move the whole hand so its palm center lands on `pos` (display space -> image space).
+    const px = 1 - pos.x; // un-mirror
+    const ix = (view.sx + px * view.sWidth) / view.srcW;
+    const iy = (view.sy + pos.y * view.sHeight) / view.srcH;
+    let mx = 0, my = 0;
+    for (const i of PALM) { mx += lm[i].x; my += lm[i].y; }
+    mx /= PALM.length;
+    my /= PALM.length;
+    for (const p of lm) { p.x += ix - mx; p.y += iy - my; }
   }
 
   return { handedness, landmarks: lm };
@@ -85,14 +135,30 @@ export const QUALITY_SHAPES = {
   4: ["index", "middle", "ring", "pinky"],
 };
 
-export function leftHand(degree, { minor = false, tilt } = {}) {
+/** Extra options (pos, view, scale) pass through to hand(). */
+export function leftHand(degree, { minor = false, tilt, ...rest } = {}) {
   return hand({
     handedness: "Left",
     ...DEGREE_SHAPES[degree],
     tilt: tilt ?? (minor ? -0.6 : 0.6),
+    ...rest,
   });
 }
 
-export function rightHand(quality, { volume = 0.8, tilt = 0, thumb = false } = {}) {
-  return hand({ handedness: "Right", fingers: QUALITY_SHAPES[quality], volume, tilt, thumb });
+/** Extra options (pos, view, scale, pinch) pass through to hand(). */
+export function rightHand(quality, { volume = 0.8, tilt = 0, thumb = false, ...rest } = {}) {
+  return hand({ handedness: "Right", fingers: QUALITY_SHAPES[quality], volume, tilt, thumb, ...rest });
+}
+
+/** A closed fist (the menu gesture). Default right hand; `thumb` may be either way. */
+export function fist({ handedness = "Right", ...rest } = {}) {
+  return hand({ handedness, fist: true, ...rest });
+}
+
+/**
+ * A pinch: thumb tip on the index tip with the middle finger extended.
+ * `distance` = pinchDistance in hand sizes (default 0.1). `fingers` defaults to middle+ring+pinky.
+ */
+export function pinch({ handedness = "Right", distance = 0.1, ...rest } = {}) {
+  return hand({ handedness, pinch: distance, ...rest });
 }
