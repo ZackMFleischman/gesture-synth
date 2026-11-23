@@ -1,8 +1,6 @@
 // Radial menu: canvas renderer. Reads a menu-state snapshot, keeps only cosmetic animation state.
 // All colors / sizes live in MENU_THEME so integration can swap them for shared UI tokens.
 
-import { DIRECTIONS } from "./menu-state.js";
-
 export const MENU_THEME = Object.freeze({
   font: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
   ink: "255,255,255", // structure (rgb triple, alpha applied per use)
@@ -36,18 +34,19 @@ export const MENU_THEME = Object.freeze({
   tauMs: 40, // easing time constant for highlight changes (~120 ms to settle)
   fillTauMs: 25,
   edgePad: 18,
+  // sub-menus
+  subMarkPx: 5, // chevron on the outer edge of an arc that opens a sub-ring
+  breadcrumbK: 0.3, // parent ring scale once it has shrunk to the breadcrumb
+  breadcrumbAlpha: 0.85,
+  backPx: 11, // "Back" caption next to the breadcrumb
+  settingDoneMs: 420, // value pill lingers (fading) after a setting confirm
 });
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 const easeOut = (t) => 1 - Math.pow(1 - clamp01(t), 3);
 const rgba = (rgb, a) => `rgba(${rgb},${a})`;
 const DEG = Math.PI / 180;
-const DIR_VEC = {
-  up: [0, -1],
-  down: [0, 1],
-  left: [-1, 0],
-  right: [1, 0],
-};
+const vec = (deg) => [Math.cos(deg * DEG), Math.sin(deg * DEG)];
 
 function hexToRgb(hex) {
   const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex || "");
@@ -144,7 +143,7 @@ function drawIcon(g, icon, x, y, size, color, alpha = 1) {
  */
 export function createMenuRenderer(themeOverrides = {}) {
   const TH = { ...MENU_THEME, ...themeOverrides };
-  const anim = new Map(); // id -> { fill, sel, hov, dim, vis }
+  const anim = new Map(); // `${level}:${id}` -> { fill, sel, hov, dim, vis, lab, push }
   let last = null;
 
   function step(cur, target, dt, tau) {
@@ -159,38 +158,44 @@ export function createMenuRenderer(themeOverrides = {}) {
     const { phase, now, timing: T, geometry: G } = snap;
     const dt = last === null ? 16 : Math.max(0, Math.min(100, now - last));
     last = now;
+    const isSettingConfirm = snap.confirmKind === "setting";
 
     // ---- Which visual phase are we in? -------------------------------------------------
     let ringAlpha = 1;
-    let ringScale = 1;
     let mode = phase; // "open" | "confirm" | "fade" | "done" | null
     if (phase === "idle") {
       const since = now - snap.closedAt;
+      const doneMs = isSettingConfirm ? TH.settingDoneMs : 160;
       if (!snap.center || !(since >= 0)) mode = null;
-      else if (snap.closeReason === "done") mode = since < 160 ? "done" : null;
+      else if (snap.closeReason === "done") mode = since < doneMs ? "done" : null;
       else if (since < T.CANCEL_FADE_MS) mode = "fade";
       else mode = null;
       if (!mode) {
         anim.clear();
         return;
       }
-      if (mode === "fade") {
-        const u = since / T.CANCEL_FADE_MS;
-        ringAlpha = 1 - u;
-        ringScale = 1 - 0.06 * u;
-      }
+    }
+    // Grow animation of the active ring (main ring at open / after "back", sub-ring at sub-open).
+    const growU = phase === "open" ? easeOut((now - Math.max(snap.openedAt, snap.levelAt ?? 0)) / T.GROW_MS) : 1;
+    let ringScale = 1;
+    if (mode === "fade") {
+      const u = (now - snap.closedAt) / T.CANCEL_FADE_MS;
+      ringAlpha = 1 - u;
+      ringScale = 1 - 0.06 * u;
     } else if (phase === "open") {
-      const u = easeOut((now - snap.openedAt) / T.GROW_MS);
-      ringAlpha = u * (snap.tracking ? 1 : 0.7);
-      ringScale = TH.growFrom + (1 - TH.growFrom) * u;
+      ringAlpha = growU * (snap.tracking ? 1 : 0.7);
+      ringScale = TH.growFrom + (1 - TH.growFrom) * growU;
     }
 
     const s = snap.handSize * view.scale; // px per hand size
-    const R = G.SELECT_R * s * ringScale;
+    const Rf = G.SELECT_R * s; // full-size outer radius
+    const R = Rf * ringScale;
     const ri = G.INNER_R * s * ringScale;
     const labelStart0 = TH.rimGap + TH.rimW + TH.labelGap; // labels clear the selected rim
     const b = view.bounds;
     const items = snap.items;
+    const level = snap.level || 0;
+    const miniR = Rf * TH.breadcrumbK;
 
     g.save();
     g.lineCap = "round";
@@ -198,33 +203,99 @@ export function createMenuRenderer(themeOverrides = {}) {
 
     // ---- Countdown / done: drawn at the hand ---------------------------------------------
     if (mode === "confirm" || mode === "done") {
-      const item = items.find((i) => i.id === snap.confirmedId);
+      const item = snap.confirmedItem || items.find((i) => i.id === snap.confirmedId);
       const t = now - snap.confirmedAt;
-      if (mode === "confirm" && t < T.FLASH_MS + 120) drawRing(t);
-      drawCountdown(item, t);
+      const ctr = clampedCenter();
+      if (mode === "confirm" && t < T.FLASH_MS + 120) {
+        if (level === 1 && snap.parent) drawBreadcrumb(ctr, 1, Math.max(0, 1 - t / T.FLASH_MS));
+        drawRing(ctr, t);
+      }
+      if (isSettingConfirm) drawSettingDone(item, t);
+      else drawCountdown(item, t);
       g.restore();
       return;
     }
 
-    drawRing(null);
+    const ctr = clampedCenter();
+    if (level === 1 && snap.parent) drawBreadcrumb(ctr, growU, 1);
+    drawRing(ctr, null);
     g.restore();
 
+    // ---- Geometry helpers ------------------------------------------------------------------
+    function labelBox(it) {
+      g.font = labelFont(true);
+      const icon = it.icon ? TH.iconPx + 6 : 0;
+      const w = g.measureText(it.label).width + icon + 22;
+      const h = TH.labelPx + 12;
+      return { w, h, icon };
+    }
+
+    /** Distance from a box center to its edge along the unit vector (vx, vy). */
+    function boxExtent(w, h, vx, vy) {
+      const ax = Math.abs(vx) > 1e-6 ? w / 2 / Math.abs(vx) : Infinity;
+      const ay = Math.abs(vy) > 1e-6 ? h / 2 / Math.abs(vy) : Infinity;
+      return Math.min(ax, ay);
+    }
+
+    /** Label pill center offset (from the ring center) for an item. */
+    function labelOffset(it, radius, push = 0) {
+      const { w, h } = labelBox(it);
+      const [vx, vy] = vec(it.angle);
+      const d = radius + labelStart0 + push + boxExtent(w, h, vx, vy);
+      return { x: vx * d, y: vy * d, w, h };
+    }
+
+    /** Breadcrumb (shrunk parent ring) position, relative to the sub-ring center, at full size. */
+    function breadcrumbOffset() {
+      const [vx, vy] = vec(snap.back.angle);
+      const d = Rf + TH.labelGap + miniR;
+      return { x: vx * d, y: vy * d };
+    }
+
+    function clampedCenter() {
+      const real = view.toCanvas(snap.center);
+      const rim = Rf + TH.rimGap + TH.rimW;
+      // extents from the center: left / right / up / down
+      const ext = { l: rim, r: rim, u: rim, d: rim };
+      for (const it of items) {
+        const o = labelOffset(it, Rf);
+        ext.l = Math.max(ext.l, -(o.x - o.w / 2));
+        ext.r = Math.max(ext.r, o.x + o.w / 2);
+        ext.u = Math.max(ext.u, -(o.y - o.h / 2));
+        ext.d = Math.max(ext.d, o.y + o.h / 2);
+      }
+      if (level === 1 && snap.back) {
+        const o = breadcrumbOffset();
+        const m = miniR + 6;
+        ext.l = Math.max(ext.l, -(o.x - m));
+        ext.r = Math.max(ext.r, o.x + m + 48); // "Back" caption beside it
+        ext.u = Math.max(ext.u, -(o.y - m));
+        ext.d = Math.max(ext.d, o.y + m);
+      }
+      ext.d += 40; // hint under the ring
+      const p = TH.edgePad;
+      const fit = (v, lo, hi) => (lo > hi ? (lo + hi) / 2 : Math.max(lo, Math.min(hi, v)));
+      return {
+        x: fit(real.x, b.x0 + ext.l + p, b.x1 - ext.r - p),
+        y: fit(real.y, b.y0 + ext.u + p, b.y1 - ext.d - p),
+      };
+    }
+
     // ---- Ring (open / fading / flashing) --------------------------------------------------
-    function drawRing(confirmT) {
-      const ctr = clampedCenter();
+    function drawRing(ctr, confirmT) {
       const { x: cx, y: cy } = ctr;
       const offPx = { x: snap.offset.x * view.scale, y: snap.offset.y * view.scale };
       const fist = { x: cx + offPx.x, y: cy + offPx.y };
       const distPx = Math.hypot(offPx.x, offPx.y);
-      const span = (90 - TH.arcGapDeg) * DEG;
       const flashing = confirmT !== null;
       // After the flash the confirmed arc fades out while the countdown ring takes over.
       const postFlash = flashing ? clamp01((confirmT - T.FLASH_MS) / 120) : 0;
       const flash = flashing ? Math.sin(Math.PI * clamp01(confirmT / T.FLASH_MS)) : 0;
+      const key = (id) => `${level}:${id}`;
 
       for (const it of items) {
-        let a = anim.get(it.id);
-        if (!a) anim.set(it.id, (a = { fill: 0, sel: 0, hov: 0, dim: 0, vis: 1, lab: TH.labelQuiet, push: 0 }));
+        let a = anim.get(key(it.id));
+        if (!a) anim.set(key(it.id), (a = { fill: 0, sel: 0, hov: 0, dim: 0, vis: 1, lab: TH.labelQuiet, push: 0 }));
         const isSel = it.id === snap.selectedId;
         const isHov = it.id === snap.hoverId;
         const fillT = isSel ? 1 : isHov ? clamp01((distPx / ringScale - G.INNER_R * s) / ((G.SELECT_R - G.INNER_R) * s)) : 0;
@@ -238,18 +309,22 @@ export function createMenuRenderer(themeOverrides = {}) {
           a.vis = flashing ? (isSel ? 1 : Math.min(a.vis, clamp01(1 - confirmT / 60))) : 1;
           a.lab = step(a.lab, labT, dt, TH.tauMs);
           // keep the label ahead of the fist so the fist never covers it
-          const [ux, uy] = DIR_VEC[it.direction];
+          const [ux, uy] = vec(it.angle);
           const along = offPx.x * ux + offPx.y * uy;
           const pushT = isHov || isSel ? Math.max(0, along + TH.fistR + 6 - (G.SELECT_R * s + labelStart0)) : 0;
           a.push = step(a.push, pushT, dt, TH.fillTauMs);
         }
       }
 
-      const ordered = [...items].sort((p, q) => (anim.get(p.id).sel || 0) - (anim.get(q.id).sel || 0));
+      // back sector (sub-ring only): neutral, no label (the breadcrumb beyond it is the label)
+      if (level === 1 && snap.back && !flashing) drawBackArc(cx, cy, distPx);
+
+      const ordered = [...items].sort((p, q) => (anim.get(key(p.id)).sel || 0) - (anim.get(key(q.id)).sel || 0));
       for (const it of ordered) {
-        const a = anim.get(it.id);
+        const a = anim.get(key(it.id));
         const col = hexToRgb(it.color);
-        const mid = DIRECTIONS[it.direction] * DEG;
+        const span = (it.span - TH.arcGapDeg) * DEG;
+        const mid = it.angle * DEG;
         const a0 = mid - span / 2;
         const a1 = mid + span / 2;
         const dimF = 1 - (1 - TH.dimAlpha) * a.dim;
@@ -299,8 +374,8 @@ export function createMenuRenderer(themeOverrides = {}) {
           g.restore();
         }
 
-        const [vx, vy] = DIR_VEC[it.direction];
-        // current-mode marker: small dot on the arc's outer edge
+        const [vx, vy] = vec(it.angle);
+        // current-item marker: small dot on the arc's outer edge
         if (isCur) {
           g.beginPath();
           g.arc(cx + vx * R, cy + vy * R, TH.markerR, 0, Math.PI * 2);
@@ -309,6 +384,13 @@ export function createMenuRenderer(themeOverrides = {}) {
           g.stroke();
           g.fillStyle = rgba(TH.ink, base * (1 - 0.4 * a.dim));
           g.fill();
+        }
+
+        // sub-menu mark: outward chevron on the outer edge; it slides out while the fist passes through
+        if (it.type === "submenu") {
+          const pend = it.id === snap.selectedId ? snap.subPending || 0 : 0;
+          const ca = base * (0.75 + 0.25 * Math.max(a.hov, pend));
+          drawChevron(cx, cy, it.angle, R + TH.rimGap + TH.rimW + 5 + 6 * pend, ca, a.sel > 0.5 ? col : TH.ink);
         }
 
         // label outside the ring, in the direction of movement
@@ -363,10 +445,19 @@ export function createMenuRenderer(themeOverrides = {}) {
       if (mode !== "open") return;
       const sel = items.find((i) => i.id === snap.selectedId);
       let hint = "Move to choose";
+      if (level === 1 && snap.back) hint = `Move to choose · ${backWord(snap.back.angle)} = back`;
       if (!snap.tracking) hint = "Hand lost";
-      else if (sel) hint = sel.id === snap.currentId ? "Already active" : "Open hand to confirm";
-      const down = items.find((i) => i.direction === "down");
-      const hy = cy + R + 24 + (down ? labelStart0 + labelBox(down).h : 0);
+      else if (sel && sel.type === "submenu") hint = "Keep going to open";
+      else if (sel) {
+        if (sel.id === snap.currentId) hint = level === 1 ? "Already set" : "Already active";
+        else hint = sel.type === "setting" ? "Open hand to set" : "Open hand to confirm";
+      } else if (snap.hoverBack) hint = "Back";
+      let low = Rf + 24;
+      for (const it of items) {
+        const o = labelOffset(it, Rf);
+        low = Math.max(low, o.y + o.h / 2 + 24);
+      }
+      const hy = cy + low;
       g.font = `${sel ? 600 : 500} ${TH.hintPx}px ${TH.font}`;
       const hw = g.measureText(hint).width + 20;
       const hh = TH.hintPx + 10;
@@ -386,12 +477,103 @@ export function createMenuRenderer(themeOverrides = {}) {
       g.fillText(hint, cx, hy + 0.5);
     }
 
-    function labelBox(it) {
-      g.font = labelFont(true);
-      const icon = it.icon ? TH.iconPx + 6 : 0;
-      const w = g.measureText(it.label).width + icon + 22;
-      const h = TH.labelPx + 12;
-      return { w, h, icon };
+    function backWord(angle) {
+      const a = ((angle % 360) + 360) % 360;
+      if (a > 225 && a < 315) return "up";
+      if (a > 45 && a < 135) return "down";
+      return a >= 135 && a <= 225 ? "left" : "right";
+    }
+
+    /** The back sector: short neutral dashed arc, fills (ink) as the fist heads back toward the parent. */
+    function drawBackArc(cx, cy, distPx) {
+      const bk = snap.back;
+      const span = (bk.span - TH.arcGapDeg) * DEG;
+      const a0 = bk.angle * DEG - span / 2;
+      const a1 = bk.angle * DEG + span / 2;
+      const r1 = ri + (R - ri) * 0.55; // shorter than the item arcs: it is a way out, not a choice
+      sectorPath(g, cx, cy, ri, r1, a0, a1, TH.cornerPx);
+      g.fillStyle = rgba(TH.plate, TH.plateAlpha * 0.8 * ringAlpha);
+      g.fill();
+      if (snap.hoverBack) {
+        const u = clamp01((distPx / ringScale - G.INNER_R * s) / ((G.BACK_R - G.INNER_R) * s));
+        if (u > 0.01) {
+          sectorPath(g, cx, cy, ri, ri + (r1 - ri) * u, a0, a1, TH.cornerPx);
+          g.fillStyle = rgba(TH.ink, 0.35 * ringAlpha);
+          g.fill();
+        }
+      }
+      sectorPath(g, cx, cy, ri, r1, a0, a1, TH.cornerPx);
+      g.save();
+      g.setLineDash([3, 3]);
+      g.lineWidth = 1.25;
+      g.strokeStyle = rgba(TH.ink, (snap.hoverBack ? 0.85 : 0.5) * ringAlpha);
+      g.stroke();
+      g.restore();
+    }
+
+    /** Parent ring shrunk to a breadcrumb beyond the back sector. u: 0 = full size in place -> 1 = breadcrumb. */
+    function drawBreadcrumb(ctr, u, alphaMul) {
+      const par = snap.parent;
+      if (!par || !snap.back) return;
+      // start: where the parent ring sits relative to the sub-ring (fixed offset in canvas px)
+      const pc = view.toCanvas(par.center);
+      const sc = view.toCanvas(snap.center);
+      const start = { x: ctr.x + (pc.x - sc.x), y: ctr.y + (pc.y - sc.y) };
+      const bo = breadcrumbOffset();
+      const end = { x: ctr.x + bo.x, y: ctr.y + bo.y };
+      const k = 1 + (TH.breadcrumbK - 1) * u;
+      const x = start.x + (end.x - start.x) * u;
+      const y = start.y + (end.y - start.y) * u;
+      const r1 = Rf * k;
+      const r0 = G.INNER_R * s * k;
+      const alpha = alphaMul * (1 - (1 - TH.breadcrumbAlpha) * u) * (snap.tracking ? 1 : 0.7);
+      const gap = TH.arcGapDeg * (1 + u) * DEG;
+      for (const it of par.items) {
+        const span = it.span * DEG - gap;
+        const a0 = it.angle * DEG - span / 2;
+        const a1 = it.angle * DEG + span / 2;
+        const isHost = it.id === par.hostId;
+        sectorPath(g, x, y, r0, r1, a0, a1, Math.max(1, TH.cornerPx * k));
+        g.fillStyle = isHost ? rgba(hexToRgb(it.color), 0.8 * alpha) : rgba(TH.plate, TH.plateAlpha * alpha);
+        g.fill();
+        g.lineWidth = 1;
+        g.strokeStyle = isHost ? rgba(hexToRgb(it.color), alpha) : rgba(TH.ink, 0.45 * alpha);
+        g.stroke();
+      }
+      if (u > 0.6) {
+        const ta = alpha * clamp01((u - 0.6) / 0.4) * (snap.hoverBack ? 1 : 0.72);
+        g.font = `${snap.hoverBack ? 650 : 500} ${TH.backPx}px ${TH.font}`;
+        g.textBaseline = "middle";
+        g.textAlign = "left";
+        const tx = x + r1 + 7;
+        const txt = "Back";
+        const tw = g.measureText(txt).width;
+        roundRect(g, tx - 5, y - 9, tw + 10, 18, 9);
+        g.fillStyle = rgba(TH.plate, 0.5 * ta);
+        g.fill();
+        g.fillStyle = rgba(TH.ink, ta);
+        g.fillText(txt, tx, y + 0.5);
+      }
+    }
+
+    function drawChevron(cx, cy, angleDeg, dist, alpha, col) {
+      const [vx, vy] = vec(angleDeg);
+      const m = TH.subMarkPx;
+      const rgb = col.startsWith("#") ? hexToRgb(col) : col;
+      g.save();
+      g.translate(cx + vx * dist, cy + vy * dist);
+      g.rotate(angleDeg * DEG);
+      g.beginPath();
+      g.moveTo(-m * 0.5, -m);
+      g.lineTo(m * 0.5, 0);
+      g.lineTo(-m * 0.5, m);
+      g.lineWidth = 3.5;
+      g.strokeStyle = rgba(TH.shadow, 0.4 * alpha);
+      g.stroke();
+      g.lineWidth = 1.75;
+      g.strokeStyle = rgba(rgb, alpha);
+      g.stroke();
+      g.restore();
     }
 
     /** Icon + label pill, centered at (x, y). */
@@ -415,13 +597,9 @@ export function createMenuRenderer(themeOverrides = {}) {
     }
 
     function drawLabel(it, cx, cy, a, alpha, col) {
-      const { w, h } = labelBox(it);
-      const [vx, vy] = DIR_VEC[it.direction];
-      const start = R + labelStart0 + a.push;
-      const lx = cx + vx * (start + w / 2);
-      const ly = cy + vy * (start + h / 2);
+      const o = labelOffset(it, R, a.push);
       const isCur = it.id === snap.currentId;
-      drawPill(it, lx, ly, {
+      drawPill(it, cx + o.x, cy + o.y, {
         textA: a.lab * alpha * (1 - (1 - TH.labelDim) * a.dim),
         plateA: (0.5 + 0.15 * a.hov) * alpha,
         strokeCol: a.sel > 0.01 ? rgba(isCur ? TH.ink : col, a.sel * alpha * (isCur ? 0.6 : 1)) : null,
@@ -429,31 +607,43 @@ export function createMenuRenderer(themeOverrides = {}) {
       });
     }
 
-    function clampedCenter() {
-      const real = view.toCanvas(snap.center);
-      const Rf = G.SELECT_R * s; // clamp against the full-size ring so it doesn't drift while growing
-      const ext = { up: Rf + TH.rimGap + TH.rimW, down: Rf + 40, left: Rf + TH.rimGap + TH.rimW, right: Rf + TH.rimGap + TH.rimW };
-      for (const it of items) {
-        const { w, h } = labelBox(it);
-        const e = Rf + labelStart0 + (it.direction === "up" || it.direction === "down" ? h : w);
-        ext[it.direction] = Math.max(ext[it.direction], e + (it.direction === "down" ? 40 : 0));
-      }
-      const p = TH.edgePad;
-      const fit = (v, lo, hi) => (lo > hi ? (lo + hi) / 2 : Math.max(lo, Math.min(hi, v)));
+    function handAnchor(extraBelow) {
+      const rc = TH.countdownR * s;
+      const hp = view.toCanvas(snap.handPos || snap.center);
+      const m = rc * 1.3 + 8;
       return {
-        x: fit(real.x, b.x0 + ext.left + p, b.x1 - ext.right - p),
-        y: fit(real.y, b.y0 + ext.up + p, b.y1 - ext.down - p),
+        rc,
+        x: Math.max(b.x0 + m, Math.min(b.x1 - m, hp.x)),
+        y: Math.max(b.y0 + m, Math.min(b.y1 - m - extraBelow, hp.y)),
       };
+    }
+
+    /** Setting confirm: no countdown (the right hand's controls don't change), just the picked value at the hand. */
+    function drawSettingDone(item, t) {
+      if (!item) return;
+      const col = hexToRgb(item.color);
+      const { h } = labelBox(item);
+      const { x, y } = handAnchor(h + 12);
+      let alpha;
+      let rise = 0;
+      if (mode === "done") {
+        const d = clamp01((now - snap.closedAt) / TH.settingDoneMs);
+        alpha = 1 - d * d;
+        rise = 4 * easeOut(d);
+      } else alpha = clamp01((t - 40) / 80);
+      if (alpha <= 0.002) return;
+      drawPill(item, x, y + TH.fistR + 12 + h / 2 - rise, {
+        textA: alpha,
+        plateA: 0.6 * alpha,
+        strokeCol: rgba(col, alpha),
+        bold: true,
+      });
     }
 
     function drawCountdown(item, t) {
       if (!item) return;
       const col = hexToRgb(item.color);
-      const rc = TH.countdownR * s;
-      const hp = view.toCanvas(snap.handPos || snap.center);
-      const m = rc * 1.3 + 8;
-      const hx = Math.max(b.x0 + m, Math.min(b.x1 - m, hp.x));
-      const hy = Math.max(b.y0 + m, Math.min(b.y1 - m - TH.labelPx - 22, hp.y));
+      const { rc, x: hx, y: hy } = handAnchor(TH.labelPx + 22);
       let u, alpha, r;
       if (mode === "done") {
         const d = clamp01((now - snap.closedAt) / 160);

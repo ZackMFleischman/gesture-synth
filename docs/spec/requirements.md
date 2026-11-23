@@ -176,7 +176,7 @@ Item types: mode (change the play mode), submenu (holds child items), setting (p
 A custom item takes control of the right hand with its own handler. The handler gets the hand input for each frame and returns "continue", "done", or "cancel". This is the path for later item types that do not fit the others.
 A mode can add its own items to the menu. These items show only while that mode is active.
 The menu code (rings, approach, selection, visuals) is generic. It does not know about specific modes.
-Sub-menu behavior (decided, build later)
+Sub-menu behavior (decided; built in src/menu, see docs/architecture.md)
 A sub-menu opens while the fist moves through its arc. The user does not open the hand between levels.
 The sub-ring opens when the fist passes the outer edge of the arc and continues in that direction for about 0.15 s. The center of the sub-ring is the fist position at that moment. The parent ring becomes a small breadcrumb.
 To go back one level, the user moves the fist back in the direction of the parent ring.
