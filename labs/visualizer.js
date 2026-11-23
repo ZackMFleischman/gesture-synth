@@ -3,7 +3,12 @@
 // type the room code shown on the synth's output chip. ?room=XXXX-XX auto-connects;
 // ?signal=ws://host:5417 picks the signaling server.
 //
-// window.__viz exposes everything received (used by tests/output.spec.js).
+// window.__viz exposes everything received (used by tests/output*.spec.js).
+//
+// Notes pair by id: a /gs/note/on is drawn from its play time until the /gs/note/off with the same id
+// (also scheduled at its play time); a /gs/note/cancel (sent before the note would have played) removes the
+// pending on/off of that id. /gs/menu events drive the ring (open, arc under the fist, progress, close);
+// /gs/mode shows the active mode in its color.
 
 import { createViewerClient } from "../src/output/viewer-client.js";
 import { SYS, defaultSignalUrl, normalizeRoomCode } from "../src/output/protocol.js";
@@ -26,9 +31,16 @@ const viz = {
   beatgrid: null,
   events: [], //      {a, v, t, at, recvLocal, playLocal, ch}
   notesShown: [], //  {note, voice, playLocal, shownLocal}
-  beatsShown: [], //  {beat, local}
+  beatsShown: [], //  {beat, local, expected}
+  beatgridLog: [], // every beat grid received, {..., recvLocal}
   channelOf: {}, //   address -> "reliable" | "fast" (last seen)
   status: null,
+  menu: null, //      last /gs/menu event value while open (null when closed)
+  menuEvents: [], //  {phase, arc, selected, confirmed, progress, recvLocal}
+  modeLog: [], //     {mode, recvLocal} on each change of /gs/mode
+  pinchEvents: [], // {v, recvLocal}
+  cancels: [], //     {id, removed, recvLocal}
+  active: new Map(), // note id -> {note, voice, on: shownLocal}
 };
 window.__viz = viz;
 
@@ -62,6 +74,8 @@ function onMessage(m, ch) {
       return;
     case SYS.beatgrid:
       viz.beatgrid = { ...m.v, recvLocal: performance.now() };
+      viz.beatgridLog.push(viz.beatgrid);
+      if (viz.beatgridLog.length > 200) viz.beatgridLog.shift();
       return;
   }
   const type = typeOfAddress(m.a);
@@ -71,13 +85,51 @@ function onMessage(m, ch) {
     const ev = { a: m.a, v: m.v, t: m.t, at: m.at, recvLocal, playLocal, ch };
     viz.events.push(ev);
     if (viz.events.length > 500) viz.events.shift();
-    scheduled.push(ev);
     logEvent(ev);
+    if (m.a === "/gs/note/cancel") return cancelNote(ev);
+    if (m.a === "/gs/menu") return onMenu(ev);
+    if (m.a === "/gs/pinch") return onPinch(ev);
+    scheduled.push(ev);
   } else {
     viz.stateUpdates++;
     (type === "continuous" ? viz.cont : viz.state)[m.a] = m.v;
     renderState();
   }
+}
+
+// A scheduled note that will not play: drop its pending on/off (and switch it off if already shown).
+function cancelNote(ev) {
+  const id = ev.v && ev.v.id;
+  if (id == null) return;
+  let removed = 0;
+  for (let i = scheduled.length - 1; i >= 0; i--) {
+    const s = scheduled[i];
+    if ((s.a === "/gs/note/on" || s.a === "/gs/note/off") && s.v && s.v.id === id) {
+      scheduled.splice(i, 1);
+      removed++;
+    }
+  }
+  if (viz.active.delete(id)) removed++;
+  viz.cancels.push({ id, removed, recvLocal: ev.recvLocal });
+  if (viz.cancels.length > 200) viz.cancels.shift();
+}
+
+function onMenu(ev) {
+  const v = ev.v || {};
+  viz.menuEvents.push({ ...v, recvLocal: ev.recvLocal });
+  if (viz.menuEvents.length > 300) viz.menuEvents.shift();
+  viz.menu = v.phase === "close" ? null : v;
+  menuClosedAt = v.phase === "close" ? ev.recvLocal : null;
+  lastMenuClose = v.phase === "close" ? v : null;
+  renderMenuInfo();
+}
+
+function onPinch(ev) {
+  viz.pinchEvents.push({ v: ev.v, recvLocal: ev.recvLocal });
+  if (viz.pinchEvents.length > 200) viz.pinchEvents.shift();
+  const on = ev.v === 1;
+  $("pinch").classList.toggle("on", on);
+  $("pinch").textContent = on ? "on" : "off";
 }
 
 function typeOfAddress(a) {
@@ -124,8 +176,10 @@ function connect() {
 }
 function resetData() {
   Object.assign(viz, { manifest: [], state: {}, cont: {}, frames: 0, frameSeq: 0, framesMissed: 0, snapshots: 0,
-    stateUpdates: 0, hello: null, beatgrid: null, events: [], notesShown: [], beatsShown: [], channelOf: {} });
+    stateUpdates: 0, hello: null, beatgrid: null, events: [], notesShown: [], beatsShown: [], beatgridLog: [], channelOf: {},
+    menu: null, menuEvents: [], modeLog: [], pinchEvents: [], cancels: [], active: new Map() });
   scheduled.length = 0;
+  lastBeatAt = null;
   renderManifest();
   renderState();
   $("events").textContent = "";
@@ -193,7 +247,101 @@ function fmt(v) {
   return String(v);
 }
 
+const MODE_COLORS = { chords: "#e8a13d", arp: "#4fb3ff", lead: "#c08cff" };
+// Fixed menu directions (docs/architecture.md: chords=up, arp=right, lead=left, down=free).
+const MENU_DIRS = { chords: "up", arp: "right", lead: "left" };
+const DIR_ANGLE = { right: 0, down: Math.PI / 2, left: Math.PI, up: -Math.PI / 2 };
+let shownMode = null;
+let menuClosedAt = null;
+let lastMenuClose = null;
+
+function renderMode() {
+  const mode = viz.state["/gs/mode"] ?? null;
+  if (mode !== shownMode) {
+    shownMode = mode;
+    if (mode != null) viz.modeLog.push({ mode, recvLocal: performance.now() });
+    const el = $("modeName");
+    el.textContent = mode ? mode[0].toUpperCase() + mode.slice(1) : "—";
+    el.dataset.mode = mode || "";
+    el.style.setProperty("--mode", MODE_COLORS[mode] || "var(--ink)");
+  }
+  const parts = [];
+  const st = viz.state;
+  if (st["/gs/voicing"]) parts.push(`voicing ${st["/gs/voicing"]}`);
+  if (mode === "arp" && st["/gs/bpm"]) parts.push(`${st["/gs/bpm"]} BPM`);
+  if (mode === "lead") {
+    if (st["/gs/noteset"] != null) parts.push(`note set ${st["/gs/noteset"]}`);
+    if (st["/gs/octave"] != null) parts.push(`octave ${st["/gs/octave"]}`);
+  }
+  const sub = parts.join(" · ");
+  if ($("modeSub").textContent !== sub) $("modeSub").textContent = sub;
+}
+
+function renderMenuInfo() {
+  const m = viz.menu;
+  const el = $("menuInfo");
+  if (m) el.textContent = m.state === "countdown" ? `→ ${m.confirmed} (get ready)` : `open · arc ${m.arc ?? "—"} · ${Math.round((m.progress || 0) * 100)}%`;
+  else if (lastMenuClose) el.textContent = lastMenuClose.confirmed ? `closed · switched to ${lastMenuClose.confirmed}` : "closed · cancelled";
+  else el.textContent = "menu closed";
+}
+
+const mg = $("menu").getContext("2d");
+function drawMenu(now) {
+  const c = mg.canvas;
+  const W = c.width, cx = W / 2, cy = W / 2, R = W * 0.42, r = W * 0.2;
+  mg.clearRect(0, 0, W, W);
+  const m = viz.menu;
+  const fade = !m && menuClosedAt != null ? Math.max(0, 1 - (now - menuClosedAt) / 600) : 0;
+  const alpha = m ? 1 : 0.25 + 0.75 * fade;
+  for (const [dir, ang] of Object.entries(DIR_ANGLE)) {
+    const id = Object.keys(MENU_DIRS).find((k) => MENU_DIRS[k] === dir) || null;
+    const color = MODE_COLORS[id] || "#3a3d42";
+    const a0 = ang - Math.PI / 4 + 0.06, a1 = ang + Math.PI / 4 - 0.06;
+    const hover = m && m.arc === id;
+    const selected = (m && (m.selected === id || m.confirmed === id)) || (!m && fade > 0 && lastMenuClose?.confirmed === id);
+    const current = viz.state["/gs/mode"] === id;
+    mg.globalAlpha = alpha * (hover || selected ? 1 : 0.45);
+    // arc band
+    mg.beginPath();
+    mg.arc(cx, cy, R, a0, a1);
+    mg.arc(cx, cy, r, a1, a0, true);
+    mg.closePath();
+    mg.fillStyle = selected ? color : "#202328";
+    mg.fill();
+    mg.lineWidth = current ? 5 : 2;
+    mg.strokeStyle = color;
+    mg.stroke();
+    // progress fill of the hovered arc (from the inner edge outwards)
+    if (m && hover && !selected && m.progress > 0) {
+      const rr = r + (R - r) * Math.min(1, m.progress);
+      mg.beginPath();
+      mg.arc(cx, cy, rr, a0, a1);
+      mg.arc(cx, cy, r, a1, a0, true);
+      mg.closePath();
+      mg.globalAlpha = alpha * 0.8;
+      mg.fillStyle = color;
+      mg.fill();
+    }
+    if (id) {
+      mg.globalAlpha = alpha;
+      mg.fillStyle = selected ? "#111" : "#e6e6e6";
+      mg.font = "bold 22px monospace";
+      mg.textAlign = "center";
+      mg.textBaseline = "middle";
+      const lr = (R + r) / 2;
+      mg.fillText(id, cx + Math.cos(ang) * lr, cy + Math.sin(ang) * lr);
+    }
+  }
+  mg.globalAlpha = 1;
+  // center: open / closed marker
+  mg.beginPath();
+  mg.arc(cx, cy, r * 0.55, 0, Math.PI * 2);
+  mg.fillStyle = m ? (m.state === "countdown" ? MODE_COLORS[m.confirmed] || "#e6e6e6" : "#e6e6e6") : "#2a2d32";
+  mg.fill();
+}
+
 function renderState() {
+  renderMode();
   const keys = ["/gs/mode", "/gs/chord", "/gs/voicing", "/gs/bpm", "/gs/noteset", "/gs/octave"];
   const rest = Object.keys(viz.state).filter((k) => !keys.includes(k)).sort();
   $("state").innerHTML = [...keys, ...rest]
@@ -216,11 +364,12 @@ function esc(s) {
 
 // ---------------------------------------------------------------- render loop
 const scheduled = []; // events waiting for their play time
-const activeNotes = new Map(); // pitch class -> count
 const g = $("hands").getContext("2d");
 const smooth = {}; // address -> smoothed value (live input arrives with network delay; smooth it)
 let lastBeatAt = null;
 
+let beatInfoHtml = "";
+let prevFrameAt = -Infinity; // previous render frame: an event shown now was due after it (tests check this)
 function frame() {
   const now = performance.now();
 
@@ -235,6 +384,11 @@ function frame() {
 
   // Beat grid -> own beat clock (no network delay).
   const bg = viz.beatgrid;
+  if (bg && bg.running === false && lastBeatAt != null) {
+    lastBeatAt = null; // clock stopped: dots off; a restart waits for its first beat onset
+    beatEls.forEach((d) => d.classList.remove("on"));
+    $("beatInfo").textContent = beatInfoHtml = `${bg.bpm} BPM · clock stopped`;
+  }
   if (bg && bg.bpm > 0 && bg.running !== false) {
     const period = 60000 / bg.bpm;
     const ref = client.toLocal(bg.beatTime);
@@ -249,11 +403,15 @@ function frame() {
       lastBeatAt = expected;
       const idx = (((bg.beat + n) % bpb) + bpb) % bpb;
       beatEls.forEach((d, i) => d.classList.toggle("on", i === idx));
-      viz.beatsShown.push({ beat: idx, local: now, expected });
+      viz.beatsShown.push({ beat: idx, local: now, expected, prevFrame: prevFrameAt });
       if (viz.beatsShown.length > 200) viz.beatsShown.shift();
     }
-    $("beatInfo").textContent = `${bg.bpm} BPM · beat grid synced`;
+    const rate = bg.rate ? ` · 1/${Math.round(1 / bg.rate)}` : "";
+    const info = `${bg.bpm} BPM${rate}${bg.double ? ' <span class="x2">x2</span>' : ""} · beat grid synced`;
+    if (info !== beatInfoHtml) $("beatInfo").innerHTML = beatInfoHtml = info; // DOM writes only on change
   }
+  renderKeys(now);
+  drawMenu(now);
 
   // Meters (smoothed).
   METERS.forEach(([, addr, min, max], i) => {
@@ -273,6 +431,7 @@ function frame() {
   });
 
   drawHands();
+  prevFrameAt = now;
   $("frameInfo").textContent = viz.frames ? `· ${viz.frames} frames (${viz.framesMissed} dropped)` : "";
   requestAnimationFrame(frame);
 }
@@ -281,20 +440,36 @@ function fire(ev, now) {
   const isOn = ev.a === "/gs/note/on";
   const isOff = ev.a === "/gs/note/off";
   if ((isOn || isOff) && ev.v && typeof ev.v.note === "number") {
-    const pc = ((ev.v.note % 12) + 12) % 12;
-    const c = (activeNotes.get(pc) || 0) + (isOn ? 1 : -1);
-    activeNotes.set(pc, Math.max(0, c));
-    keyEls[pc].classList.toggle("on", c > 0);
+    const id = ev.v.id;
+    if (id != null) {
+      // Paired by id (the synth's globally unique note id).
+      if (isOn) viz.active.set(id, { note: ev.v.note, voice: ev.v.voice, on: now });
+      else viz.active.delete(id);
+    } else {
+      // Legacy sender without ids: count per pitch class.
+      const pc = ((ev.v.note % 12) + 12) % 12;
+      legacyCount[pc] = Math.max(0, legacyCount[pc] + (isOn ? 1 : -1));
+    }
     if (isOn) {
-      viz.notesShown.push({ note: ev.v.note, voice: ev.v.voice, playLocal: ev.playLocal, shownLocal: now, recvLocal: ev.recvLocal });
+      const pc = ((ev.v.note % 12) + 12) % 12;
+      lastOnAt[pc] = now;
+      viz.notesShown.push({ note: ev.v.note, voice: ev.v.voice, id, playLocal: ev.playLocal, shownLocal: now, recvLocal: ev.recvLocal, prevFrame: prevFrameAt });
       if (viz.notesShown.length > 500) viz.notesShown.shift();
-      if (ev.v.voice !== "chords") {
-        // one-shot voices: brief flash even without a note/off
-        setTimeout(() => { if (!activeNotes.get(pc)) keyEls[pc].classList.remove("on"); }, 120);
-      }
     }
   }
   if (ev.a === "/gs/beat") viz.beatsShown.push({ beat: ev.v, local: now, event: true });
+}
+
+const legacyCount = new Array(12).fill(0);
+const lastOnAt = new Array(12).fill(-Infinity);
+const MIN_LIT_MS = 70; // very short arp notes still light their key for a few frames
+function renderKeys(now) {
+  const lit = legacyCount.map((c) => c > 0);
+  for (const n of viz.active.values()) lit[((n.note % 12) + 12) % 12] = true;
+  for (let pc = 0; pc < 12; pc++) {
+    const on = lit[pc] || now - lastOnAt[pc] < MIN_LIT_MS;
+    if (keyEls[pc].classList.contains("on") !== on) keyEls[pc].classList.toggle("on", on);
+  }
 }
 
 function drawHands() {

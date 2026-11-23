@@ -45,6 +45,14 @@
   #events { max-height: 190px; overflow: auto; font-size: 12px; }
   #events div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .muted { color: var(--muted); }
+  #modeBox { display: flex; gap: 14px; align-items: center; }
+  #modeName { font-size: 30px; font-weight: 700; letter-spacing: 0.02em; color: var(--mode, var(--ink)); }
+  #modeSub { color: var(--muted); margin-top: 4px; }
+  canvas#menu { width: 150px; height: 150px; flex: none; }
+  #menuInfo { min-height: 1.4em; }
+  #pinch { display: inline-block; padding: 1px 8px; border-radius: 10px; border: 1.5px solid var(--muted); color: var(--muted); }
+  #pinch.on { border-color: var(--pink); background: var(--pink); color: #111; }
+  #beatInfo .x2 { color: var(--blue); font-weight: 700; }
 </style>
 </head>
 <body>
@@ -70,6 +78,18 @@
     </section>
   </div>
   <div class="col">
+    <section>
+      <h2>Mode &amp; menu</h2>
+      <div id="modeBox">
+        <canvas id="menu" width="300" height="300" aria-label="Radial menu"></canvas>
+        <div>
+          <div id="modeName" data-mode="">—</div>
+          <div id="modeSub"></div>
+          <div id="menuInfo" class="muted">menu closed</div>
+          <div style="margin-top:6px">pinch <span id="pinch">off</span></div>
+        </div>
+      </div>
+    </section>
     <section><h2>State</h2><table id="state"></table></section>
     <section><h2>Events</h2><div id="events"></div></section>
     <section><h2>Manifest <span class="muted" id="manifestCount"></span></h2><table id="manifest"></table></section>
