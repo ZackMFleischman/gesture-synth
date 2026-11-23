@@ -32,6 +32,11 @@ body.gs-modes #helpButton { left: var(--gs-gutter); }
 body.gs-modes #volumeMeter,
 body.gs-modes #distortionDisplay { right: var(--gs-gutter); }
 
+/* One filter visual (camera feedback): the arc at the right hand shows the value ("Filter +40%", hand-overlays.js).
+   The original top-right readout stays in the DOM (index.html, still updated) but is not shown with the modes UI,
+   on desktop and phones alike. */
+body.gs-modes #distortionDisplay { display: none; }
+
 /* "Open Guide" / "Close Guide" keep one width so the Controls toggle never crowds it. */
 body.gs-modes #guideToggle { min-width: 112px; }
 
@@ -76,7 +81,8 @@ body.gs-modes.gs-no-right-track #volumeMeter { display: none; }
 #modeBadge { left: 110px; }
 .gs-badge .gs-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gs-mode); }
 #noteSetBadge { gap: 3px; padding: 0 9px; cursor: default; left: var(--gs-noteset-left, 200px); }
-#noteSetBadge.gs-flash { box-shadow: 0 0 0 2px #fff; }
+#noteSetBadge.gs-flash { box-shadow: 0 0 0 2px #fff; animation: gs-confirm-pop 150ms ease-out; } /* CONFIRM.popMs/popScale */
+@keyframes gs-confirm-pop { from { transform: scale(1.15); } to { transform: scale(1); } }
 #noteSetBadge.hidden { display: none; }
 #noteSetBadge i {
   display: block; width: 9px; height: 8px; border-radius: 2px;
@@ -252,7 +258,7 @@ body.gs-modes #outputPopover { top: 46px; right: var(--gs-gutter); }
 .gs-guide-head { color: var(--gs-mode); font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
 .gs-guide-head::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--gs-mode); }
 .gs-guide-label { color: var(--gs-ink); font-size: 13px; opacity: 0.85; }
-.gesture-guide-row.gs-guide-mode .gesture-guide-gesture { width: 28px; text-align: center; font-size: 18px; color: var(--gs-ink); }
+.gesture-guide-row.gs-guide-mode .gesture-guide-gesture { min-width: 28px; text-align: center; font-size: 18px; color: var(--gs-ink); white-space: nowrap; }
 
 /* ---- Hooks for other layouts (a compact phone layout can collapse any new element) ---- */
 body.gs-modes .gs-collapsed { display: none !important; }

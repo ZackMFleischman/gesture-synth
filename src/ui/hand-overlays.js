@@ -1,4 +1,7 @@
-// Feedback at the right hand (docs/ui-integration.md §4 "At the hand"): the filter arc, all modes.
+// Feedback at the right hand (docs/ui-integration.md §4 "At the hand"): the filter arc, all modes. It is THE
+// filter visual (camera feedback: two filter visuals were one too many): the value shows as a small label above
+// the arc ("Filter +40%"); the old top-right readout #distortionDisplay stays in the DOM (Eric's markup, still
+// updated by indicators.js / readouts.js) but is hidden while the modes UI is mounted (modes.css, body.gs-modes).
 // Sits above the right hand: centered on the palm horizontally, with the arc's lowest points a
 // margin above the highest fingertip (`right/top`), so it never covers the fingers. -150° -> -30°;
 // dot in the mode color at the filter value, moving the way the fingertips lean on screen (tilt is
@@ -115,6 +118,7 @@ export function createHandOverlays({ S, bus }) {
   }
 
   function draw(g, G) {
+    S.filterLabel = null; // rect of the value label this frame (first-use labels stack above it)
     drawAxes(g, G);
     const pos = S.drawPos("right");
     if (!pos || S.menu.state !== "closed") return;
@@ -134,9 +138,30 @@ export function createHandOverlays({ S, bus }) {
       dotAt, dotColor: S.color, dotHollow: held, dotRadius: 5,
     });
     const dotA = deg(-150 + 120 * dotAt);
-    G.reg("filter-arc", "hand", { ...box, dot: { x: p.x + r * Math.cos(dotA), y: cy + r * Math.sin(dotA) } });
+    const label = drawFilterValue(g, p.x, Math.max(FONT.small, cy - r - 16), S.filter, held, G.W);
+    S.filterLabel = label.rect;
+    G.reg("filter-arc", "hand", { ...box, dot: { x: p.x + r * Math.cos(dotA), y: cy + r * Math.sin(dotA) }, label });
   }
   return { draw };
+}
+
+/** The filter value as text ("Filter +40%"): what the old top-right readout said, now at the arc. */
+export function filterText(f) {
+  const pct = Math.round(Math.max(-1, Math.min(1, f)) * 100);
+  return `Filter ${pct > 0 ? "+" : ""}${pct}%`;
+}
+
+/** Small value label above the arc's apex (halo, legible over video). Returns {text, rect}. */
+function drawFilterValue(g, x, y, f, held, W = Infinity) {
+  const text = filterText(f);
+  // Kept on screen when the hand is at the very edge (the arc may leave the frame; its value never does).
+  g.save();
+  g.font = `600 ${FONT.small}px ${FONT.family}`;
+  const half = g.measureText(text).width / 2 + 4;
+  g.restore();
+  x = Math.max(half, Math.min(W - half, x));
+  const rect = drawLabel(g, text, x, y, { size: FONT.small, weight: 600, color: COLORS.ink, align: "center", alpha: held ? 0.45 : 0.9 });
+  return { text, rect };
 }
 
 /** x2 pill under the right palm (Arp): outline until double time is active, then filled. */

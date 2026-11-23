@@ -73,8 +73,8 @@ test.describe("mobile viewport", () => {
     const ids = [];
     for (const id of all) {
       if (await page.locator(`#${id}`).isVisible()) ids.push(id);
-      else expect(await page.locator(`#gsBar #${id}, #${id}`).first().evaluate((e) => !!e.closest("#gsBar") || e.id === "volumeMeter"),
-        `#${id} hidden but not in the mobile bar`).toBe(true);
+      else expect(await page.locator(`#gsBar #${id}, #${id}`).first().evaluate((e) => !!e.closest("#gsBar") || e.id === "volumeMeter" || e.id === "distortionDisplay"),
+        `#${id} hidden but not in the mobile bar (the filter readout is hidden on purpose: the arc at the hand shows it)`).toBe(true);
     }
     ids.push("gsBar");
     const boxes = {};

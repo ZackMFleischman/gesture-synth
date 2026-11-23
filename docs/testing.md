@@ -69,7 +69,7 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `pinch-tempo.unit.spec.js` | unit | Pinch -> tempo mapping, the `pinch` bus event, `matchToScheduleAnyOffset` (helpers/schedule-match.js). |
 | `arp.spec.js` | integration | Right place for engine timing (±3 ms) on recorded audio. Lab-only: **app-level timing owed** (M1). Includes a WAV demo (not a gate-worthy assert; keep, it's cheap). |
 | `gesture-test.int.spec.js` | integration | From `gesture-reliability.spec.js`. |
-| `lead.spec.js` | integration | Right place for Lead UX checks 2.1–2.5 in the lab (engine-level measurements: glide, retrigger, clicks). App journeys: `m2-lead.spec.js`. |
+| `lead.spec.js` | integration | Right place for Lead UX checks 2.1–2.5 in the lab (engine-level measurements: discrete note steps, retrigger, clicks). App journeys: `m2-lead.spec.js`. |
 | `lead-demo.spec.js` | integration | Demo artifact (melody WAV + screenshots), 1 assert. Keep; candidate for a non-gating demo tag later. |
 | `mobile-ui.int.spec.js` | integration | Mobile system prototype in `labs/mobile-lab.html` (+ planned chrome as the before): budgets, clear area, 2-tap reach, sheets, 44 px targets, auto-collapse. |
 | `menu-lab.int.spec.js` | integration | From `radial-menu.spec.js` (lab visuals). |
@@ -86,6 +86,7 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `m1-pinch.spec.js` | e2e | Milestone spec (1.6 pinch = tempo): no jump at the start, voicing kept (bus + heard pitches), locks, Return, no lost/doubled step on recorded audio, visuals, screenshots + video. |
 | `m2-lead.spec.js` | e2e | Milestone spec: Lead in the app (fist menu, switches without a gap, 2.1–2.5, menu hold, clipping, layout both sides at 1280×800 / 390×844, screenshots + `test-results/videos/m2-lead.webm` with sound). Helpers: `helpers/m2-lead.js` (browser-only). |
 | `output.spec.js` | e2e | Right place (app + visualizer, two contexts). Its demo-video test is the slowest e2e test (~19 s). |
+| `camera-feedback.e2e.spec.js` | e2e | Lead after the first real-camera session: set shapes (open hand never selects; 1/2/3 fingers + 🤘), confirm pop/linger/fade, ladder labels (both sides, 1280×800 + 390×844), discrete pitch steps (cycles + FFT per 85 ms, click metric), one filter visual per mode, screens `feedback-*.png` + `videos/camera-feedback-lead.webm`. Analysis: `helpers/lead-pitch.js` (pure). |
 | `m3-output.spec.js` | e2e | M3 3.3: output hooked into the modes app (beat grid, menu/mode, Arp notes, manifest, pinch, screens + video). |
 | `output-m3.unit.spec.js` | unit | M3 3.3 pure mapping + clock transport notifications. |
 | `reach-zones.e2e.spec.js` | e2e | The user's reach bug (height 1/0 at the top/bottom whole-hand positions), markers level with the palm across the band, Arp gate + Lead cursor/arrows at the band ends, Range, x bands, Drive (FFT brightness, ±2 dB, no limiting), Space (tail / none), switches, at-hand scales, phone, screens `reach-*.png` + `videos/reach-zones.webm`. |

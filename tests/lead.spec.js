@@ -7,6 +7,7 @@ import { leftHand, rightHand, pinch, DESKTOP_VIEW } from "./helpers/hands.js";
 import { test, SCREENS, rh, preview, play, setHands, dbg, yFor, settle, setKey, setNoteSet, snapWhen, openLab } from "./helpers/lead-lab.js";
 import { makeView } from "../src/input/hand-input.js";
 import { triad, rng } from "./helpers/theory.js";
+import { stepAnalysis, windowPitches, clickRatio } from "./helpers/lead-pitch.js";
 import { midiToFreq, rangeLow, mod12, OCTAVE_MIN, OCTAVE_MAX, OCTAVE_DEFAULT } from "../src/modes/lead-notes.js";
 
 const AUDIO_DIR = "test-results/audio";
@@ -19,21 +20,6 @@ const AUDIO_DIR = "test-results/audio";
 function pitchOf(samples, sampleRate) {
   const p = peaks(spectrum(samples, sampleRate, 16384), 0.3);
   return p.length ? p[0].freq : 0;
-}
-
-/** Per-cycle frequency from upward zero crossings (works on the clean triangle lead). */
-function cycleFreqs(samples, sampleRate) {
-  const out = [];
-  let last = -1;
-  for (let i = 1; i < samples.length; i++) {
-    if (samples[i - 1] < 0 && samples[i] >= 0) {
-      const frac = -samples[i - 1] / (samples[i] - samples[i - 1]);
-      const x = i - 1 + frac;
-      if (last >= 0) out.push({ at: x, f: sampleRate / (x - last) });
-      last = x;
-    }
-  }
-  return out;
 }
 
 /** RMS envelope in `win`-sample windows. */
@@ -287,47 +273,70 @@ test.describe("2.3 pinch to play", () => {
     }
   });
 
-  test("moving while pinched glides smoothly to the next note (no gap, intermediate pitches)", async ({ lab: page }) => {
-    await setNoteSet(page, 3);
-    const notes = await page.evaluate(() => window.__gsTest.lead._controller.state.ladder.notes.map((n) => n.midi));
-    const a = notes[4];
-    const b = notes[6];
-    const ya = await yFor(page, a);
-    const yb = await yFor(page, b);
-    await setHands(page, preview(ya));
-    await settle(page, 80);
-    await setHands(page, play(ya));
-    await settle(page, 250);
-    await page.evaluate(() => { window.__audioCap.chunks = []; window.__audioCap.recording = true; });
-    await page.waitForTimeout(250);
-    await setHands(page, play(yb));
-    await page.waitForTimeout(400);
-    const { chunks, sampleRate } = await page.evaluate(() => {
-      window.__audioCap.recording = false;
-      return { chunks: window.__audioCap.chunks, sampleRate: window.__audioCap.sampleRate };
+  // Camera feedback: the 70 ms glide sounded like a slide guitar. Moving while pinched now STEPS to the next note.
+  test("moving while pinched steps to the next note: no intermediate pitches, no gap, no click", async ({ context }, info) => {
+    await retryOnCaptureGlitch(info, async ({ track }) => {
+      const page = await openLab(context);
+      try {
+        await setNoteSet(page, 3);
+        const notes = await page.evaluate(() => window.__gsTest.lead._controller.state.ladder.notes.map((n) => n.midi));
+        const path = [notes[4], notes[6], notes[5], notes[8], notes[4]];
+        // The ladder spans the right hand's reach zone (src/input/reach-zones.js): place it with the hand in view.
+        await setHands(page, preview(0.5));
+        await settle(page, 300);
+        const ys = [];
+        for (const m of path) ys.push(await yFor(page, m));
+        await setHands(page, preview(ys[0]));
+        await settle(page, 80);
+        await setHands(page, play(ys[0]));
+        await settle(page, 250);
+        await page.evaluate(() => { window.__audioCap.chunks = []; window.__audioCap.blocks = []; window.__audioCap.recording = true; });
+        for (let i = 0; i < path.length; i++) {
+          await setHands(page, play(ys[i]));
+          await page.waitForTimeout(260);
+        }
+        const { chunks, blocks, sampleRate } = await page.evaluate(() => {
+          window.__audioCap.recording = false;
+          return { chunks: window.__audioCap.chunks, blocks: window.__audioCap.blocks, sampleRate: window.__audioCap.sampleRate };
+        });
+        const samples = Float32Array.from(chunks.flat());
+        track({ samples, sampleRate, health: captureHealth(blocks, sampleRate) });
+        writeWav(`${AUDIO_DIR}/lead-steps.wav`, samples, sampleRate);
+        expect((await dbg(page)).playing).toBe(path.at(-1));
+        const targets = [...new Set(path)].map(midiToFreq);
+        const a = stepAnalysis(samples, sampleRate, targets);
+        // Every move is heard as its own run of cycles on the target pitch, in order.
+        const heard = a.segments.filter((s) => (s.to - s.from) / sampleRate > 0.05).map((s) => s.target);
+        const want = path.map((m) => targets.indexOf(midiToFreq(m)));
+        expect(heard, `segments ${JSON.stringify(a.segments.map((s) => [s.target, Math.round(s.from), Math.round(s.to)]))}`).toEqual(want);
+        // No intermediate pitches: at most the two cycles that touch a step read as a mixed period (measured: 4
+        // such cycles over 4 steps, longest run 2, ~3 ms at 700 Hz); the old 70 ms glide gave ~25 in a row.
+        expect(a.maxBetweenRun, `cycles between targets: ${a.between.map((c) => c.f.toFixed(0)).join(",")}`).toBeLessThanOrEqual(2);
+        expect(a.between.length).toBeLessThanOrEqual(2 * (path.length - 1));
+        // FFT per 85 ms window: the first window that starts at a step already shows the new note, and no window
+        // anywhere shows a pitch that is none of the notes.
+        const wins = windowPitches(samples, sampleRate);
+        for (const w of wins) {
+          if (w.freq === 0) continue;
+          expect(targets.some((t) => Math.abs(w.freq / t - 1) < 0.02), `window @${(w.start / sampleRate).toFixed(3)} s: ${w.freq.toFixed(1)} Hz`).toBe(true);
+        }
+        for (let i = 1; i < a.segments.length; i++) {
+          const s = a.segments[i];
+          if ((s.to - s.from) / sampleRate < 0.1) continue;
+          const w = wins.find((x) => x.start >= s.from);
+          expect(Math.abs(w.freq / targets[s.target] - 1), `first window after step ${i}`).toBeLessThan(0.02);
+        }
+        // No gap (legato: the level never drops) and no click at the steps.
+        const env = envelope(samples);
+        const steady = env.slice(2, 20).reduce((sum, v) => sum + v, 0) / 18;
+        expect(Math.min(...env.slice(2))).toBeGreaterThan(steady * 0.6);
+        const cr = clickRatio(samples);
+        expect(cr.ratio, `max jump ${cr.allMax.toFixed(4)} vs steady ${cr.steadyMax.toFixed(4)}`).toBeLessThan(1.6);
+        expect(page.__errors).toEqual([]);
+      } finally {
+        await page.close();
+      }
     });
-    const samples = Float32Array.from(chunks.flat());
-    writeWav(`${AUDIO_DIR}/lead-glide.wav`, samples, sampleRate);
-    expect((await dbg(page)).playing).toBe(b);
-    const fa = midiToFreq(a);
-    const fb = midiToFreq(b);
-    const cyc = cycleFreqs(samples, sampleRate);
-    const near = (f, g) => Math.abs(f / g - 1) < 0.01;
-    const firstB = cyc.findIndex((c) => near(c.f, fb));
-    expect(firstB).toBeGreaterThan(5);
-    expect(near(cyc[0].f, fa)).toBe(true);
-    // between the last A cycle and the first B cycle there are cycles in between (a glide, not a jump)
-    let lastA = -1;
-    for (let i = 0; i < firstB; i++) if (near(cyc[i].f, fa)) lastA = i;
-    const between = cyc.slice(lastA + 1, firstB).filter((c) => c.f > fa * 1.01 && c.f < fb * 0.99);
-    expect(between.length).toBeGreaterThanOrEqual(3);
-    // monotone rise, and the glide is short (< 120 ms)
-    for (let i = lastA + 2; i < firstB; i++) expect(cyc[i].f).toBeGreaterThan(cyc[i - 1].f * 0.995);
-    expect((cyc[firstB].at - cyc[lastA].at) / sampleRate).toBeLessThan(0.12);
-    // no gap: the level never drops during the move
-    const env = envelope(samples);
-    const steady = env.slice(2, 20).reduce((s, v) => s + v, 0) / 18;
-    expect(Math.min(...env.slice(2))).toBeGreaterThan(steady * 0.6);
   });
 
   test("a new pinch retriggers the note (a second onset)", async ({ lab: page }) => {

@@ -265,7 +265,7 @@ test.describe("Lead UX checks in the app", () => {
     await expect.poll(() => bus(page, "lead/noteset"), { timeout: 1000 }).toBe(3);
     await expect(page.locator("#noteSetBadge i.on")).toHaveCount(1);
     await expect(page.locator("#noteSetBadge i").nth(2)).toHaveClass(/on/);
-    await expect(page.locator("#noteSetBadge")).toHaveAttribute("title", "Note set: Full scale");
+    await expect(page.locator("#noteSetBadge")).toHaveAttribute("title", "Note set: Full scale (hand: 3️⃣ 3 fingers)");
     await openControls(page);
     await expect(page.locator('#controlsPanel .lead-controls [data-set="3"]')).toHaveAttribute("aria-pressed", "true");
     await closeControls(page);

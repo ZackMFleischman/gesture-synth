@@ -2,7 +2,8 @@
 //   - note sets built from the key + the current chord
 //   - a 2-octave range mapped over the ladder, snapping with hysteresis at note edges
 //   - octave state with limits, octave arrows (pinch must START on the arrow, held 0.3 s)
-//   - note-set toggle that needs the finger count stable for 0.3 s (never during/around a pinch)
+//   - note-set toggle that needs a set shape (SET_SHAPES: 1/2/3 fingers, rock sign) stable for 0.3 s (never
+//     during/around a pinch; an open hand never selects)
 //
 // Coordinates: the controller works in ladder units `u`: 0 = bottom note line, 1 = top note line.
 // Values beyond [0, 1] are the arrow zones. lead.js converts screen y <-> u.
@@ -11,7 +12,7 @@ import { MAJOR_SCALE } from "../services/harmony.js";
 
 // ---- Tunables ----
 
-/** Finger count must be stable this long to change the note set. */
+/** A set shape must be stable this long to change the note set. */
 export const SET_HOLD_MS = 300;
 /** Pinch held on an octave arrow this long changes the octave. */
 export const ARROW_HOLD_MS = 300;
@@ -177,10 +178,10 @@ export function snapIndex(p, notes, prev = null, hyst = SNAP_HYSTERESIS) {
  *   present: boolean,       // a right hand (or a screen pointer) is there
  *   u: number,              // raw ladder coordinate (0 bottom line .. 1 top line; beyond = arrow zones)
  *   pinch: boolean,         // play gesture (pinch, mouse button, key)
- *   count: 1..4 | null,     // a VALID finger count this frame (see validCount), else null
+ *   count: 1..4 | null,     // a VALID set shape this frame (see validCount / SET_SHAPES), else null
  *   noteIdx?: number|null,  // force the cursor to this ladder index (keyboard); skips height + arrows
  * }
- * Returns the events of this step (reused array): {type:"noteOn"|"glide"|"noteOff", midi, from?} |
+ * Returns the events of this step (reused array): {type:"noteOn"|"step"|"noteOff", midi, from?} |
  * {type:"noteset", value} | {type:"octave", value, dir}.
  */
 export function createLeadController({ setId = 1, octave = OCTAVE_DEFAULT } = {}) {
@@ -326,18 +327,18 @@ export function createLeadController({ setId = 1, octave = OCTAVE_DEFAULT } = {}
     } else if (!input.pinch && s.pinchMode !== "none") {
       endPinch();
     } else if (s.pinchMode === "note") {
-      // Playing: the cursor stays on the ladder (clamped), the pitch glides to the snapped note.
+      // Playing: the cursor stays on the ladder (clamped), the pitch steps to the snapped note (discrete, no glide).
       if (s.preview != null && s.preview !== s.playIdx) {
         const from = s.playMidi;
         s.playIdx = s.preview;
         s.playMidi = notes[s.preview].midi;
-        if (s.playMidi !== from) events.push({ type: "glide", midi: s.playMidi, from });
+        if (s.playMidi !== from) events.push({ type: "step", midi: s.playMidi, from });
       } else if (s.playIdx == null && s.preview != null) {
         // The ladder changed under a held note (chord/set change) and the note left it: follow the cursor.
         const from = s.playMidi;
         s.playIdx = s.preview;
         s.playMidi = notes[s.preview].midi;
-        if (s.playMidi !== from) events.push({ type: "glide", midi: s.playMidi, from });
+        if (s.playMidi !== from) events.push({ type: "step", midi: s.playMidi, from });
       }
     } else if (s.pinchMode === "arrow") {
       const zone = s.arrowDir > 0 ? "up" : "down";
@@ -403,14 +404,38 @@ export function createLeadController({ setId = 1, octave = OCTAVE_DEFAULT } = {}
 }
 
 /**
- * The finger count a HandFrame shows for the note-set toggle, or null if it is not a deliberate count:
- * not pinching, index finger extended (all counting shapes 1-4 start with the index; the post-pinch "OK" shape
- * has it curled), and the thumb clearly away from the index tip (not a pinch on its way).
+ * Hand shape for each note set (lead decision after the first real-camera session): 1-3 = count up from the
+ * index (index / index+middle / index+middle+ring), 4 = the rock sign (index+pinky, middle+ring curled; the
+ * shape the left hand already uses for VI). The thumb may be either way (it is the pinch finger; its
+ * extension flickers). An open hand (4 fingers) or 5 fingers is NEVER a set: releasing a pinch opens the
+ * hand fully, and that must not change anything. `emoji` / `label` are what the guide, help and Controls show.
+ */
+export const SET_SHAPES = Object.freeze([
+  null,
+  Object.freeze({ id: 1, emoji: "1️⃣", label: "1 finger", fingers: { index: true, middle: false, ring: false, pinky: false } }),
+  Object.freeze({ id: 2, emoji: "2️⃣", label: "2 fingers", fingers: { index: true, middle: true, ring: false, pinky: false } }),
+  Object.freeze({ id: 3, emoji: "3️⃣", label: "3 fingers", fingers: { index: true, middle: true, ring: true, pinky: false } }),
+  Object.freeze({ id: 4, emoji: "🤘", label: "Rock sign", fingers: { index: true, middle: false, ring: false, pinky: true } }),
+]);
+
+/** The note set a finger state shows (1-4), or null for any other shape (open hand, 5 fingers, OK sign...). */
+export function shapeSet(fingers) {
+  if (!fingers) return null;
+  for (let i = 1; i <= 4; i++) {
+    const f = SET_SHAPES[i].fingers;
+    if (!!fingers.index === f.index && !!fingers.middle === f.middle && !!fingers.ring === f.ring && !!fingers.pinky === f.pinky) return i;
+  }
+  return null;
+}
+
+/**
+ * The note set a HandFrame shows for the note-set toggle, or null if it is not a deliberate set shape:
+ * not pinching, one of the four SET_SHAPES (all start with the index; the post-pinch "OK" shape has it curled,
+ * the open hand after a pinch release has all four out), and the thumb clearly away from the index tip (not a
+ * pinch on its way).
  */
 export function validCount(hand) {
   if (!hand || hand.pinch) return null;
-  if (!hand.fingers.index) return null;
   if (!(hand.pinchDistance >= COUNT_MIN_PINCH_DISTANCE)) return null;
-  const c = hand.voicingCount;
-  return c >= 1 && c <= 4 ? c : null;
+  return shapeSet(hand.fingers);
 }

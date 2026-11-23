@@ -16,7 +16,11 @@ import {
   OCTAVE_MAX,
   OCTAVE_DEFAULT,
   LOST_GRACE_MS,
+  SET_SHAPES,
 } from "../src/modes/lead-notes.js";
+import { buildHandFrame } from "../src/input/hand-input.js";
+import { hand } from "./helpers/hands.js";
+import { confirmPhase, CONFIRM } from "../src/ui/theme.js";
 import { KEYS, triad, rng } from "./helpers/theory.js";
 
 base.describe("lead-notes (unit)", () => {
@@ -115,14 +119,14 @@ base.describe("lead-notes (unit)", () => {
     }
   });
 
-  base("controller: moving while pinched glides note by note; a new pinch retriggers", () => {
+  base("controller: moving while pinched steps note by note (discrete, no glide); a new pinch retriggers", () => {
     const c = createLeadController({ setId: 4 });
     c.setContext("C", null, 0);
     const notes = c.state.ladder.notes;
     const uOf = (m) => notes.find((n) => n.midi === m).u;
     c.step({ present: true, u: uOf(64), pinch: true, count: null }, 0);
     const evs = c.step({ present: true, u: uOf(66), pinch: true, count: null }, 16);
-    expect(evs).toEqual([{ type: "glide", midi: 66, from: 64 }]);
+    expect(evs).toEqual([{ type: "step", midi: 66, from: 64 }]);
     expect(c.step({ present: true, u: uOf(66), pinch: false, count: null }, 32)).toEqual([{ type: "noteOff", midi: 66 }]);
     expect(c.step({ present: true, u: uOf(66), pinch: true, count: null }, 48)).toEqual([{ type: "noteOn", midi: 66 }]);
   });
@@ -160,11 +164,55 @@ base.describe("lead-notes (unit)", () => {
       pinch: false, pinchDistance: 1.2, fingers: { thumb: false, index: false, middle: false, ring: false, pinky: false, ...fingers },
       voicingCount: Object.values(fingers).filter(Boolean).length, ...extra,
     });
+    expect(validCount(f({ index: true }))).toBe(1);
     expect(validCount(f({ index: true, middle: true }))).toBe(2);
+    expect(validCount(f({ index: true, middle: true, ring: true }))).toBe(3);
+    expect(validCount(f({ index: true, pinky: true }))).toBe(4); // rock sign
+    expect(validCount(f({ index: true, pinky: true, thumb: true }))).toBe(4); // thumb either way
+    expect(validCount(f({ index: true, middle: true, thumb: true }))).toBe(2);
+    // An open hand (4 fingers, thumb either way) and 5 fingers are never a set (camera feedback: releasing a
+    // pinch opens the whole hand).
+    expect(validCount(f({ index: true, middle: true, ring: true, pinky: true }))).toBe(null);
+    expect(validCount(f({ index: true, middle: true, ring: true, pinky: true, thumb: true }))).toBe(null);
+    // Other shapes that are not one of the four
+    expect(validCount(f({ index: true, ring: true }))).toBe(null);
+    expect(validCount(f({ index: true, middle: true, pinky: true }))).toBe(null);
     expect(validCount(f({ middle: true, ring: true, pinky: true }))).toBe(null); // post-pinch "OK" shape
     expect(validCount(f({ index: true, middle: true, ring: true, pinky: true }, { pinchDistance: 0.5 }))).toBe(null); // about to pinch
     expect(validCount(f({ index: true }, { pinch: true }))).toBe(null);
     expect(validCount(null)).toBe(null);
+  });
+
+  base("validCount on real HandFrames (hand-input + the mock hand builder): 1/2/3 fingers, rock = sets 1-4; open hand never", () => {
+    const frame = (fingers, thumb = false) => buildHandFrame(hand({ handedness: "Right", fingers, thumb }).landmarks, "Right");
+    expect(validCount(frame(["index"]))).toBe(1);
+    expect(validCount(frame(["index", "middle"]))).toBe(2);
+    expect(validCount(frame(["index", "middle", "ring"]))).toBe(3);
+    expect(validCount(frame(["index", "pinky"]))).toBe(4);
+    expect(validCount(frame(["index", "pinky"], true))).toBe(4);
+    expect(validCount(frame(["index", "middle", "ring", "pinky"]))).toBe(null);
+    expect(validCount(frame(["index", "middle", "ring", "pinky"], true))).toBe(null);
+    expect(SET_SHAPES.slice(1).map((s) => s.emoji)).toEqual(["1️⃣", "2️⃣", "3️⃣", "🤘"]);
+  });
+
+  base("2.4 note set: releasing a pinch into an open hand held 1 s never changes the set; rock held 0.3 s selects 4", () => {
+    const c = createLeadController({ setId: 2 });
+    c.setContext("A", null, 0);
+    let t = 0;
+    const open = buildHandFrame(hand({ handedness: "Right", fingers: ["index", "middle", "ring", "pinky"] }).landmarks, "Right");
+    const openThumb = buildHandFrame(hand({ handedness: "Right", fingers: ["index", "middle", "ring", "pinky"], thumb: true }).landmarks, "Right");
+    const rock = buildHandFrame(hand({ handedness: "Right", fingers: ["index", "pinky"] }).landmarks, "Right");
+    const step = (f, pinch = false) => c.step({ present: true, u: 0.5, pinch, count: pinch ? null : validCount(f) }, (t += 16));
+    for (let i = 0; i < 20; i++) step(null, true); // playing
+    for (let i = 0; i < 70; i++) step(i % 2 ? open : openThumb); // released into an open hand, ~1.1 s
+    expect(c.state.setId).toBe(2);
+    expect(c.state.setHoldTarget).toBe(null);
+    const t0 = t;
+    while (t - t0 < SET_HOLD_MS - 30) step(rock);
+    expect(c.state.setId).toBe(2); // not yet
+    expect(c.state.setHoldTarget).toBe(4);
+    while (t - t0 < SET_HOLD_MS + 20) step(rock);
+    expect(c.state.setId).toBe(4);
   });
 
   base("2.5 octave: sliding into the arrow zone during a pinch never changes the octave", () => {
@@ -228,5 +276,20 @@ base.describe("lead-notes (unit)", () => {
     expect(c.step(null, 100)).toEqual([]);
     const evs = c.step(null, 100 + LOST_GRACE_MS);
     expect(evs[0].type).toBe("noteOff");
+  });
+  base("setting confirm timing (theme CONFIRM): pop at the confirm, fully visible ~1 s, gone after the fade", () => {
+    const at0 = confirmPhase(0);
+    expect(at0.visible).toBe(true);
+    expect(at0.scale).toBeCloseTo(CONFIRM.popScale, 5);
+    expect(at0.flash).toBe(1);
+    expect(confirmPhase(CONFIRM.popMs).scale).toBe(1);
+    expect(confirmPhase(CONFIRM.popMs).flash).toBe(0);
+    for (const ms of [0, 200, 500, 900, CONFIRM.holdMs]) expect(confirmPhase(ms).alpha, `alpha at ${ms} ms`).toBe(1);
+    expect(confirmPhase(CONFIRM.holdMs + CONFIRM.fadeMs / 2).alpha).toBeGreaterThan(0);
+    expect(confirmPhase(CONFIRM.holdMs + CONFIRM.fadeMs / 2).alpha).toBeLessThan(1);
+    expect(confirmPhase(CONFIRM.holdMs + CONFIRM.fadeMs).visible).toBe(false);
+    expect(confirmPhase(-Infinity).visible).toBe(false);
+    expect(confirmPhase(Infinity).visible).toBe(false);
+    expect(CONFIRM.holdMs + CONFIRM.fadeMs).toBeLessThanOrEqual(1500);
   });
 });

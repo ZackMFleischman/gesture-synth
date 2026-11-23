@@ -89,7 +89,8 @@ test.describe("real app + mobile system", () => {
 
     test("minimal HUD is remembered across reloads", async ({ synthPage: page }) => {
       await mountInApp(page);
-      await expect(page.locator("#distortionDisplay")).toBeVisible();
+      await expect(page.locator("#volumeMeter")).toBeAttached();
+      await expect(page.locator("#distortionDisplay")).toBeHidden(); // one filter visual: the arc at the hand
       await page.locator("#gsPill").click();
       await page.locator("#gsHudToggle").click();
       await expect(page.locator("body")).toHaveClass(/gs-hud-min/);

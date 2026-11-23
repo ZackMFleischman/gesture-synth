@@ -3,7 +3,9 @@
 //    (Chords = volume, exactly as indicators.js renders it today; Arp = arp/gate), bars in the mode
 //    color via CSS. Hidden when the mode has no right track (Lead).
 //  - #distortionDisplay "Filter: x%": same text; in modes that don't publish `filter` it follows
-//    `right/tilt` (frozen while the right hand is held). Color + dim come from modes.css.
+//    `right/tilt` (frozen while the right hand is held). Color + dim come from modes.css. Since the camera-feedback
+//    pass the element is hidden under body.gs-modes (one filter visual: the arc at the hand, which reads S.filter
+//    set here); it is still kept up to date for other layouts and Eric's original page.
 // indicators.js keeps rendering `volume`/`filter` as before; this module renders after it, so in
 // Chords the result is identical and in other modes the mode's own value wins.
 

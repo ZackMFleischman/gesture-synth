@@ -184,7 +184,7 @@ append a separator, a header with the mode dot + mode name, and right-hand rows 
 
 | Chords | Arp | Lead |
 |---|---|---|
-| ✊ Menu · ↕ Volume · 👍 Octave down | ✊ Menu · ↕ Gate · 👍 Double time · 🤏 Tempo | ✊ Menu · ↕ Note · 🤏 Play · ☝️ Note set |
+| ✊ Menu · ↕ Volume · 👍 Octave down | ✊ Menu · ↕ Gate · 👍 Double time · 🤏 Tempo | ✊ Menu · ↕ Note · 🤏 Play · 1️⃣2️⃣3️⃣🤘 Note set |
 
 Rows come from the mode plugin (proposed `guide: [[emoji, label], ...]`, see §10). The existing
 `tests/ui.spec.js` guide test selects `.gesture-guide-note`, which the appended rows don't use, so it stays green.
