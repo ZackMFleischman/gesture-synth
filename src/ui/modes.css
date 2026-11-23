@@ -41,7 +41,7 @@ body.gs-modes .vol-bar.lit { background: var(--gs-mode); }
 body.gs-modes #distortionDisplay {
   color: var(--gs-mode);
   /* Legible over bright video: soft plate + shadow (fresh-eyes review). */
-  background: rgba(20, 20, 20, 0.6);
+  background: rgba(20, 20, 20, 0.78);
   padding: 1px 6px;
   border-radius: 4px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
@@ -246,7 +246,7 @@ body.gs-modes.gs-no-right-track #volumeMeter { display: none; }
 #transport .gs-beats i { width: 8px; height: 8px; border-radius: 50%; box-sizing: border-box; border: 1px solid var(--gs-quiet); display: block; }
 #transport .gs-beats i.on { background: var(--gs-mode); border-color: var(--gs-mode); }
 #transport .gs-steps { gap: 4px; }
-#transport .gs-steps i { width: 5px; height: 5px; border-radius: 50%; background: rgba(243,239,231,0.3); display: block; }
+#transport .gs-steps i { width: 5px; height: 5px; border-radius: 50%; background: rgba(243,239,231,0.45); box-shadow: 0 0 0 1px rgba(0,0,0,0.35); display: block; }
 #transport .gs-steps i.on { background: var(--gs-ink); }
 #transport .gs-steps i.rest { background: rgba(243,239,231,0.55); }
 #transport .gs-div { width: 1px; height: 12px; background: rgba(243,239,231,0.25); }
@@ -256,4 +256,4 @@ body.gs-modes.gs-no-right-track #volumeMeter { display: none; }
 .gs-guide-head { color: var(--gs-mode); font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
 .gs-guide-head::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--gs-mode); }
 .gs-guide-label { color: var(--gs-ink); font-size: 13px; opacity: 0.85; }
-.gesture-guide-row.gs-guide-mode .gesture-guide-gesture { width: 28px; text-align: center; font-size: 18px; }
+.gesture-guide-row.gs-guide-mode .gesture-guide-gesture { width: 28px; text-align: center; font-size: 18px; color: var(--gs-ink); }

@@ -3,6 +3,10 @@
 //   const modeUI = mountModeUI({ bus, ctx, registry, router, canvas: canvasEl });   // once, after the router
 //   modeUI.draw(g);                                                                // each frame, after router.draw(g)
 //
+// The canvas layers are drawn on their own canvas (#modeOverlay, right above #overlay, cleared and
+// redrawn every animation frame), so their translucent plates don't build up between camera frames
+// (#overlay is only cleared when a new video frame arrives). `g` is accepted for the hook signature.
+//
 // Everything here augments the existing UI (index.html + indicators.js + controls.js): it adds
 // `body.gs-modes` + modes.css, new DOM nodes, and canvas layers drawn on top of the modes. State comes
 // from bus signals (subscribe), never from mode internals. Missing signals degrade gracefully:
@@ -28,6 +32,7 @@ export const DEFAULT_RIGHT_TRACK = {
 };
 
 const LOST_GRACE_MS = 250; // a hand must be gone this long before it shows as lost
+const SIDE_LOCK_MS = 600; // the chord hand must stay on the other side this long before the tracks swap
 
 function newHand() {
   return { pos: null, height: null, size: null, pinch: false, tilt: null, seen: false, lastPos: null, goneAt: null };
@@ -53,6 +58,8 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, doc = d
     hands: { left: newHand(), right: newHand() },
     chordSide: "left",
     chordSideKnown: false,
+    sideCandidate: null,
+    sideSince: 0,
     rightHeld: false,
     rightReturn: false,
     heldValue: null,
@@ -65,6 +72,11 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, doc = d
     covered(r) {
       return this.covers.some((c) => rectsOverlap(r, c));
     },
+    /** Is the hand at canvas point p (palm) under an open panel? */
+    palmCovered(p, hs) {
+      const k = hs * 0.3;
+      return this.covered({ x: p.x - k, y: p.y - k, w: 2 * k, h: 2 * k });
+    },
     now: 0,
     /** name -> {value, hand:"left"|"right", ref:number|null} (screen control wins until the hand moves). */
     overrides: new Map(),
@@ -72,14 +84,20 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, doc = d
       const h = this.hands[side];
       return !h.pos && h.seen && h.goneAt != null && this.now - h.goneAt > LOST_GRACE_MS;
     },
+    /** Position to draw at: live, or the last one during the lost grace (tracking dropouts don't blink). */
+    drawPos(side) {
+      const h = this.hands[side];
+      if (h.pos) return h.pos;
+      return h.lastPos && h.goneAt != null && this.now - h.goneAt <= LOST_GRACE_MS ? h.lastPos : null;
+    },
   };
 
-  const listeners = new Set(); // sub-module onSignal(name, v) hooks
-  const onSignal = (name, v) => listeners.forEach((fn) => fn(name, v));
+  const listeners = new Set(); // sub-module hooks: fn(kind: "set"|"event", name, value, playTime)
 
   function applyMode(id) {
     if (!id) return;
     const mode = registry?.getMode?.(id) || null;
+    if (id !== S.modeId) S.overrides.clear(); // a screen value never carries into another mode
     S.modeId = id;
     S.mode = mode;
     S.name = mode?.name || id[0].toUpperCase() + id.slice(1);
@@ -107,17 +125,34 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, doc = d
     } else h[field] = v;
   }
 
-  // Master track sits on the edge where the chord ("Left") hand is displayed (D11), with hysteresis.
+  // Master track sits on the edge where the chord ("Left") hand is displayed (D11). Decided from both
+  // hands (chord hand left of the mode hand -> left edge) and only after it held for SIDE_LOCK_MS, so a
+  // hand reaching across the middle doesn't swap the tracks. One hand only: first guess, never a swap.
   function updateChordSide() {
     const L = S.hands.left.pos;
     const R = S.hands.right.pos;
-    const x = L ? L.x : R ? 1 - R.x : null;
-    if (x == null) return;
+    const both = !!(L && R);
+    let side = null;
+    if (both) side = L.x < R.x ? "left" : "right";
+    else if (!S.chordSideKnown && (L || R)) side = (L ? L.x : 1 - R.x) < 0.5 ? "left" : "right";
+    if (!side) return;
     if (!S.chordSideKnown) {
-      S.chordSide = x < 0.5 ? "left" : "right";
-      S.chordSideKnown = true;
-    } else if (S.chordSide === "left" && x > 0.6) S.chordSide = "right";
-    else if (S.chordSide === "right" && x < 0.4) S.chordSide = "left";
+      S.chordSide = side; // immediate until both hands have been seen together
+      S.chordSideKnown = both;
+      return;
+    }
+    const now = performance.now();
+    if (side === S.chordSide) {
+      S.sideCandidate = null;
+      return;
+    }
+    if (S.sideCandidate !== side) {
+      S.sideCandidate = side;
+      S.sideSince = now;
+    } else if (now - S.sideSince >= SIDE_LOCK_MS) {
+      S.chordSide = side;
+      S.sideCandidate = null;
+    }
   }
 
   const HAND_SIGNALS = {
@@ -132,10 +167,10 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, doc = d
       onSet(name, v) {
         if (name === "mode") applyMode(v);
         else if (HAND_SIGNALS[name]) setHand(...HAND_SIGNALS[name], v);
-        onSignal(name, v);
+        listeners.forEach((fn) => fn("set", name, v));
       },
       onEvent(name, data, playTime) {
-        listeners.forEach((fn) => fn(name, data, playTime));
+        listeners.forEach((fn) => fn("event", name, data, playTime));
       },
     },
     (name) => name !== "note/on" && name !== "note/off" && name !== "note/cancel"
@@ -149,6 +184,14 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, doc = d
   }
 
   bus.declare("ui/override", { type: "state", owner: "ui" });
+
+  // Own canvas for the modes UI layers (see the header), right above the video canvas, under all DOM.
+  const layer = doc.createElement("canvas");
+  layer.id = "modeOverlay";
+  layer.setAttribute("aria-hidden", "true");
+  layer.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;";
+  canvas.after(layer);
+  const lg = layer.getContext("2d");
 
   const env = { S, bus, ctx, registry, router, doc, canvas, subscribe: (fn) => (listeners.add(fn), () => listeners.delete(fn)) };
   const badges = createBadges(env);
@@ -209,28 +252,32 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, doc = d
   const regions = [];
   const reg = (name, kind, rect) => (rect && regions.push({ name, kind, rect }), rect);
 
-  function draw(g) {
+  function draw() {
     tick();
     regions.length = 0;
-    const W = canvas.clientWidth || canvas.width;
-    const H = canvas.clientHeight || canvas.height;
+    const W = layer.clientWidth || canvas.clientWidth || canvas.width;
+    const H = layer.clientHeight || canvas.clientHeight || canvas.height;
+    const dpr = window.devicePixelRatio || 1;
+    const bw = Math.round(W * dpr);
+    const bh = Math.round(H * dpr);
+    if (layer.width !== bw || layer.height !== bh) {
+      layer.width = bw;
+      layer.height = bh;
+    }
+    lg.setTransform(1, 0, 0, 1, 0, 0);
+    lg.clearRect(0, 0, bw, bh);
+    // Not drawn until the start overlay is dismissed (the video canvas is .dimmed until then).
     if (!canvas.classList.contains("dimmed")) {
-      // Canvas may be backed at a different resolution than CSS px: draw in CSS px.
-      const sx = canvas.width / W;
-      const sy = canvas.height / H;
-      const portrait = H > W;
       const G = {
-        W, H, portrait, reg,
-        hs: handSpan(W, H, portrait),
+        W, H, portrait: H > W, reg,
+        hs: handSpan(W, H),
         toPx: (p) => ({ x: p.x * W, y: p.y * H }),
       };
-      g.save();
-      g.setTransform(sx, 0, 0, sy, 0, 0);
-      // Z-order (§5): edge tracks, hand feedback, first-use labels. The menu/mode draw is underneath.
-      tracks.draw(g, G);
-      overlays.draw(g, G);
-      guide.draw(g, G);
-      g.restore();
+      lg.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // Z-order (§5): edge tracks, hand feedback, first-use labels (all above the mode/menu canvas).
+      tracks.draw(lg, G);
+      overlays.draw(lg, G);
+      guide.draw(lg, G);
     }
     if (import.meta.env?.DEV && window.__gsTest) {
       window.__gsTest.ui = {
@@ -247,11 +294,12 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, doc = d
     }
   }
 
-  // Hand span (wrist -> fingertips) in px. Uses the published hand size when there is one.
-  function handSpan(W, H, portrait) {
+  // Hand span (wrist -> fingertips) in px. HandFrame.handSize (wrist -> middle MCP) is in display-height
+  // units; it is used when hand input publishes it as `left|right/size`, else a typical arm's-length span.
+  function handSpan(W, H) {
     const size = S.hands.right.size || S.hands.left.size;
-    if (typeof size === "number" && size > 0) return Math.max(50, Math.min(260, size * W * 1.9));
-    return portrait ? W * 0.24 : H * 0.14;
+    const span = typeof size === "number" && size > 0 ? size * H * 1.9 : H * 0.2;
+    return Math.max(50, Math.min(span, W * 0.32, 280));
   }
 
   return {
@@ -262,6 +310,7 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, doc = d
     destroy() {
       unsubBus();
       for (const p of parts) p.destroy?.();
+      layer.remove();
       body.classList.remove("gs-modes", "gs-right-held", "gs-no-right-track");
       delete body.dataset.mode;
     },

@@ -1,8 +1,8 @@
 // Feedback at the right hand (docs/ui-integration.md §4 "At the hand"): the filter arc, all modes.
 // Centered on the right palm, r = 0.95 hand spans, -150° -> -30° (above the hand); dot in the mode
 // color at the filter value. Held (Arp pinch): arc dims, hollow dot. Hidden while the menu is open,
-// when the right hand is not tracked, and where an open panel (guide / controls) would cover it: on
-// phones the panels sit over the hands, and a half-covered arc reads as a glitch.
+// when the right hand is not tracked, and while the hand itself is under an open panel (guide /
+// controls; on phones the panels sit over the hands): feedback for a hidden hand reads as a glitch.
 //
 // Also exports small canvas helpers modes can use for their own at-hand feedback (Arp x2 pill, the
 // big BPM plate during a pinch) so they share one look.
@@ -11,13 +11,13 @@ import { COLORS, FONT, STROKE, deg, drawArc, drawPill, drawPlate } from "./theme
 
 export function createHandOverlays({ S }) {
   function draw(g, G) {
-    const R = S.hands.right;
-    if (!R.pos || S.menu.state !== "closed") return;
+    const pos = S.drawPos("right");
+    if (!pos || S.menu.state !== "closed") return;
     if (S.filter == null) return;
-    const p = G.toPx(R.pos);
+    const p = G.toPx(pos);
     const r = G.hs * 0.95;
+    if (S.palmCovered(p, G.hs)) return;
     const box = { x: p.x - r - 6, y: p.y - r - 6, w: 2 * r + 12, h: r * 0.6 + 12 };
-    if (S.covered(box)) return;
     const held = S.rightHeld || S.rightReturn;
     drawArc(g, {
       cx: p.x, cy: p.y, r, a0: deg(-150), a1: deg(-30),

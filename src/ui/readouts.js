@@ -43,7 +43,8 @@ export function createReadouts({ S, bus, doc, subscribe }) {
     }
   }
 
-  const off = subscribe((name) => {
+  const off = subscribe((kind, name) => {
+    if (kind !== "set") return;
     if (name === "filter") filterSeenInMode = true;
     if (name === S.rightTrack?.param || name === "volume") renderMeter();
   });

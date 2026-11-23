@@ -26,6 +26,7 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc }) {
   toggle.type = "button";
   toggle.dataset.gsKind = "status";
   toggle.setAttribute("aria-pressed", "false");
+  toggle.setAttribute("aria-expanded", "false");
   toggle.setAttribute("aria-controls", "controlsPanel");
   toggle.textContent = "Controls";
   guideToggle.after(toggle);
@@ -37,7 +38,7 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc }) {
   panel.setAttribute("role", "region");
   panel.setAttribute("aria-label", "Screen controls");
   panel.innerHTML = `
-    <span class="gs-k">Mode</span><span class="gs-v"><div class="gs-seg" data-control="mode" role="radiogroup" aria-label="Mode"></div></span>
+    <span class="gs-k">Mode</span><span class="gs-v"><div class="gs-seg" data-control="mode" role="group" aria-label="Mode"></div></span>
     <div class="gs-sep"></div>
     <div class="gs-mode-host"></div>
     <div class="gs-sep"></div>
@@ -74,7 +75,6 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc }) {
     for (const m of modes) {
       const b = doc.createElement("button");
       b.type = "button";
-      b.setAttribute("role", "radio");
       b.dataset.value = m.id;
       b.textContent = m.name || m.id;
       b.addEventListener("click", () => router?.setMode?.(m.id));
@@ -87,7 +87,7 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc }) {
   function defaultOutputRow(c) {
     c.innerHTML =
       '<button type="button" class="gs-switch" aria-pressed="false" aria-label="Output" disabled></button>' +
-      '<span class="gs-note">Off · room code in M3</span>';
+      '<span class="gs-note">Off · coming soon</span>';
   }
   function setOutputRow(render) {
     outputCleanup?.();
@@ -196,7 +196,9 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc }) {
           continue;
         }
       }
-      if (o.read() !== o.value) o.apply(o.value);
+      // Fallback until modes skip hand writes for names in `ui/override`: put the screen value back.
+      const cur = o.read();
+      if (typeof cur !== "number" || Math.abs(cur - o.value) > 1e-6) o.apply(o.value);
     }
     publishOverrides();
   }
@@ -204,21 +206,36 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc }) {
   // ---- Open / close (mutually exclusive with the gesture guide) ----
   const isOpen = () => !panel.classList.contains("hidden");
   const guideOpen = () => !!guideEl && !guideEl.classList.contains("hidden");
-  function open() {
+  function open({ focus = true } = {}) {
     if (guideOpen()) guideToggle.click(); // closes it through controls.js (keeps its label in sync)
     panel.classList.remove("hidden");
     toggle.setAttribute("aria-pressed", "true");
+    toggle.setAttribute("aria-expanded", "true");
     update();
+    if (focus) (seg.querySelector("button.on") || panel.querySelector("button, input"))?.focus({ preventScroll: true });
   }
-  function close() {
+  function close({ restoreFocus = false } = {}) {
+    const hadFocus = panel.contains(doc.activeElement);
     panel.classList.add("hidden");
     toggle.setAttribute("aria-pressed", "false");
+    toggle.setAttribute("aria-expanded", "false");
+    if (restoreFocus || hadFocus) toggle.focus({ preventScroll: true });
   }
   toggle.addEventListener("click", () => (isOpen() ? close() : open()));
   // controls.js toggles the guide first (it subscribed earlier); then we close the panel if the guide opened.
-  const onGuide = () => guideOpen() && close();
+  guideToggle.setAttribute("aria-expanded", String(guideOpen()));
+  guideToggle.setAttribute("aria-controls", "gestureGuide");
+  const onGuide = () => {
+    guideToggle.setAttribute("aria-expanded", String(guideOpen()));
+    if (guideOpen()) close();
+  };
   guideToggle.addEventListener("click", onGuide);
-  const onKey = (e) => e.key === "Escape" && isOpen() && close();
+  const helpModal = doc.getElementById("helpModal");
+  const onKey = (e) => {
+    if (e.key !== "Escape" || !isOpen()) return;
+    if (helpModal && !helpModal.classList.contains("hidden")) return; // the modal is on top
+    close({ restoreFocus: true });
+  };
   doc.addEventListener("keydown", onKey);
 
   let lastMarks = "";
@@ -229,8 +246,10 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc }) {
     buildSeg();
     for (const b of seg.children) {
       const on = b.dataset.value === S.modeId;
-      b.classList.toggle("on", on);
-      b.setAttribute("aria-checked", String(on));
+      if (b.classList.contains("on") !== on) {
+        b.classList.toggle("on", on);
+        b.setAttribute("aria-pressed", String(on));
+      }
     }
     if (doc.activeElement !== master) {
       const mv = typeof ctx.masterVolume === "number" ? ctx.masterVolume : 1;

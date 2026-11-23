@@ -39,14 +39,15 @@ export function createBadges({ S, bus, doc }) {
       badge.setAttribute("aria-label", `Mode: ${name}. Open controls`);
     }
     const set = S.modeId === "lead" ? bus.get("lead/noteset") : null;
+    const on = typeof set === "number";
     if (set !== shownSet) {
       shownSet = set;
-      const on = typeof set === "number";
       noteSet.classList.toggle("hidden", !on);
-      if (on) {
-        noteSet.innerHTML = Array.from({ length: NOTE_SETS }, (_, i) => `<i class="${i === set ? "on" : ""}"></i>`).join("");
-        noteSet.style.left = `${badge.offsetLeft + badge.offsetWidth + 8}px`;
-      }
+      if (on) noteSet.innerHTML = Array.from({ length: NOTE_SETS }, (_, i) => `<i class="${i === set ? "on" : ""}"></i>`).join("");
+    }
+    if (on) {
+      const left = `${badge.offsetLeft + badge.offsetWidth + 8}px`;
+      if (noteSet.style.left !== left) noteSet.style.left = left;
     }
   }
   update();

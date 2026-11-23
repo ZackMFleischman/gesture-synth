@@ -74,18 +74,19 @@ export function createGuide({ S, doc }) {
       firstUseUntil = S.now + MOTION.firstUse;
     }
     if (!labels) firstUseUntil = 0;
-    visible = !!labels && (S.now < firstUseUntil || S.guideOpen) && !!S.hands.right.pos && S.menu.state === "closed";
+    visible = !!labels && (S.now < firstUseUntil || S.guideOpen) && !!S.drawPos("right") && S.menu.state === "closed";
   }
 
   function draw(g, G) {
     if (!visible) return;
-    const R = G.toPx(S.hands.right.pos);
+    const R = G.toPx(S.drawPos("right"));
     const exprSide = S.chordSide === "left" ? "right" : "left";
     const inw = exprSide === "left" ? 1 : -1; // from the right-hand edge towards the center
     const size = 12;
     const o = { size, plate: true, color: COLORS.ink };
     g.save();
     g.font = `400 ${size}px ${FONT.family}`;
+    const placed = [];
     for (const [where, text] of FIRST_USE[S.modeId]) {
       let x, y, align;
       if (where === "track") {
@@ -103,9 +104,12 @@ export function createGuide({ S, doc }) {
       const w = g.measureText(text).width + 12;
       const h = size * 1.15 + 6;
       const left = align === "center" ? x - w / 2 : align === "right" ? x - w + 6 : x - 6;
-      if (S.covered({ x: left, y: y - h / 2, w, h })) continue;
-      G.reg(`first-use-${where}`, "transient", drawLabel(g, text, x, y, { ...o, align }));
+      // Skip a label an open panel would cut.
+      if (!S.covered({ x: left, y: y - h / 2, w, h })) placed.push({ where, text, x, y, align });
     }
+    // A hand under an open panel gets no labels at all: orphaned labels read as noise.
+    if (!S.palmCovered(R, G.hs))
+      for (const p of placed) G.reg(`first-use-${p.where}`, "transient", drawLabel(g, p.text, p.x, p.y, { ...o, align: p.align }));
     g.restore();
   }
 

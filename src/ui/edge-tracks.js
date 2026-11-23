@@ -14,7 +14,7 @@ import {
 
 const MEET_PX = 6; // return state ends when the hand marker is this close to the held marker
 
-export function createEdgeTracks({ S }) {
+export function createEdgeTracks({ S, bus }) {
   let wasHeld = false;
   let heldY = null; // hollow marker y while held (menu / pinch)
   let lastRightY = null;
@@ -83,6 +83,13 @@ export function createEdgeTracks({ S }) {
   }
 
   /** One hand's track. o: {side, color, hand, lostNow, markerY, heldY, dim, guideTo, name} */
+  /** Hollow-marker y for a value, in the hand's own frame when the hand is visible (so hollow and solid
+   *  meet where the engine hands control back: height ~ wrist y over 90% of the frame), else on the track. */
+  function hollowY(G, value, liveY, handHeight) {
+    if (liveY != null && typeof handHeight === "number") return liveY + (handHeight - value) * 0.9 * G.H;
+    return valueToY(G, value);
+  }
+
   function track(g, G, o) {
     const x = edgeTrackX(o.side, G.W);
     // What was drawn (read by tests through window.__gsTest.ui.tracks).
@@ -91,7 +98,9 @@ export function createEdgeTracks({ S }) {
     backing(g, x, top, bottom);
     if (o.guideTo && o.markerY != null) {
       const dir = o.guideTo.x > x ? 1 : -1;
-      guide(g, x + dir * (LAYOUT.markerLength / 2 + 4), o.markerY, o.guideTo.x, o.guideTo.y);
+      const x0 = x + dir * (LAYOUT.markerLength / 2 + 4);
+      const seg = { x: Math.min(x0, o.guideTo.x), y: Math.min(o.markerY, o.guideTo.y) - 3, w: Math.abs(o.guideTo.x - x0), h: Math.abs(o.guideTo.y - o.markerY) + 6 };
+      if (!S.covered(seg)) guide(g, x0, o.markerY, o.guideTo.x, o.guideTo.y); // not under an open panel
     }
     const rect = drawEdgeTrack(g, {
       x, top, bottom, color: o.color, markerY: o.markerY, heldY: o.heldY, dim: o.dim, lost: o.lostNow,
@@ -120,7 +129,8 @@ export function createEdgeTracks({ S }) {
     const L = S.hands.left;
     const lLost = S.lost("left");
     const ov = S.overrides.get("master");
-    const lY = L.pos ? L.pos.y * G.H : L.lastPos && L.seen ? L.lastPos.y * G.H : null;
+    const lPos = S.drawPos("left");
+    const lY = lPos ? lPos.y * G.H : L.lastPos && L.seen ? L.lastPos.y * G.H : null;
     track(g, G, {
       name: "master-track",
       side: chordSide,
@@ -128,17 +138,21 @@ export function createEdgeTracks({ S }) {
       hand: L,
       lostNow: lLost,
       markerY: lY,
-      heldY: ov && L.pos ? valueToY(G, ov.value) : null,
-      guideTo: L.pos ? handEdgePoint(G, L.pos, chordSide) : null,
+      heldY: ov && lPos ? hollowY(G, ov.value, lY, L.height) : null,
+      guideTo: lPos ? handEdgePoint(G, lPos, chordSide) : null,
     });
 
     // ---- Right track (mode's right-height control) ----
+    const R = S.hands.right;
+    const rPos = S.drawPos("right");
+    const liveY = rPos ? rPos.y * G.H : null;
     if (S.modeId !== lastMode) {
       lastMode = S.modeId;
-      heldY = null;
+      // The router switches mode at the START of the countdown, while the menu still holds the hand:
+      // keep showing a held marker, now at the new mode's value.
+      const v = S.rightTrack ? bus.get(S.rightTrack.param) : null;
+      heldY = S.rightHeld ? (typeof v === "number" ? valueToY(G, v) : heldY) : null;
     }
-    const R = S.hands.right;
-    const liveY = R.pos ? R.pos.y * G.H : null;
     if (S.rightHeld && !wasHeld) heldY = S.heldValue != null ? valueToY(G, S.heldValue) : lastRightY ?? liveY;
     if (!S.rightHeld) heldY = null;
     wasHeld = S.rightHeld;
@@ -148,8 +162,8 @@ export function createEdgeTracks({ S }) {
     const rLost = S.lost("right");
     const rov = S.overrides.get(S.rightTrack.param);
     let hollow = null;
-    if (S.rightReturn && S.heldValue != null) hollow = valueToY(G, S.heldValue);
-    else if (rov) hollow = valueToY(G, rov.value);
+    if (S.rightReturn && S.heldValue != null) hollow = hollowY(G, S.heldValue, liveY, R.height);
+    else if (rov) hollow = hollowY(G, rov.value, liveY, R.height);
     if (hollow != null && liveY != null && Math.abs(hollow - liveY) < MEET_PX) hollow = null;
 
     if (rLost) {
@@ -164,7 +178,7 @@ export function createEdgeTracks({ S }) {
         hand: R,
         markerY: liveY,
         heldY: hollow,
-        guideTo: R.pos ? handEdgePoint(G, R.pos, exprSide) : null,
+        guideTo: rPos ? handEdgePoint(G, rPos, exprSide) : null,
       });
     }
   }

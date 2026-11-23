@@ -64,12 +64,18 @@ const bus = {
   set: (page, name, v) => page.evaluate(([n, v]) => window.__gsTest.bus.set(n, v), [name, v]),
 };
 
-/** Hand feedback (filter arc, first-use labels) is not drawn where an open panel would cut it. */
+/** First-use labels are never cut by an open panel; the filter arc is not drawn for a hand under it. */
 async function noHandFeedbackUnder(page, sel) {
   const b = await page.locator(sel).boundingBox();
   const panel = { x: b.x, y: b.y, w: b.width, h: b.height };
-  for (const r of (await ui(page)).regions.filter((r) => r.kind === "hand" || r.kind === "transient"))
+  const regions = (await ui(page)).regions;
+  for (const r of regions.filter((r) => r.kind === "transient"))
     expect(overlap(r.rect, panel), `${r.name} drawn under ${sel}`).toBe(false);
+  const arc = regions.find((r) => r.name === "filter-arc");
+  if (arc) {
+    const palm = { x: arc.rect.x + arc.rect.w / 2, y: arc.rect.y + (arc.rect.w - 12) / 2 + 6, w: 1, h: 1 };
+    expect(overlap(palm, panel), `filter arc drawn for a hand under ${sel}`).toBe(false);
+  }
 }
 
 async function toArp(page) {
@@ -259,6 +265,34 @@ test.describe("modes UI behavior", () => {
     await frames(page, 3);
     expect((await ui(page)).tracks["right-track"].heldY).toBeNull();
     await expect(page.locator("body")).not.toHaveClass(/gs-right-held/);
+  });
+
+  test("held marker stays through a mode switch at countdown start", async ({ synthPage: page, setHands }) => {
+    await ensureArp(page);
+    await setHands(...scene(DESKTOP));
+    await frames(page, 4);
+    await bus.set(page, "menu", { state: "countdown", confirmed: "arp" });
+    await frames(page, 2);
+    await page.evaluate(() => window.__gsTest.router.setMode("arp")); // the router switches at countdown start
+    await frames(page, 3);
+    const t = (await ui(page)).tracks["right-track"];
+    expect(t.dim).toBe(true);
+    expect(t.heldY).not.toBeNull();
+    await expect(page.locator("#modeBadge")).toHaveText("Arp");
+  });
+
+  test("tracks don't swap edges when one hand crosses the middle; they do once both hands swap", async ({ synthPage: page, setHands }) => {
+    await setHands(...scene(DESKTOP));
+    await frames(page, 4);
+    expect((await ui(page)).chordSide).toBe("right");
+    const view = makeView(640, 480, 1280, 800);
+    await setHands(leftHand(4, { pos: { x: 0.3, y: 0.5 }, view })); // chord hand alone, reaching across
+    await page.waitForTimeout(800);
+    expect((await ui(page)).chordSide).toBe("right");
+    await setHands(...scene(DESKTOP, { swap: true })); // a brief swap is ignored...
+    await frames(page, 2);
+    expect((await ui(page)).chordSide).toBe("right");
+    await expect.poll(async () => (await ui(page)).chordSide, { timeout: 3000 }).toBe("left"); // ...a held one is not
   });
 
   test("Arp pinch holds the gate track and shows the tempo delta in the transport", async ({ synthPage: page, setHands }) => {

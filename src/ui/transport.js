@@ -36,7 +36,8 @@ export function createTransport({ S, bus, ctx, doc, subscribe }) {
     return ac ? ac.currentTime - (ac.outputLatency || 0) : null;
   };
 
-  const off = subscribe((name, data, playTime) => {
+  const off = subscribe((kind, name, data, playTime) => {
+    if (kind !== "event") return;
     if (name === "beat" && typeof data === "number") {
       const now = audioNow();
       if (playTime == null || now == null || playTime <= now) setBeat(data - 1);
@@ -77,7 +78,11 @@ export function createTransport({ S, bus, ctx, doc, subscribe }) {
     const on = CLOCKED.has(S.modeId) || S.mode?.transport === true;
     el.classList.toggle("hidden", !on);
     if (!on) {
-      pending.length = 0;
+      if (beat >= 0 || pending.length) {
+        pending.length = 0;
+        beat = -1;
+        beatEls.forEach((b) => (b.classList.remove("on"), (b.style.transform = "")));
+      }
       return;
     }
     // Beats due by now (audio clock).
@@ -92,9 +97,12 @@ export function createTransport({ S, bus, ctx, doc, subscribe }) {
     }
     // Pulse: the only repeating motion. Scale the current dot for PULSE_MS after the beat.
     const k = Math.max(0, 1 - (performance.now() - pulseAt) / PULSE_MS);
-    if (beat >= 0) beatEls[beat].style.transform = `scale(${(1.15 + 0.35 * k).toFixed(3)})`;
-    beatEls.forEach((b, i) => i !== beat && b.style.transform && (b.style.transform = ""));
-    el.dataset.pulse = k > 0 ? "1" : "0";
+    beatEls.forEach((b, i) => {
+      const tf = i === beat ? `scale(${(1.15 + 0.35 * k).toFixed(2)})` : "";
+      if (b.style.transform !== tf) b.style.transform = tf;
+    });
+    const pulse = k > 0 ? "1" : "0";
+    if (el.dataset.pulse !== pulse) el.dataset.pulse = pulse;
 
     const bpm = bus.get("bpm") ?? ctx.clock?.bpm;
     if (bpm !== shownBpm) {
