@@ -76,17 +76,29 @@ const LOOK = {
 const STEP_KEYS = ["KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK", "KeyL", "Semicolon", "Quote",
   "KeyQ", "KeyW", "KeyE", "KeyR", "KeyT", "KeyY", "KeyU", "KeyI", "KeyO", "KeyP", "BracketLeft", "BracketRight"];
 
+/** Radius of an arrow's drawn footprint (lit size 1.25x, hold ring + its halo). */
+const arrowReach = (sz) => sz.arrowSize * 1.25 * 1.05 + 5;
+/** Width of the ladder's footprint from the screen edge (lines, arrows, octave marks). */
+const footprint = (sz) => sz.edgeInset + sz.lineChord / 2 + sz.arrowSize * 1.35 + 10 + 8;
+
 /**
  * Ladder geometry in canvas px. side = screen edge of the expression hand ("left" | "right"); inset = safe-area
- * inset on that edge. `dir` points from the edge inward; `edge` = outer end of the lines, `inner` = inner end of
- * the chord lines.
+ * inset on that edge; clear = {top, bottom}: the band of that edge that is free of DOM controls (the arrows stay
+ * inside it). `dir` points from the edge inward; `edge` = outer end of the lines, `inner` = inner end of the
+ * chord lines.
  */
-export function ladderGeometry(W, H, side = "right", inset = 0) {
+export function ladderGeometry(W, H, side = "right", inset = 0, clear = null) {
   const sz = W < NARROW_PX ? SIZE_NARROW : SIZE_WIDE;
   const dir = side === "left" ? 1 : -1;
   const edge = side === "left" ? inset + sz.edgeInset : W - inset - sz.edgeInset;
-  const top = Math.min(LOOK.topPx, Math.round(H * 0.24));
-  const bottom = Math.max(top + 120, H - LOOK.bottomInset);
+  const reach = sz.arrowGap + arrowReach(sz) + 6;
+  let top = Math.min(LOOK.topPx, Math.round(H * 0.24));
+  let bottom = H - LOOK.bottomInset;
+  if (clear) {
+    top = Math.max(top, Math.ceil(clear.top + reach));
+    bottom = Math.min(bottom, Math.floor(clear.bottom - reach));
+  }
+  bottom = Math.max(top + 120, bottom);
   return {
     W, H, side, dir, sz, edge, top, bottom,
     narrow: W < NARROW_PX,
@@ -95,6 +107,31 @@ export function ladderGeometry(W, H, side = "right", inset = 0) {
     upY: top - sz.arrowGap,
     downY: bottom + sz.arrowGap,
   };
+}
+
+// ---- DOM controls at the ladder's edge (status chips, readouts, left column, help button) ----
+// The ladder's arrows must never sit under them. Measured at most every 500 ms (layout reads are not free).
+const CLEAR_SEL = '#keySelect, #toneSelect, #guideToggle, #helpButton, #volumeMeter, #distortionDisplay, #outputChip, [data-gs-kind="status"]';
+const clearCache = { key: "", at: -Infinity, value: null };
+function edgeClearance(W, H, side, now) {
+  if (typeof document === "undefined") return null;
+  const key = `${W}x${H}|${side}`;
+  if (key === clearCache.key && now - clearCache.at < 500) return clearCache.value;
+  const band = footprint(W < NARROW_PX ? SIZE_NARROW : SIZE_WIDE) + 4;
+  const x0 = side === "left" ? 0 : W - band;
+  let top = 0;
+  let bottom = H;
+  for (const el of document.querySelectorAll(CLEAR_SEL)) {
+    if (!el.getClientRects().length || getComputedStyle(el).visibility === "hidden") continue;
+    const r = el.getBoundingClientRect();
+    if (r.right <= x0 || r.left >= x0 + band) continue;
+    if (r.top < H * 0.4) top = Math.max(top, r.bottom);
+    else if (r.bottom > H * 0.6) bottom = Math.min(bottom, r.top);
+  }
+  clearCache.key = key;
+  clearCache.at = now;
+  clearCache.value = { top, bottom };
+  return clearCache.value;
 }
 const uToY = (geo, u) => geo.bottom - u * (geo.bottom - geo.top);
 const yToU = (geo, y) => (geo.bottom - y) / (geo.bottom - geo.top);
@@ -505,7 +542,7 @@ const lead = {
     const H = g.canvas.height;
     const sides = ctx?.bus?.get?.("ui/sides");
     const side = sides && sides.expr === "left" ? "left" : "right";
-    const geo = (lastGeo = ladderGeometry(W, H, side, safeInsets(W, H)[side]));
+    const geo = (lastGeo = ladderGeometry(W, H, side, safeInsets(W, H)[side], edgeClearance(W, H, side, now)));
     const sz = geo.sz;
     const dir = geo.dir;
     const alignIn = side === "left" ? "left" : "right"; // labels on the inner side of the ladder
@@ -605,7 +642,7 @@ const lead = {
     g.restore();
     {
       // The ladder's persistent footprint (lines, arrows incl. their lit size + ring, octave marks).
-      const ar = sz.arrowSize * 1.25 * 1.05 + 5;
+      const ar = arrowReach(sz);
       const xs = [geo.edge, geo.inner, geo.cx - ar, geo.cx + ar, mx - 8, mx + 8];
       const x0 = Math.min(...xs);
       const x1 = Math.max(...xs);
