@@ -313,6 +313,43 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
   - Arp pinch feedback: tempo scale + big BPM level with the pinch point, to its LEFT on screen (scale next to the hand,
     plate further left), clear of the hand box; on the right only when the left has less room (pinch near the left edge).
     During the ~1 s linger after the release it keeps the last pinch point's offset from the palm.
+- Instrument plugins + the Sound menu (ws/sound-menu, Phase 2):
+  - Instruments are plugins like modes: one file per instrument in `src/instruments/` (`warm.js`, `bright.js`, `retro.js`
+    via `oscillator-instrument.js`; `organ.js`; `sax.js`; `electric/` = `index.js` + `ks-worklet.js`), registered in
+    order by `src/instruments/index.js` (= Sound sub-ring order). Registry (`src/instruments/registry.js`):
+    `registerInstrument(def)`, `getInstrument(id)`, `listInstruments()`, `onInstrumentsChanged(fn)`, `traitsOf(id)`,
+    `instrumentFromTone/toneOf`, `createSource(ac, id, freq, t0, opts)`, `createRack(ac, dest)` (per-voice post chains),
+    `prepareInstrument(s)(ac)`, `soundMenuItem({layerOn, color, current})`. The engine, voices and UI use ONLY this
+    interface + traits; `tests/instruments.unit.spec.js` fails if `src/{services,modes,ui,core,menu,output}`, router or
+    main.js contain an instrument id literal.
+  - Definition: `{ id, label, icon (24x24 path), level (linear loudness/gain-staging trim on the post chain), tone?
+    (tone-select value; default id), toneLabel?, createSource(ac, freq, t0, opts) -> Source, createChain?(ac) ->
+    {input, output} (LINEAR post chain shared by a voice's notes), traits?, onReady?(ac) (one-time per AudioContext,
+    e.g. addModule) }`. Source: `connect, disconnect, stop(t), release(t) (own note end), excite(t, amount) (a new
+    attack on a sounding source), setFreq(f, t, rampS), frequency.value, instrument, onended`. opts: `{voice:
+    "chords"|"arp"|"lead", mono?: true}` (mono = the Lead's long-lived source: silent until excite()).
+    Traits (defaults): `strumMs 0` (Chords stagger, low to high), `releaseTailS null` (null = stop at once on a chord
+    change, the plain-oscillator behavior; else release() then stop after the tail), `sustains true`,
+    `legato "retrigger"|"hammer-on"` + `hammerOn 0.3` (Lead note step: excite(t, hammerOn) too), `leadToneHz 12000`.
+  - Engine: base instrument (Chords + Arp; = `#toneSelect`, whose options come from the registry; historical values
+    triangle/sawtooth/square kept) and lead instrument (`null` = follows the base until picked).
+    `audio.instrument(target)`, `audio.setInstrument(target, id)`, `audio.onInstrument(fn)`; bus/wire `sound/base`,
+    `sound/lead` (state, owner audio; `/gs/sound/base`, `/gs/sound/lead`; visualizer shows them). Chords' notes are
+    sources -> chord instance gain -> `chordRack` post -> chordGain; a base change re-voices a sounding chord (60 ms
+    equal-power fade + 30 ms fade-in). Arp voice: source -> ADSR -> its rack; `release(end)` at each note end. Lead
+    voice: one mono source; instrument change while sounding = 60 ms equal-power crossfade to a new source.
+  - Sound menu: main.js appends `soundMenuItem(...)` (down arc; accent = the right-hand mode's color; "Lead sound" +
+    `sound/lead` while the Lead layer is on). Router: `r.setting` -> `ctx.settings[key](value)` (app-context:
+    `sound/base`, `sound/lead`); bus `menu` adds `level`, `path`, state `"flash"` + `setting`; `/gs/menu` adds a
+    `flash` phase and `setting` on close. Controls panel: Sound row (`data-control=sound-base`) and, with the layer
+    on, Lead sound (`data-control=sound-lead`); guide row "Fist down: sound" (`.gs-guide-sound`); help text.
+  - Levels: each instrument's `level` keeps steady play within ±2 dB RMS of the median per voice and every voice at
+    max settings >= 1 dB under the limiter threshold (measured offline, tests/instruments.e2e.spec.js).
+  - Electric: Karplus-Strong in an AudioWorklet driven by AudioParams (`freq` a-rate, `t60`, `pluck` = change counter,
+    `pluckAmp`, `alive`): sample-accurate also in an OfflineAudioContext (port messages would arrive after an offline
+    render). Strings come from a per-context pool (12 pre-created, grows): a fresh AudioWorkletNode's processor starts
+    0-10 ms late live. Per-string asymmetric tube clipper ("hexaphonic": full chord voicings stay clear, so no
+    power-chord reduction), shared tone stack + cabinet. Drive (right hand sideways) adds on top, level-compensated.
 
 - Real screen sides (ws/real-sides, user-verified with a real camera): the chord ("Left") hand is the player's physical
   left hand and shows on the screen LEFT (mirrored selfie view), the right hand on the screen RIGHT. So in real use the

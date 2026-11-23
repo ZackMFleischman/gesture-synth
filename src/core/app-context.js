@@ -8,6 +8,7 @@ import { SynthEngine, createAudioFacade } from "../services/audio.js";
 import { createHarmony } from "../services/harmony.js";
 import { createClock } from "../services/clock.js";
 import { createAxes } from "./axes.js";
+import { listInstruments } from "../instruments/index.js"; // registers the built-in instrument plugins
 
 /**
  * @param {{ bus, registry, canvasEl: HTMLCanvasElement, controlsContainer?: HTMLElement|null,
@@ -46,6 +47,13 @@ export function createAppContext({ bus, registry, canvasEl, controlsContainer = 
     rightLocked: null, // router: the right HandFrame locked when the menu opened
     layerBase: null, // router: base mode id while the Lead layer plays on top of it
     axes: null, // reach axes (src/core/axes.js): Drive / Space switches
+    // Menu settings (router: a setting item confirmed in a sub-ring -> settings[key](value)). Sound menu:
+    // the base instrument (Chords / Arp) or the Lead layer's instrument.
+    settings: {
+      "sound/base": (id) => audio.setInstrument("base", id),
+      "sound/lead": (id) => audio.setInstrument("lead", id),
+    },
+    instruments: listInstruments, // the registered instrument plugins (menu / Controls / tone select read this)
   };
   const axes = createAxes({ bus, audio });
   ctx.axes = axes;

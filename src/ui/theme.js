@@ -51,7 +51,7 @@ export const STROKE = Object.freeze({
 });
 
 /** Motion durations (ms). Spec: 120–200 ms; the beat pulse is the only repeating motion. */
-export const MOTION = Object.freeze({
+export const MOTION = { // mutable: the Tweaks panel may change lostHold / lostFade / firstUse at runtime (read live)
   fast: 120, // fades, dim/undim, cancel (spec says ~100 ms; 120 is our floor)
   base: 150, // ring grow, confirm flash, chord-note line move
   slow: 200, // ladder slide, panel open
@@ -61,7 +61,7 @@ export const MOTION = Object.freeze({
   firstUse: 3000, // first-use labels
   lostHold: 1000, // "hand lost" ring + label stay fully visible this long...
   lostFade: 800, // ...then fade out over this long (real-camera feedback: a lingering ring isn't useful)
-});
+};
 
 /**
  * Setting confirmed (note set, octave, any Lead setting): spec "progress first, then a clear confirmed state".
@@ -69,12 +69,12 @@ export const MOTION = Object.freeze({
  * holdMs after the confirm, then fades out over fadeMs. Real-camera feedback: the old 150 ms flash + 0.5 s
  * linger disappeared before the player could read it.
  */
-export const CONFIRM = Object.freeze({
+export const CONFIRM = { // mutable: Tweaks may change holdMs / fadeMs at runtime (read live by confirmPhase)
   popMs: 150,
   popScale: 1.15,
   holdMs: 1000, // fully visible this long after the confirm (pop included)
   fadeMs: 300,
-});
+};
 
 /**
  * Where a confirmed-setting visual is `since` ms after the confirm.

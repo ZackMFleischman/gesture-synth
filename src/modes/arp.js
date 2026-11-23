@@ -47,12 +47,12 @@ export const PINCH_TEMPO = Object.freeze({
 // looks like a pinch forming (index curled, thumb tip near the index tip) waits PINCH_LOOKBACK_MS
 // (300 ms) instead: it reads 3 fingers for a few frames before the pinch is detected, and a 100 ms hold
 // alone would let an approach of > 100 ms through.
-export const VOICING_HOLD = Object.freeze({
+export const VOICING_HOLD = { // mutable: Tweaks may change MS at runtime (read live)
   /** ms a new count must be stable (normal shapes). */
   MS: CHORD_HOLD_TIME_MS,
   /** pinchDistance (hand sizes) below which a curled-index shape counts as a pinch approach. */
   APPROACH_DISTANCE: 0.8,
-});
+};
 
 /** Pure: is this frame a pinch forming (index curled, thumb tip near the index tip, not pinched yet)? */
 export function isPinchApproach(f) {
@@ -134,7 +134,7 @@ export function createArpMode() {
     entry.midi = currentNote(entry.pos);
     entry.handle = null;
     if (entry.midi == null) return;
-    if (ctx.audio.waveform) voice.waveform = ctx.audio.waveform;
+    voice.instrument = ctx.audio.instrument ? ctx.audio.instrument("base") : ctx.audio.waveform; // Sound menu / tone select
     entry.handle = voice.playStep(midiToHz(entry.midi), entry.time, entry.dur, params.gate.value, {
       midi: entry.midi,
       step: entry.step,
@@ -308,7 +308,7 @@ export function createArpMode() {
         pattern: ctx.param("arp/pattern", { type: "state", value: params?.pattern.value ?? "up" }),
         octaves: ctx.param("arp/octaves", { type: "state", value: params?.octaves.value ?? 1, min: 1, max: 3 }),
       };
-      voice = createArpVoice(ctx.audio.ac, ctx.audio.out, { waveform: ctx.audio.waveform, onNote, nextId: ctx.audio.nextNoteId });
+      voice = createArpVoice(ctx.audio.ac, ctx.audio.out, { instrument: ctx.audio.instrument?.("base") ?? ctx.audio.waveform, onNote, nextId: ctx.audio.nextNoteId });
       unsub = [ctx.clock.onStep(onStep), ctx.clock.onStepChange(onStepChange), ctx.clock.onStop(cancelPending)];
       thumbWas = null;
       resetPinch();

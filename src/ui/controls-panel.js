@@ -51,6 +51,8 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc, output
   panel.setAttribute("aria-label", "Screen controls");
   panel.innerHTML = `
     <span class="gs-k">Mode</span><span class="gs-v"><div class="gs-seg" data-control="mode" role="group" aria-label="Mode"></div></span>
+    <span class="gs-k" data-row="sound-base">Sound</span><span class="gs-v" data-row="sound-base"><select class="gs-select" data-control="sound-base" aria-label="Instrument"></select></span>
+    <span class="gs-k" data-row="sound-lead" hidden>Lead sound</span><span class="gs-v" data-row="sound-lead" hidden><select class="gs-select" data-control="sound-lead" aria-label="Lead instrument"></select></span>
     <div class="gs-sep"></div>
     <div class="gs-mode-host"></div>
     <div class="gs-sep"></div>
@@ -64,6 +66,40 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc, output
   const host = panel.querySelector(".gs-mode-host");
   const master = panel.querySelector('[data-control="master"]');
   const outputEl = panel.querySelector('[data-hook="output"]');
+
+  // ---- Sound: the base instrument (Chords / Arp) and, while the Lead layer is on, the lead's (instrument plugins:
+  // options from ctx.instruments(), the registry; same setting as the Sound menu and the tone select) ----
+  const soundSel = {
+    base: panel.querySelector('[data-control="sound-base"]'),
+    lead: panel.querySelector('[data-control="sound-lead"]'),
+  };
+  const leadRows = panel.querySelectorAll('[data-row="sound-lead"]');
+  let soundFor = "";
+  for (const [target, sel] of Object.entries(soundSel)) {
+    sel.addEventListener("change", () => ctx.audio?.setInstrument?.(target, sel.value));
+  }
+  function syncSound() {
+    const list = typeof ctx.instruments === "function" ? ctx.instruments() : [];
+    const key = list.map((d) => `${d.id}:${d.label}`).join(",");
+    if (key !== soundFor) {
+      soundFor = key;
+      for (const sel of Object.values(soundSel)) {
+        sel.innerHTML = "";
+        for (const d of list) {
+          const o = doc.createElement("option");
+          o.value = d.id;
+          o.textContent = d.label;
+          sel.append(o);
+        }
+      }
+    }
+    for (const [target, sel] of Object.entries(soundSel)) {
+      const v = ctx.audio?.instrument?.(target) ?? bus.get(`sound/${target}`);
+      if (v && sel.value !== v && doc.activeElement !== sel) sel.value = v;
+    }
+    const layer = !!S.layerId;
+    for (const r of leadRows) if (r.hidden === layer) r.hidden = !layer;
+  }
 
   // ---- Range (reach zone preset, bus `reach/range`) + sideways axes on/off (bus `<id>/on`, src/core/axes.js) ----
   const rangeSeg = panel.querySelector('[data-control="range"]');
@@ -337,6 +373,7 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc, output
     enforceOverrides();
     if (!isOpen()) return;
     buildSeg();
+    syncSound();
     for (const b of seg.children) {
       const on = b.dataset.value === (S.baseId ?? S.modeId) || b.dataset.value === S.layerId;
       if (b.classList.contains("on") !== on) {
