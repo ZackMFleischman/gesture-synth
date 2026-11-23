@@ -23,6 +23,8 @@ export function lostAlpha(ms) {
 }
 
 const MEET_PX = 6; // return state ends when the hand marker is this close to the held marker
+/** Loudspeaker with sound waves (24×24 path), drawn above the master-volume track. */
+const SPEAKER_ICON = "M4 10v4h3l5 4V6L7 10H4M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11";
 
 /** Track center x, moved in by the safe-area inset on that side (landscape notch; G.safe from mode-ui). */
 export function trackX(side, G) {
@@ -113,6 +115,29 @@ export function createEdgeTracks({ S, bus }) {
 
   /** One hand's track. o: {side, color, hand, lostNow, markerY, heldY, dim, guideTo, name} */
 
+  /** Small stroked icon (24×24 SVG path) centred at (cx, cy), with a dark halo so it reads over bright video. */
+  const iconPaths = new Map();
+  function drawTrackIcon(g, path, cx, cy, size = 16, alpha = 1) {
+    if (typeof Path2D === "undefined") return null;
+    let p = iconPaths.get(path);
+    if (!p) iconPaths.set(path, (p = new Path2D(path)));
+    const k = size / 24;
+    g.save();
+    g.globalAlpha *= alpha;
+    g.translate(cx - 12 * k, cy - 12 * k);
+    g.scale(k, k);
+    g.lineJoin = "round";
+    g.lineCap = "round";
+    g.lineWidth = 4.5 / k; // 4.5 px on screen
+    g.strokeStyle = COLORS.halo;
+    g.stroke(p);
+    g.lineWidth = 1.8 / k;
+    g.strokeStyle = COLORS.ink;
+    g.stroke(p);
+    g.restore();
+    return { x: cx - size / 2, y: cy - size / 2, w: size, h: size };
+  }
+
   function track(g, G, o) {
     const x = trackX(o.side, G);
     // What was drawn (read by tests through window.__gsTest.ui.tracks).
@@ -130,6 +155,11 @@ export function createEdgeTracks({ S, bus }) {
       fillY: o.fillY, guideTo: null,
     });
     G.reg(o.name, "edge", rect);
+    if (o.icon) {
+      const size = 20;
+      const cx = Math.max(size / 2 + 3, Math.min(G.W - size / 2 - 3, x)); // keep the whole icon on screen
+      G.reg(`${o.name}-icon`, "edge", drawTrackIcon(g, o.icon, cx, top - size / 2 - 6, size, o.dim ? 0.5 : 0.95));
+    }
     if (o.lostNow) lostFeedback(g, G, o.name, o.side, o.hand, o.markerY ?? G.H / 2);
     return rect;
   }
@@ -169,6 +199,7 @@ export function createEdgeTracks({ S, bus }) {
       name: "master-track",
       side: chordSide,
       color: COLORS.ink,
+      icon: SPEAKER_ICON, // tells players this track is the volume
       hand: L,
       lostNow: lLost,
       markerY: lY,
