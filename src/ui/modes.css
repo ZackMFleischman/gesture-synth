@@ -16,6 +16,7 @@ body.gs-modes {
   --gs-warn: #ff5a5f;
   --gs-good: #5ad17a;
   --gs-gutter: 20px;            /* LAYOUT.gutter in src/ui/theme.js */
+  --gs-left-col: 32px;          /* top-left control column: clears the speaker icon above the volume track */
   --gs-fast: 120ms;
   --gs-base: 150ms;
 }
@@ -26,11 +27,11 @@ body.gs-modes[data-mode="lead"] { --gs-mode: #c08cff; }
 body.gs-modes[data-layer="lead"] { --gs-mode: #c08cff; }
 
 /* R1: existing edge controls move in by 8px to free a 20px gutter for the edge tracks. */
+body.gs-modes #helpButton { left: var(--gs-gutter); }
 body.gs-modes #keySelect,
 body.gs-modes #toneSelect,
 body.gs-modes #guideToggle,
-body.gs-modes #gestureGuide,
-body.gs-modes #helpButton { left: var(--gs-gutter); }
+body.gs-modes #gestureGuide { left: var(--gs-left-col); }
 body.gs-modes #volumeMeter,
 body.gs-modes #distortionDisplay { right: var(--gs-gutter); }
 
@@ -86,7 +87,7 @@ body.gs-modes.gs-no-meter #volumeMeter { display: none; }
   z-index: 5;
   transition: color var(--gs-base), border-color var(--gs-base), background var(--gs-base);
 }
-#modeBadge { left: 110px; }
+#modeBadge { left: calc(110px + var(--gs-left-col) - var(--gs-gutter)); }
 .gs-badge .gs-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gs-mode); }
 #noteSetBadge { gap: 3px; padding: 0 9px; cursor: default; left: var(--gs-noteset-left, 200px); }
 #noteSetBadge.gs-flash { box-shadow: 0 0 0 2px #fff; animation: gs-confirm-pop 150ms ease-out; } /* CONFIRM.popMs/popScale */
@@ -109,7 +110,7 @@ body.gs-modes #outputPopover { top: 46px; right: var(--gs-gutter); }
 #controlsToggle {
   position: absolute;
   top: 90px;
-  left: calc(var(--gs-gutter) + 112px + 8px); /* guide toggle min-width + gap */
+  left: calc(var(--gs-left-col) + 112px + 8px); /* guide toggle min-width + gap */
   background: #1a1a1a;
   color: #e8a13d;
   border: 1px solid #3a3428;
@@ -126,8 +127,8 @@ body.gs-modes #outputPopover { top: 46px; right: var(--gs-gutter); }
 #controlsPanel {
   position: absolute;
   top: 128px;
-  left: var(--gs-gutter);
-  width: min(340px, calc(100vw - 2 * var(--gs-gutter)));
+  left: var(--gs-left-col);
+  width: min(340px, calc(100vw - var(--gs-left-col) - var(--gs-gutter)));
   max-height: calc(100dvh - 128px - 76px);
   overflow-y: auto;
   box-sizing: border-box;
