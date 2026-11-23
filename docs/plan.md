@@ -12,12 +12,25 @@ and is merged into the integration branch by the lead after its tests pass.
   progress page for you to try on the milestone dev instance.
 - Timebox: an agent stuck ~3 attempts on one problem stops, reports, and the lead re-plans around it.
 
+## Testing (cross-cutting; strategy in `docs/testing.md`)
+- Three layers: **unit** (Node, pure logic), **integration** (one subsystem in the browser, usually its lab page),
+  **e2e** (the real app via `?mockHands` / `?replay=`, plus a production-build smoke). Every page — the app and every
+  `labs/*.html` — has a smoke test that loads it with no errors and exercises one core interaction.
+- **Merge gate:** `npm run verify` (all layers + production build + no test hooks in `dist/`) must pass on the
+  workstream branch AND again on `feature/gesture-modes` after the merge. A red gate blocks the next merge.
+- A feature tested only in its lab is not done: each integration step owes an e2e test in the real app (listed under
+  "Owed by integration" in docs/testing.md and tracked on the progress page).
+- Visual baselines (`toHaveScreenshot`) for stable surfaces now; Arp/Lead/menu chrome gets baselines once integrated.
+- Real-hand recordings from `labs/gesture-test.html` become replay regression tests in `tests/fixtures/`.
+
 ## Waves
 | Wave | Workstreams (parallel) | Depends on |
 |---|---|---|
 | 1 | UI integration pass · Core refactor 0.1+0.2 · Radial menu component · Arp clock/engine | contracts |
 | 2 | Integrate menu (1.2) + Arp mode (1.1) onto refactor · Gesture test page + pinch/fist tuning (0.3) · Shared UI chrome from the UI spec (edge tracks, badge, beat bar, controls panel) + left height master volume (1.3) · Lead engine (pure) · WebRTC output skeleton (bus consumer, signaling server) | wave 1 |
 | 3 | Arp gestures 1.4 gate · 1.5 thumb x2 · 1.6 pinch tempo · Lead mode 2.1–2.5 integration · Output 3 (room code, chip, two channels, manifest, clock sync) + test visualizer page | wave 2 |
+| 2b | **Test architecture**: layer split, verify gate, page smoke for all pages, prod-build smoke, visual baselines | wave 1 merged |
+| 2c | **Mobile UI pass** — phase A: audit + compact/minimizable design + prototype (`docs/mobile-ui.md`, `labs/mobile-lab.html`); phase B: implement in the app after M1 UI merges | M1 UI |
 | 4 | End-to-end polish pass, help/guide content, full regression, milestone demos | all |
 
 ## Milestones (each ends with a dev instance for you to try)
