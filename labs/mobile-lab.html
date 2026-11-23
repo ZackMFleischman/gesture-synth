@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Gesture Synth Mobile Lab</title>
+<!-- Same base as labs/ui-lab.html: index.html's own <style> + markup are injected at runtime (ui-lab.js),
+     ui-lab.css = the planned modes chrome. The mobile system (src/ui/mobile/) is layered on top by mobile-lab.js. -->
+<link rel="stylesheet" href="./ui-lab.css" />
+<style>
+  /* Lab chrome only (never shipped). ui-lab's own bar is hidden (&clean); this one switches mobile states. */
+  #labBar { display: none; }
+  #mobileLabBar {
+    position: fixed; left: 50%; bottom: 4px; transform: translateX(-50%);
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 3px;
+    max-width: 96vw; padding: 4px; border-radius: 8px;
+    background: rgba(0,0,0,0.75); z-index: 60; font: 10px monospace;
+  }
+  #mobileLabBar a { color: #ccc; background: #222; border: 1px solid #444; border-radius: 3px; padding: 2px 5px; text-decoration: none; }
+  #mobileLabBar a.on { color: #111; background: #e8a13d; border-color: #e8a13d; }
+  body.mlab-clean #mobileLabBar { display: none; }
+</style>
+</head>
+<body>
+<div id="labBar"></div>
+<div id="mobileLabBar"></div>
+<script type="module" src="./mobile-lab.js"></script>
+</body>
+</html>
