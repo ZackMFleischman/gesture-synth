@@ -367,7 +367,8 @@ test.describe("Lead UX checks in the app", () => {
 test.describe("Lead with the menu and the master", () => {
   test("menu hold: the lead note stops, the ladder dims, the base (Chords) keeps playing and follows the chord; cancel returns", async ({ synthPage: page }) => {
     const y = 0.5;
-    await setHandsOn(page, SC.left(1), SC.preview(y));
+    await setHandsOn(page, SC.left(1), SC.open(2, y)); // Chords plays (the base under the Lead layer)
+    await page.waitForTimeout(300);
     await enterLeadByPanel(page);
     await setNoteSet(page, 2);
     await setHandsOn(page, SC.left(1), SC.preview(y));
