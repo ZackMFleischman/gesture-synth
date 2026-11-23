@@ -73,9 +73,11 @@
   const arp = createArpMode();
   const $ = (id) => document.getElementById(id);
 
-  // Test hooks: every step as the clock emitted it (index, play time, beat, step length).
+  // Test hooks: every step as the clock emitted it (index, play time, beat, step length, and `at` = the
+  // context time when it was emitted, so tests can tell a starved main thread from a scheduler error).
   const stepLog = [];
-  ctx.clock.onStep((i, time, info) => stepLog.push({ i, time, beat: info.beat, beats: info.stepBeats, dur: info.stepDur }));
+  ctx.clock.onStep((i, time, info) =>
+    stepLog.push({ i, time, beat: info.beat, beats: info.stepBeats, dur: info.stepDur, at: ctx.audio.ac.currentTime }));
 
   function start() {
     ctx.audio.ac.resume();
