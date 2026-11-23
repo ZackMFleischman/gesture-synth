@@ -133,8 +133,12 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
 - M1 wiring (ws/m1-wiring):
   - Audio graph: chord oscillators -> per-chord instance gain -> `chordGain` (Chords' right-height volume, `audio.setVolume`) ->
     `out` (PRE-FILTER waveshaper; every voice connects here) -> filter -> `master` (left height only, `audio.setMasterVolume`)
-    -> limiter (DynamicsCompressor, -6 dB, 20:1, 1 ms) -> soft clipper (|y| < 0.95) -> destination. Chord oscillators are
-    trimmed to `CHORD_LEVEL` 0.42 each.
+    -> limiter (DynamicsCompressor) -> soft clipper -> destination. Gain staging (ws/audio-gain-staging): steady playing
+    never reaches the limiter. `CHORD_LEVEL` 0.13 per oscillator: the worst chord at master 1 / right 1 / sawtooth / filter
+    fully open peaks at 0.67 (-3.5 dBFS) at the limiter input; Arp (gate 1, x2) ~0.5, Lead (lead + pad) ~0.36. Limiter
+    `LIMITER` = -2 dBFS, knee 1, 20:1, 1 ms attack, 100 ms release (transients only; its fixed makeup is +1.0 dB); soft clipper
+    linear to 0.9, |y| < 0.98, so the output never exceeds ±1. Loudness is linear in both volume controls
+    (`tests/gain-staging.e2e.spec.js`).
   - ctx.audio adds: `waveform` (getter), `chordGain`, `masterVolume`, `releaseChord(fadeS)` (equal-power fade of the Chords
     pad; the next `playChord` starts a fresh chord with a 30 ms fade-in), `setMasterVolume(v)` (router only), `nextNoteId()`.
     `setFilter(tilt)` also publishes `filter`.
@@ -148,7 +152,7 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
     `RESUME_MS` (200 ms). On confirm: `mode` is set, `old.exit()`, `new.enter()` (same frame = countdown start).
   - `harmony.voicing` is shared across modes (Chords and Arp read/write it). `VOICING_SEMITONES` / `voicingSemitones()` live in
     `src/services/harmony.js`; the createChordStabilizer() function has `.prime(state, now)`.
-  - Bus: `volume` = MASTER volume (left height; dead zone 0.04, ~140 ms smoothing, 0 at height <= 0.1, 1 at >= 0.7; 1 before a
+  - Bus: `volume` = MASTER volume (left height; dead zone 0.04, ~140 ms smoothing, 0 at height <= 0.1, 1 at >= 0.55 (`MASTER_VOLUME`); 1 before a
     left hand was seen). Chords' right height = `chords/volume`. `menu` (state): `{state, hoverId, selectedId, progress}` while
     open/countdown, `null` when closed. `right/held` (state, bool). `bpm` declared at startup. Note events carry
     `{freq, midi, voice, id}`; `note/on` pairs with `note/off` or `note/cancel` by the globally unique `id`.

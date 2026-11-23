@@ -2,7 +2,7 @@
 // changes (left height = master volume, right fist = menu), and sound continuity across mode switches.
 import fs from "node:fs";
 import { test, expect, SCREENS_DIR } from "./fixtures.js";
-import { hand, leftHand, rightHand, fist, DESKTOP_VIEW } from "./helpers/hands.js";
+import { hand, leftHand, rightHand, fist, DESKTOP_VIEW, masterAt } from "./helpers/hands.js";
 import { recordAudio, rms, writeWav } from "./helpers/audio.js";
 import { detectOnsets, noteLengths, peakAbs } from "./helpers/arp-analysis.js";
 
@@ -408,8 +408,8 @@ test.describe("1.3 left height = master volume", () => {
     const mid = await bus(page, "volume");
     await page.waitForTimeout(700);
     expect(mid).toBeGreaterThan(0.3);
-    expect(mid).toBeLessThan(2 / 3 - 0.02);
-    expect(await bus(page, "volume")).toBeCloseTo(2 / 3, 2);
+    expect(mid).toBeLessThan(masterAt(0.5) - 0.02);
+    expect(await bus(page, "volume")).toBeCloseTo(masterAt(0.5), 2);
   });
 
   test("master volume works in Arp too", async ({ synthPage: page, setHands }) => {
