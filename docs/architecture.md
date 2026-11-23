@@ -34,7 +34,8 @@ src/output/*             milestone 3 (WebRTC), lazy-loaded
 ## HandFrame (output of src/input/hand-input.js, one per visible hand per video frame)
 ```js
 /** @typedef {{
- *   handedness: "Left"|"Right",   // MediaPipe label; "Left" = chord hand (existing convention)
+ *   handedness: "Left"|"Right",   // MediaPipe label; "Left" = chord hand = the player's physical left hand
+ *                                 // (verified with a real camera); displayed on the screen LEFT (mirrored view)
  *   landmarks: {x,y,z}[],          // raw 21 MediaPipe landmarks (unmirrored image space)
  *   fingers: {thumb:boolean, index:boolean, middle:boolean, ring:boolean, pinky:boolean},
  *   fingerCount: number,           // incl. thumb (left-hand chord degree semantics)
@@ -277,7 +278,7 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
     right = gate / note cursor / ...), every mode and screen; hand size, extent, shape and distance never move it. No
     smoothing of the band (nothing to smooth), no presets: the Controls "Range" row, `reach/range`, `RANGE_PRESETS`,
     `handExtents`, `createZoneSmoother` and HandFrame `extents` are gone.
-  - Horizontal band (Drive / Space only) is fixed too: `BAND.INNER` 0.56 .. `BAND.OUTER` 0.9 on the right half,
+  - Horizontal band (Drive / Space only) is fixed too: `BAND.INNER` 0.56 .. `BAND.OUTER` 0.88 on the right half,
     mirrored on the left; dead zone unchanged (16 %).
   - `zoneFor(side)` -> {top, bottom, inner, outer, side}. Bus `left|right/zone` still published (same values; a new
     object only when the hand's display side changes) so consumers keep one source.
@@ -347,3 +348,13 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
   - Arp pinch feedback: tempo scale + big BPM level with the pinch point, to its LEFT on screen (scale next to the hand,
     plate further left), clear of the hand box; on the right only when the left has less room (pinch near the left edge).
     During the ~1 s linger after the release it keeps the last pinch point's offset from the palm.
+
+- Real screen sides (ws/real-sides, user-verified with a real camera): the chord ("Left") hand is the player's physical
+  left hand and shows on the screen LEFT (mirrored selfie view), the right hand on the screen RIGHT. So in real use the
+  master track is on the left edge; the right edge track, Lead ladder, filter arc, fist menu and BPM plate are on the
+  right half. App defaults already match it (`ui/sides` before any hand is seen = `{chord: "left", expr: "right"}`
+  from `S.chordSide = "left"` in src/ui/mode-ui.js; Lead's ladder edge = "right" when `ui/sides` is unpublished;
+  `handZones()` chord zone left). Synthetic hands (`tests/helpers/hands.js` `hand()`: "Left" at raw x 0.7 = display
+  0.3, "Right" at raw 0.3 = display 0.7), the tests' scenes and `npm run capture` use this orientation; the tests'
+  `swap` variants (and the labs' `&swap`) are the mirrored case (chord hand on the screen right). Hand-internal geometry
+  (thumb direction, tilt sign) is unchanged.

@@ -79,3 +79,8 @@ Node lives at `~/.local/node/bin` on this machine (not on the default PATH):
 - (fixed in M1) Output clipping: the master now has a limiter + soft clipper; `audio.spec.js › output never clips` passes.
 - Audio-continuity tests record through a main-thread ScriptProcessor tap; under heavy parallel load it can drop a render
   quantum (spike/gap on a 128-sample join). `tests/m1-integration.spec.js` ignores quantum joins; lab timing tests can flake.
+
+## Conventions: Tweaks
+- When trying out variations, any constant, threshold or behavior switch someone may want to adjust goes into the Tweaks panel
+  (`defineTweak` in `src/tweaks/`, shown with `?tweaks=true`), with an `info` explanation for the ⓘ tooltip. Defaults stay in code;
+  tweaks only apply when `?tweaks` is in the URL.

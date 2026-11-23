@@ -18,14 +18,14 @@ const EXISTING = [
 ];
 
 /**
- * Hands at realistic display positions. Default: chord hand on the screen right (the mock's MediaPipe
- * convention); `swap` puts it on the left. `right`: "open" | "pinch" | "fist" | null (not visible).
+ * Hands at realistic display positions. Default = real use: chord hand on the screen LEFT (selfie view);
+ * `swap` puts it on the screen right (the unusual case). `right`: "open" | "pinch" | "fist" | null (not visible).
  */
 function scene(vp, { swap = false, leftY = 0.57, rightY = 0.47, rightX, right = "open", rightOpts = {} } = {}) {
   const view = makeView(640, 480, vp.width, vp.height);
   const scale = vp.height > vp.width ? 0.8 : 1;
-  const lx = swap ? 0.25 : 0.75;
-  const rx = rightX ?? (swap ? 0.75 : 0.25);
+  const lx = swap ? 0.75 : 0.25;
+  const rx = rightX ?? (swap ? 0.25 : 0.75);
   const L = leftHand(4, { pos: { x: lx, y: leftY }, view, scale });
   if (right === null) return [L];
   const o = { pos: { x: rx, y: rightY }, view, scale, ...rightOpts };
@@ -104,14 +104,14 @@ for (const [vpName, vp] of Object.entries(VIEWPORTS)) {
     test.use({ viewport: vp });
 
     for (const swap of [false, true]) {
-      const tag = swap ? " (chord hand left)" : "";
+      const tag = swap ? " (chord hand right)" : "";
       const sfx = swap ? "-swap" : "";
 
       test(`chords-play${tag}`, async ({ synthPage: page, setHands }) => {
         await setHands(...scene(vp, { swap }));
         await expect(page.locator("#chordDisplay")).toHaveText("D(IV)");
         await frames(page, 4);
-        expect((await ui(page)).chordSide).toBe(swap ? "left" : "right");
+        expect((await ui(page)).chordSide).toBe(swap ? "right" : "left");
         await shot(page, `chords-play${sfx}`, vpName);
         checkLayout(await collectLayout(page, EXISTING), vp, { rightTrack: false });
       });
@@ -153,7 +153,7 @@ for (const [vpName, vp] of Object.entries(VIEWPORTS)) {
       await frames(page, 6);
       await setHands(...scene(vp, { right: "fist" }));
       await expect.poll(async () => (await ui(page)).menu.state).toBe("open");
-      await setHands(...scene(vp, { right: "fist", rightX: 0.25 + (vp.width < 520 ? 0.1 : 0.05) }));
+      await setHands(...scene(vp, { right: "fist", rightX: 0.75 + (vp.width < 520 ? 0.1 : 0.05) }));
       await frames(page, 8);
       await shot(page, "menu-open", vpName);
       const u = await ui(page);
@@ -254,9 +254,9 @@ test.describe("modes UI behavior", () => {
         await setHands(...scene(DESKTOP, { swap, leftY, rightY }));
         await frames(page, 4);
         const t = (await ui(page)).tracks;
-        const master = swap ? "left" : "right";
+        const master = swap ? "right" : "left";
         expect(t["master-track"].side).toBe(master);
-        expect(t["right-track"].side).toBe(swap ? "right" : "left");
+        expect(t["right-track"].side).toBe(swap ? "left" : "right");
         expect(Math.abs(t["master-track"].markerY - leftY * DESKTOP.height)).toBeLessThanOrEqual(4);
         expect(Math.abs(t["right-track"].markerY - rightY * DESKTOP.height)).toBeLessThanOrEqual(4);
         expect(t["right-track"].heldY).toBeNull();
@@ -311,15 +311,15 @@ test.describe("modes UI behavior", () => {
   test("tracks don't swap edges when one hand crosses the middle; they do once both hands swap", async ({ synthPage: page, setHands }) => {
     await setHands(...scene(DESKTOP));
     await frames(page, 4);
-    expect((await ui(page)).chordSide).toBe("right");
+    expect((await ui(page)).chordSide).toBe("left");
     const view = makeView(640, 480, 1280, 800);
-    await setHands(leftHand(4, { pos: { x: 0.3, y: 0.5 }, view })); // chord hand alone, reaching across
+    await setHands(leftHand(4, { pos: { x: 0.7, y: 0.5 }, view })); // chord hand alone, reaching across
     await page.waitForTimeout(800);
-    expect((await ui(page)).chordSide).toBe("right");
+    expect((await ui(page)).chordSide).toBe("left");
     await setHands(...scene(DESKTOP, { swap: true })); // a brief swap is ignored...
     await frames(page, 2);
-    expect((await ui(page)).chordSide).toBe("right");
-    await expect.poll(async () => (await ui(page)).chordSide, { timeout: 3000 }).toBe("left"); // ...a held one is not
+    expect((await ui(page)).chordSide).toBe("left");
+    await expect.poll(async () => (await ui(page)).chordSide, { timeout: 3000 }).toBe("right"); // ...a held one is not
   });
 
   test("Arp pinch holds the gate track and shows the tempo delta in the transport", async ({ synthPage: page, setHands }) => {

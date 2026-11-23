@@ -15,7 +15,7 @@
  *  INNER/OUTER: palm x for x 0 / 1 on the RIGHT half (mirrored on the left): starts a little past the middle (hands
  *  crossing the center is awkward and the other hand lives there) and ends where an ordinary open hand (the test hand at
  *  the desktop view) still fits whole in frame. */
-export const BAND = Object.freeze({ TOP: 0.125, BOTTOM: 0.875, INNER: 0.56, OUTER: 0.9 });
+export const BAND = Object.freeze({ TOP: 0.125, BOTTOM: 0.875, INNER: 0.56, OUTER: 0.88 });
 
 export const ZONE = Object.freeze({
   /** Neutral zone in the middle of the horizontal band, as a fraction of the band width. */

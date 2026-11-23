@@ -2,7 +2,8 @@
 
 Status: proposal from the UI pass (branch `ws/ui-pass`). Implement against this. Change requests go through the lead.
 Visual reference: `labs/ui-lab.html?state=<state>` (dev server). Add `&debug` to see the clear area and the boxes the
-layout test checks, `&swap` to put the chord hand on the screen right, `&bg=bright` for a bright room.
+layout test checks, `&swap` to put the chord hand on the screen right (the unusual case; real use = chord hand on the
+screen LEFT, see Q1), `&bg=bright` for a bright room.
 Tokens and canvas primitives: `src/ui/theme.js`. Layout contract test: `tests/ui-lab.spec.js`.
 
 User constraint this doc implements: *don't replace the current UI; augment it. The radial UI is new, but the
@@ -24,7 +25,7 @@ side elements must integrate with what exists.*
 | D8 | **Screen controls** = a `Controls` toggle on the third row (next to `Open Guide`) that opens a panel **in the same slot and style as the gesture guide**. Guide and panel are mutually exclusive. The spec's bottom-right "Settings" pill is dropped. | Extends the existing dropdown column (key, tone are already settings). Keeps the bottom free for the chord + transport. |
 | D9 | **Transport** (BPM, 4 beat dots, 8 step dots) is a small plate **centered just above the chord display**, Arp only. | Status at the bottom edge as the spec asks, tied to the chord it plays. Same position on desktop and mobile. |
 | D10 | **Edge tracks live in a 20px gutter.** The existing left column, help button, meter and readout move in by 8px (12 → 20px) via an additive, class-scoped CSS rule. | Full-height tracks need the screen edge; an 8px shift is the smallest change that gives them room without overlapping anything. |
-| D11 | **Tracks follow the hands, not the words "left/right"**: the master-volume track is on the screen edge where the chord hand is displayed. | See Q1: with MediaPipe's handedness convention the "Left" (chord) hand may render on the screen right. Layout works either way (tested with `&swap`). |
+| D11 | **Tracks follow the hands, not the words "left/right"**: the master-volume track is on the screen edge where the chord hand is displayed. | Real use (Q1, verified with a real camera): the chord ("Left") hand shows on the screen LEFT, so the master track is on the left edge and the right-hand control (track / Lead ladder) on the right. The rule still covers crossed hands; layout works either way (tested with `&swap` / the tests' `swap` scenes). |
 | D12 | **Connection chip** sits top right, left of the meter; on narrow screens (<520px) it collapses to its dot. It shows only once the output is turned on. | Fits the top-right status group without moving the meter. |
 
 ---
@@ -267,11 +268,13 @@ don't overlap each other; no persistent element (new or existing, except user-op
 
 ## 12. Open questions
 
-- **Q1 Which screen side is the chord hand?** `main.js` feeds the unmirrored video to MediaPipe, whose handedness
-  assumes a mirrored image, so the "Left" label likely belongs to the player's physical **right** hand, which the
-  mirrored display shows on the screen **right** (the mock helper also places "Left" at display x≈0.7). The spec
-  assumes master volume on the left edge. D11 makes the tracks follow the hand; someone with a camera should
-  confirm, and the lead should decide whether the help text "Left Hand" needs to say "chord hand".
+- **Q1 Which screen side is the chord hand?** RESOLVED (see the lead decisions below): the player's physical LEFT
+  hand is labelled "Left" and plays chords; the mirrored (selfie) display shows it on the screen **LEFT**, the right
+  hand on the screen **right**, as the spec assumed (master volume on the left edge). The original concern (MediaPipe
+  might label the physical right hand "Left") did not hold with a real camera. The mock helper
+  (`tests/helpers/hands.js` `hand()`) used to place "Left" at display x≈0.7 (screen right), so every synthetic scene
+  was mirrored vs reality; since ws/real-sides it places "Left" at display x≈0.3 (raw image x 0.7) and "Right" at
+  display x≈0.7. Tests' `swap` scenes now cover the unusual case (chord hand on the screen right).
 - **Q2** Should the meter in Arp show gate (D5) or the master/output level? Gate keeps "meter = what right height
   does"; output level would be more useful in Lead (where the meter is hidden now).
 - **Q3** Dropping the spec's bottom-right "Settings" pill in favor of the `Controls` toggle (D8): OK with the user?
@@ -281,7 +284,10 @@ don't overlap each other; no persistent element (new or existing, except user-op
 
 ## Lead decisions on the open questions (2026-11-22)
 - **Q1 chord-hand side — RESOLVED (user, real camera, 2026-11-22): the player's physical LEFT hand plays chords;
-  MediaPipe's "Left" label is correct as the app uses it. Help text "Left Hand" stays.** Original note: keep the hand-following rule (master track on the edge where the chord hand is displayed). It is correct
+  MediaPipe's "Left" label is correct as the app uses it, and the mirrored display shows the chord hand on the screen
+  LEFT (master track left edge; right-hand track, Lead ladder, filter arc, fist menu, BPM plate on the right half).
+  Synthetic test hands, the labs and `npm run capture` use this orientation; `swap` = the mirrored case. Help text
+  "Left Hand" stays.** Original note: keep the hand-following rule (master track on the edge where the chord hand is displayed). It is correct
   whichever way MediaPipe labels hands. Do not change help text ("Left Hand") until confirmed with a real camera; the user will check
   on the M1 instance.
 - **Q2 meter in Arp:** shows gate (the right-height control), as proposed.

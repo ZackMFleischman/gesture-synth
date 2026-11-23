@@ -50,3 +50,10 @@ and is merged into the integration branch by the lead after its tests pass.
 ## Dev instances
 - Live integration branch (hot reload as merges land): http://localhost:5173
 - Milestone snapshots (frozen worktrees): M0 http://localhost:5180 · M1 :5181 · M2 :5182 · M3 :5183
+
+## Queued after the current iteration (user, 2026-11-22)
+1. **Test-fix batch:** repair the tests broken while iterating fast (features first, tests after).
+2. **Test speed audit (subagent):** test speed is a resource to optimize. Remove duplicate / low-value tests and demo-capture
+   "tests"; move app-level checks of pure logic down to unit/integration; shorten long audio-timing captures where a shorter
+   window proves the same; split a fast default run from a slow full gate (e.g. `npm test` fast, `npm run verify` full).
+   Report time per layer before/after; target the everyday run under ~1 minute.

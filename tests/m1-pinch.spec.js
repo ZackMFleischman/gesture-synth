@@ -18,7 +18,7 @@ const TOL = 0.003; // ±3 ms (same as tests/arp.spec.js)
 test.describe.configure({ mode: "default" });
 
 // Display-space positions (DESKTOP_VIEW: fake camera 640x480 on a 1280x800 canvas).
-const R0 = { x: 0.3, y: 0.55 }; // right hand home (screen left: the video is mirrored)
+const R0 = { x: 0.7, y: 0.55 }; // right hand home (screen right, as in real use: mirrored selfie view)
 const at = (p) => ({ pos: p, view: DESKTOP_VIEW });
 const openRight = (q = 1, p = R0, o = {}) => rightHand(q, { ...at(p), ...o });
 const pinchAt = (p = R0, o = {}) => pinch({ ...at(p), ...o });

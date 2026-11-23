@@ -63,7 +63,8 @@ export function handGeometry(lm, view = placeView, { side } = {}) {
  * @param {number} opts.volume  desired HandFrame.height, 0..1 over the reach zone (the palm is placed at that height of
  *   the zone for the placement view: `view` if given, else setPlacementView()'s). Ignored if `pos` is given.
  * @param {number} opts.x  desired HandFrame.x (0 inner .. 0.5 neutral .. 1 outer of the horizontal band; `side`
- *   = screen half, default guessed from the palm). Omitted = the default x (0.3 / 0.7 of the image). Ignored with `pos`.
+ *   = screen half, default guessed from the palm). Omitted = the default x (raw image 0.7 for "Left" / 0.3 for
+ *   "Right" = display 0.3 / 0.7: chord hand on the screen left). Ignored with `pos`.
  * @param {boolean} opts.fist  tightly closed hand (index..pinky curled into the palm); thumb still follows `thumb`
  * @param {boolean|number} opts.pinch  thumb tip on the index tip; a number = desired pinchDistance
  *   (thumb-index distance / hand size), `true` = 0.1. Fingers default to middle+ring+pinky (an "OK" sign).
@@ -90,7 +91,9 @@ export function hand({
   if (fingers === undefined) fingers = pinch ? ["middle", "ring", "pinky"] : [];
   if (fist) fingers = [];
 
-  const cx = handedness === "Left" ? 0.3 : 0.7;
+  // Raw image x: the display is mirrored (x_display = 1 - x_raw), so the chord ("Left") hand at raw 0.7 shows on the
+  // screen LEFT (display x 0.3) and the "Right" hand on the screen RIGHT, as with a real camera (user-verified).
+  const cx = handedness === "Left" ? 0.7 : 0.3;
   const wristY = 0.95 - volume * 0.9;
   const s = scale;
   const mcpY = wristY - 0.15 * s;

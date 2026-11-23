@@ -24,7 +24,7 @@ test.describe("bus in the app", () => {
     expect(s.values["right/height"]).toBeCloseTo(0.75, 5);
     expect(s.values["right/tilt"]).toBeCloseTo(0.5, 5);
     expect(s.values["left/tilt"]).toBeCloseTo(0.6, 5);
-    expect(s.values["right/pos"].x).toBeLessThan(0.5); // mirrored: right hand shows on the left
+    expect(s.values["right/pos"].x).toBeGreaterThan(0.5); // mirrored selfie view: right hand shows on the right
     const names = s.manifest.map((m) => m.name);
     for (const n of ["mode", "chord", "voicing", "volume", "filter", "left/height", "right/pinch",
       "note/on", "note/off", "note/cancel", "menu", "right/held"]) {

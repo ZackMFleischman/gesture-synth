@@ -85,7 +85,7 @@ test.describe("reach zones: horizontal", () => {
     const r = zoneFor("right");
     const l = zoneFor("left");
     expect(r.inner).toBeCloseTo(0.56, 9);
-    expect(r.outer).toBeCloseTo(0.9, 9);
+    expect(r.outer).toBeCloseTo(0.88, 9);
     expect(l.inner).toBeCloseTo(1 - r.inner, 9);
     expect(l.outer).toBeCloseTo(1 - r.outer, 9);
     expect(xIn(r, 0.95)).toBe(1); // clamped beyond the outer end
@@ -143,12 +143,13 @@ test.describe("reach zones: hand input", () => {
     hi.process(results(leftHand(1), rightHand(2)), 2);
     expect(typeof bus.get("left/x")).toBe("number");
     expect(typeof bus.get("right/x")).toBe("number");
-    // helper default: left palm displays at x 0.7 (right half), right palm at 0.3 (left half)
+    // helper default (real use): left palm displays at x 0.3 (left half), right palm at 0.7 (right half)
+    expect(bus.get("left/zone").side).toBe("left");
+    expect(bus.get("right/zone").side).toBe("right");
+    bus.set("ui/sides", { chord: "right", expr: "left" }); // the UI's decision wins over the palm guess
+    hi.process(results(leftHand(1), rightHand(2)), 33);
     expect(bus.get("left/zone").side).toBe("right");
     expect(bus.get("right/zone").side).toBe("left");
-    bus.set("ui/sides", { chord: "left", expr: "right" });
-    hi.process(results(leftHand(1), rightHand(2)), 33);
-    expect(bus.get("left/zone").side).toBe("left");
     for (const side of ["left", "right"]) {
       expect(bus.get(`${side}/zone`).top).toBe(BAND.TOP);
       expect(bus.get(`${side}/zone`).bottom).toBe(BAND.BOTTOM);
