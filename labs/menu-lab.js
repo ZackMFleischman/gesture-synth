@@ -1,8 +1,8 @@
 // Radial menu lab: the mouse drives a fake right-hand HandFrame.
-//   mousedown = fist at the cursor, move = fist moves, mouseup = open hand.
+//   mousedown = fist at the cursor, move = fist moves (crossing an arc's outer edge selects it), mouseup = open hand.
 // URL flags: ?manualClock (time only advances via __menuLab.step(ms)), ?noCamera (dark backdrop only).
 
-import { createRadialMenu, playTick } from "../src/menu/radial-menu.js";
+import { createRadialMenu } from "../src/menu/radial-menu.js";
 import { listInstruments } from "../src/instruments/index.js";
 
 const params = new URLSearchParams(location.search);
@@ -54,7 +54,6 @@ const sizeVal = document.getElementById("sizeVal");
 const dropBtn = document.getElementById("drop");
 
 let currentId = "chords";
-let audio = null;
 const events = [];
 const pointer = { x: 0.5, y: 0.5, down: false, seen: false };
 let handSize = Number(sizeEl.value);
@@ -63,10 +62,6 @@ let dropped = false;
 const menu = createRadialMenu({
   items: ITEMS_FN,
   currentId: () => currentId,
-  onTick: () => {
-    log("tick");
-    if (audio) playTick(audio);
-  },
 });
 
 // ---- camera (Chrome fake camera in tests) or plain backdrop ---------------------------
@@ -99,11 +94,6 @@ canvas.addEventListener("pointerdown", (e) => {
   setPointer(e);
   pointer.down = true;
   canvas.setPointerCapture?.(e.pointerId);
-  if (!audio) {
-    try {
-      audio = new AudioContext();
-    } catch {}
-  }
 });
 const up = (e) => {
   if (e) setPointer(e);

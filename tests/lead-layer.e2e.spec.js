@@ -270,7 +270,7 @@ test("menu: Lead again = no change; the base underneath = layer off + Return cro
   expect(snap.currentId).toBe("lead");
   expect(snap.items).toEqual(expect.arrayContaining([
     { id: "lead", type: "layer", secondary: false, hint: null },
-    { id: "arp", type: "mode", secondary: true, hint: "Open hand: Lead off" },
+    { id: "arp", type: "mode", secondary: true, hint: "Lead off" },
     { id: "chords", type: "mode", secondary: false, hint: null },
   ]));
   await setHands(page, L1, SC.preview(Y)); // cancel (open in the centre)

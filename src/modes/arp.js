@@ -14,6 +14,7 @@ import { arpNoteAt, midiToHz, PATTERNS, PATTERN_LABELS } from "./arp-patterns.js
 import { RATES, MIN_BPM, MAX_BPM } from "../services/clock.js";
 import { drawEnergy } from "./chords.js";
 import { drawX2Pill, drawBpmPlate } from "../ui/hand-overlays.js";
+import { createSmoothers } from "../ui/smooth.js";
 import { COLORS, FONT, LAYOUT, MOTION, withAlpha, drawPlate } from "../ui/theme.js";
 import { PINCH_LOOKBACK_MS } from "../input/hand-input.js";
 import { CHORD_HOLD_TIME_MS } from "../services/harmony.js";
@@ -99,6 +100,7 @@ export function createArpMode() {
   const dblHistory = []; // { t, v } requested double time per frame (restored at a pinch start)
   let drawnTempo = null;
   let handBox = null; // last right HandFrame.box (display space), for the tempo feedback's clearance
+  const drawSmooth = createSmoothers(); // display-only smoothing of the at-hand feedback (x2 pill, tempo scale + BPM)
   // Pinch point + hand box relative to the palm (display units), from the last pinching frame: the lingering BPM
   // (~1 s after the release, when `right/pinchpt` is null) stays at the same place next to the hand.
   let tempoAnchor = null;
@@ -458,19 +460,28 @@ export function createArpMode() {
       const bus = c.bus;
       drawnTempo = null;
       // Under the Lead layer the right hand plays the lead: no Arp feedback at the hand (gate etc. are held).
-      if (!clock || bus.get("right/held") || c.layerBase) return;
-      const pos = bus.get("right/pos");
-      const size = bus.get("right/size");
-      if (!pos || !(size > 0)) return;
-      const p = c.toCanvas(pos);
       const now = performance.now();
+      const rawPos = bus.get("right/pos");
+      const rawSize = bus.get("right/size");
+      if (!clock || bus.get("right/held") || c.layerBase || !rawPos || !(rawSize > 0)) {
+        drawSmooth.reset();
+        return;
+      }
+      // Display-only smoothing of the at-hand feedback's anchors (src/ui/smooth.js); the gate / tempo math above
+      // uses the raw hand.
+      const pos = drawSmooth.get("pos", rawPos, now);
+      const size = drawSmooth.get("size", rawSize, now, "size");
+      const p = c.toCanvas(pos);
       if (shown && !pinch && now >= shown.until) shown = null;
       const tp = pinch || shown;
       if (tp) {
         const alpha = pinch ? 1 : Math.min(1, (shown.until - now) / MOTION.fast);
-        const pp = bus.get("right/pinchpt");
+        const rawPP = bus.get("right/pinchpt");
+        const pp = rawPP ? drawSmooth.get("pinchpt", rawPP, now) : drawSmooth.get("pinchpt", null, now);
         if (pinch && pp) {
-          const b = handBox;
+          const b0 = handBox ? drawSmooth.get("box0", { x: handBox.x0, y: handBox.y0 }, now) : null;
+          const b1 = handBox ? drawSmooth.get("box1", { x: handBox.x1, y: handBox.y1 }, now) : null;
+          const b = b0 && b1 ? { x0: b0.x, y0: b0.y, x1: b1.x, y1: b1.y } : null;
           tempoAnchor = {
             dx: pp.x - pos.x, dy: pp.y - pos.y,
             box: b ? { x0: b.x0 - pos.x, y0: b.y0 - pos.y, x1: b.x1 - pos.x, y1: b.y1 - pos.y } : null,

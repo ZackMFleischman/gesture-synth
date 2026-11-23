@@ -1,5 +1,7 @@
 // Radial menu sub-menus (level 1 rings) and setting items: pure state-machine unit tests (Node).
 // Spec: docs/spec/requirements.md "Sub-menu behavior". Lab (browser) tests: menu-lab.int.spec.js.
+// Auto-select: crossing an item's select radius chooses it (settings: flash; the current one: no change); a submenu arc
+// is never chosen, it opens its sub-ring after the SUB_OPEN_MS pass-through.
 import { test, expect } from "@playwright/test";
 import {
   createMenuState,
@@ -10,6 +12,7 @@ import {
   angDist,
   BACK_ID,
 } from "../src/menu/menu-state.js";
+import { setMenuConfig, resetMenuConfig } from "../src/menu/menu-config.js";
 
 const INSTRUMENTS = ["warm", "bright", "retro", "organ", "electric", "sax"].map((id) => ({ id, label: id }));
 // Fan order with the back sector up: up-left, left, down-left, down-right, right, up-right.
@@ -27,8 +30,7 @@ function makeItems({ current = () => "warm", children = INSTRUMENTS, setting = "
 }
 
 function rig({ items = makeItems(), current = "chords", aspect = 1, size = 0.1, x = 0.5, y = 0.35 } = {}) {
-  let ticks = 0;
-  const m = createMenuState({ items: () => items, currentId: () => current, onTick: () => ticks++, aspect });
+  const m = createMenuState({ items: () => items, currentId: () => current, aspect });
   const h = { fist: false, x, y, size, visible: true };
   let now = 1000;
   const frame = () =>
@@ -50,22 +52,24 @@ function rig({ items = makeItems(), current = "chords", aspect = 1, size = 0.1, 
     h.y = c.y + Math.sin((deg * Math.PI) / 180) * d * h.size * aspect;
   };
   const subCenter = () => m.snapshot().center;
+  /** Fist until the menu is open and its ring has grown in (selection armed). */
   const open = () => {
     h.fist = true;
-    return run(120);
+    return run(T.ENTER_STABLE_MS + T.LEVEL_ARM_MS + 32);
   };
-  /** Open the menu and go down through the Sound arc until the sub-ring opens. */
+  /** Open the menu, go down through the Sound arc until the sub-ring opens, hold still while it grows in. */
   const enterSub = () => {
     open();
     polar(90, PAST);
-    return run(T.SUB_OPEN_MS + 2 * DT);
+    run(T.SUB_OPEN_MS + 2 * DT);
+    return run(T.LEVEL_ARM_MS);
   };
   const release = () => {
     h.fist = false;
     return run(T.OPEN_DEBOUNCE_MS + DT);
   };
   const find = (k) => results.find((r) => r[k]);
-  return { m, h, run, polar, subCenter, open, enterSub, release, find, results, ticks: () => ticks };
+  return { m, h, run, polar, subCenter, open, enterSub, release, find, results };
 }
 
 test.describe("sub-ring layout", () => {
@@ -107,11 +111,14 @@ test.describe("sub-ring layout", () => {
 });
 
 test.describe("sub-menu state machine", () => {
-  test("a submenu arc selects like any arc but opening the hand on it changes nothing", () => {
+  test.afterEach(() => resetMenuConfig());
+
+  test("a submenu arc selects like any arc (no auto-select); opening the hand on it changes nothing", () => {
     const r = rig();
     r.open();
     r.polar(90, PAST);
     const res = r.run(3 * DT);
+    expect(res.state).toBe("open");
     expect(res.selectedId).toBe("sound");
     expect(res.level).toBe(0);
     expect(r.m.snapshot().subPending).toBeGreaterThan(0);
@@ -159,7 +166,26 @@ test.describe("sub-menu state machine", () => {
     expect(r.run(4 * DT).level).toBe(1);
   });
 
-  test("hover/select each instrument by direction in the sub-ring", () => {
+  test("follow-through: the fist overshooting down right after the sub-ring opens selects nothing while it grows", () => {
+    const r = rig();
+    r.open();
+    r.polar(90, PAST);
+    r.run(T.SUB_OPEN_MS + 2 * DT);
+    expect(r.results.at(-1).level).toBe(1);
+    const c = r.subCenter();
+    r.polar(80, PAST, c); // momentum carries the fist on into Organ (65°) within the grow time
+    let res = r.run(T.LEVEL_ARM_MS - 3 * DT);
+    expect(res.state).toBe("open");
+    expect(r.find("setting")).toBeUndefined();
+    // drawn back toward the center before the ring is armed: nothing was chosen
+    r.polar(80, G.DEAD_R * 0.5, c);
+    res = r.run(4 * DT);
+    expect(res.state).toBe("open");
+    expect(res.selectedId).toBe(null);
+    expect(r.find("setting")).toBeUndefined();
+  });
+
+  test("each instrument: hover by direction, crossing its radius auto-selects it (the current one = no change)", () => {
     for (const it of INSTRUMENTS) {
       const r = rig();
       r.enterSub();
@@ -171,22 +197,25 @@ test.describe("sub-menu state machine", () => {
       expect(res.progress).toBeGreaterThan(0);
       r.polar(ANGLE[it.id], PAST, c);
       res = r.run(DT);
-      expect(res.selectedId, it.id).toBe(it.id);
+      if (it.id === "warm") {
+        expect(res.state).toBe("closed");
+        expect(r.find("cancelled").reason).toBe("same-item");
+      } else {
+        expect(res.setting?.id, it.id).toBe(it.id);
+        expect(res.state).toBe("flash");
+      }
     }
   });
 
-  test("confirm a setting: flash only (no countdown), reports the value, then finished", () => {
+  test("auto-select a setting: flash only (no countdown), reports the value, then finished — the fist never opens", () => {
     const r = rig();
     r.enterSub();
-    const ticks0 = r.ticks();
     r.polar(ANGLE.electric, PAST, r.subCenter());
-    expect(r.run(DT).selectedId).toBe("electric");
-    expect(r.ticks()).toBe(ticks0 + 1);
-    const res = r.release();
-    const s = r.find("setting");
-    expect(s.setting).toEqual({ key: "sound/base", submenu: "sound", id: "electric", value: "electric" });
+    const res = r.run(DT);
+    expect(res.setting).toEqual({ key: "sound/base", submenu: "sound", id: "electric", value: "electric" });
     expect(r.find("confirmed")).toBeUndefined();
     expect(res.state).toBe("flash");
+    expect(r.h.fist).toBe(true);
     expect(r.m.isHoldingRight()).toBe(true);
     expect(r.m.snapshot().confirmKind).toBe("setting");
     expect(r.m.snapshot().confirmedItem.id).toBe("electric");
@@ -194,10 +223,12 @@ test.describe("sub-menu state machine", () => {
     expect(end.state).toBe("closed");
     expect(r.find("finished").finished).toBe("electric");
     expect(r.m.isHoldingRight()).toBe(false);
-    // the whole confirm is shorter than a mode change (no get-ready countdown)
+    // the whole confirm is shorter than a mode change (no countdown)
     const tSet = r.results.findIndex((x) => x.setting);
     const tFin = r.results.findIndex((x) => x.finished);
     expect((tFin - tSet) * DT).toBeLessThan(T.FLASH_MS + T.COUNTDOWN_MS);
+    // the still-held fist does not reopen the menu (cooldown)
+    expect(r.run(T.REARM_MS - 2 * T.FLASH_MS).state).toBe("closed");
   });
 
   test("setting value / key overrides: item.value and submenu.setting", () => {
@@ -207,21 +238,20 @@ test.describe("sub-menu state machine", () => {
     const a = r.m.snapshot().items.find((i) => i.id === "a");
     r.polar(a.angle, PAST, r.subCenter());
     r.run(DT);
-    r.release();
     expect(r.find("setting").setting).toEqual({ key: "sound", submenu: "sound", id: "a", value: 42 });
   });
 
-  test("selecting the current value changes nothing ('same-item')", () => {
+  test("crossing the current value changes nothing ('same-item')", () => {
     const r = rig();
     r.enterSub();
     r.polar(ANGLE.warm, PAST, r.subCenter());
-    expect(r.run(DT).selectedId).toBe("warm");
-    r.release();
+    const res = r.run(DT);
+    expect(res.state).toBe("closed");
     expect(r.find("cancelled").reason).toBe("same-item");
     expect(r.find("setting")).toBeUndefined();
   });
 
-  test("open hand anywhere else in the sub-ring cancels all levels", () => {
+  test("open hand anywhere in the sub-ring before choosing cancels all levels", () => {
     const r = rig();
     r.enterSub();
     r.polar(ANGLE.retro, (G.DEAD_R + G.SELECT_R) / 2, r.subCenter()); // approaching only
@@ -256,64 +286,60 @@ test.describe("sub-menu state machine", () => {
     expect(res.selectedId).toBe(null);
     // the fist is back near the main center: the sub-ring does not re-open by itself
     expect(r.run(T.SUB_OPEN_MS * 2).level).toBe(0);
-    // but other arcs work, and the Sound arc opens again when passed through
-    r.polar(0, PAST);
-    expect(r.run(DT).selectedId).toBe("arp");
+    // the Sound arc opens again when passed through
     r.polar(90, PAST);
     expect(r.run(T.SUB_OPEN_MS + 2 * DT).level).toBe(1);
   });
 
-  test("going back then confirming a mode works across levels", () => {
+  test("going back then crossing a mode arc confirms it across levels", () => {
     const r = rig();
     r.enterSub();
     r.polar(-90, G.BACK_R + 0.05, r.subCenter());
     r.run(DT);
+    expect(r.find("back")).toBeTruthy();
+    r.run(T.LEVEL_ARM_MS); // the main ring re-grows
     r.polar(180, PAST);
-    expect(r.run(DT).selectedId).toBe("lead");
-    r.release();
-    expect(r.find("confirmed").confirmed).toBe("lead");
-    expect(r.results.at(-1).state).toBe("countdown");
+    const res = r.run(DT);
+    expect(res.confirmed).toBe("lead");
+    expect(res.state).toBe("countdown");
   });
 
-  test("sector hysteresis in the sub-ring: jitter across a boundary neither flips nor re-ticks", () => {
+  test("sector hysteresis in the sub-ring: jitter across a boundary keeps the hover; crossing picks that arc", () => {
     const r = rig();
     r.enterSub();
     const c = r.subCenter();
-    r.polar(ANGLE.retro, PAST, c);
-    expect(r.run(DT).selectedId).toBe("retro");
-    const t0 = r.ticks();
+    const APPROACH = (G.DEAD_R + G.SELECT_R) / 2;
+    r.polar(ANGLE.retro, APPROACH, c);
+    expect(r.run(DT).hoverId).toBe("retro");
     for (const a of [138, 143, 147, 141, 149, 136]) {
-      r.polar(a, PAST, c); // boundary retro|bright is 140; band is ±10
-      expect(r.run(DT).selectedId, `angle ${a}`).toBe("retro");
+      r.polar(a, APPROACH, c); // boundary retro|bright is 140; band is ±10
+      expect(r.run(DT).hoverId, `angle ${a}`).toBe("retro");
     }
-    expect(r.ticks()).toBe(t0);
-    r.polar(155, PAST, c);
-    expect(r.run(DT).selectedId).toBe("bright");
-    expect(r.ticks()).toBe(t0 + 1);
+    r.polar(147, PAST, c); // past the radius inside the hysteresis band: still Retro
+    expect(r.run(DT).setting?.id).toBe("retro");
   });
 
-  test("radial hysteresis in the sub-ring: stays selected until back inside DESELECT_R", () => {
+  test("jitter around the radius in the sub-ring fires once", () => {
     const r = rig();
     r.enterSub();
     const c = r.subCenter();
-    r.polar(ANGLE.organ, PAST, c);
-    expect(r.run(DT).selectedId).toBe("organ");
-    r.polar(ANGLE.organ, G.DESELECT_R + 0.03, c);
-    expect(r.run(DT).selectedId).toBe("organ");
-    r.polar(ANGLE.organ, G.DESELECT_R - 0.05, c);
-    expect(r.run(DT).selectedId).toBe(null);
+    for (let i = 0; i < 30; i++) {
+      r.polar(ANGLE.organ, G.SELECT_R + (i % 2 ? 0.02 : -0.02), c);
+      r.run(DT);
+    }
+    expect(r.results.filter((x) => x.setting).length).toBe(1);
+    expect(r.find("setting").setting.id).toBe("organ");
   });
 
   test("tracking lost in the sub-ring: kept for the grace period, then everything cancels", () => {
     const r = rig();
     r.enterSub();
-    r.polar(ANGLE.sax, PAST, r.subCenter());
+    r.polar(ANGLE.sax, (G.DEAD_R + G.SELECT_R) / 2, r.subCenter());
     r.run(DT);
     r.h.visible = false;
     let res = r.run(T.LOST_GRACE_MS - 50);
     expect(res.state).toBe("open");
     expect(res.level).toBe(1);
-    expect(res.selectedId).toBe("sax");
     res = r.run(80);
     expect(res.state).toBe("closed");
     expect(r.find("cancelled").reason).toBe("tracking-lost");
@@ -331,7 +357,7 @@ test.describe("sub-menu state machine", () => {
       expect(res.progress).toBeCloseTo(0.5, 5);
       r.polar(ANGLE.bright, PAST, c);
       res = r.run(DT);
-      expect(res.selectedId, `size ${size}`).toBe("bright");
+      expect(res.setting?.id, `size ${size}`).toBe("bright");
       expect(r.m.snapshot().dist).toBeCloseTo(PAST, 5);
     }
   });
@@ -352,7 +378,7 @@ test.describe("sub-menu state machine", () => {
     const c = r.subCenter();
     expect(c.y).toBeGreaterThan(0.95);
     r.polar(ANGLE.electric, PAST, c);
-    expect(r.run(DT).selectedId).toBe("electric");
+    expect(r.run(DT).setting?.id).toBe("electric");
     expect(r.m.snapshot().offset.x).toBeCloseTo(Math.cos((15 * Math.PI) / 180) * PAST * 0.1, 6);
   });
 
@@ -377,10 +403,10 @@ test.describe("sub-menu state machine", () => {
     expect(r.m.snapshot().items.length).toBe(G.MAX_SUB_ITEMS);
   });
 
-  test("a flickering open hand in the sub-ring does not confirm (debounce)", () => {
+  test("a flickering open hand in the sub-ring does not cancel (debounce)", () => {
     const r = rig();
     r.enterSub();
-    r.polar(ANGLE.organ, PAST, r.subCenter());
+    r.polar(ANGLE.organ, (G.DEAD_R + G.SELECT_R) / 2, r.subCenter());
     r.run(DT);
     r.h.fist = false;
     r.run(DT);
@@ -388,6 +414,17 @@ test.describe("sub-menu state machine", () => {
     const res = r.run(64);
     expect(res.state).toBe("open");
     expect(res.level).toBe(1);
-    expect(res.selectedId).toBe("organ");
+    expect(res.hoverId).toBe("organ");
+  });
+
+  test("requireRelease (live config): the sub-ring item is only selected; opening the hand sets it", () => {
+    setMenuConfig({ requireRelease: true });
+    const r = rig();
+    r.enterSub();
+    r.polar(ANGLE.electric, PAST, r.subCenter());
+    expect(r.run(DT).selectedId).toBe("electric");
+    expect(r.find("setting")).toBeUndefined();
+    r.release();
+    expect(r.find("setting").setting.id).toBe("electric");
   });
 });

@@ -14,6 +14,7 @@
 
 import { COLORS, FONT, STROKE, deg, drawArc, drawPill, drawPlate, drawLabel, withAlpha } from "./theme.js";
 import { AXES, isAxisOn } from "../core/axes.js";
+import { createSmoothers } from "./smooth.js";
 
 // Sideways axes (src/core/axes.js: right x = Drive, left x = Space): a short horizontal tick scale under each palm,
 // running from the band's inner end (towards the screen middle) to its outer end. Middle segment = the neutral dead
@@ -28,6 +29,10 @@ const AXIS_DEAD = 0.16; // drawn dead-zone width, fraction of the scale (= ZONE.
 const ARC_CLEARANCE = 0.12;
 
 export function createHandOverlays({ S, bus }) {
+  // Display-only smoothing (src/ui/smooth.js) of what follows the hand here: the arc's dot (filter value), its anchor
+  // above the fingertips (right/top), the axis dots. The audio filter keeps following the raw tilt; positions come
+  // already smoothed from S.drawPos().
+  const sm = createSmoothers();
   function drawAxis(g, G, a) {
     if (!isAxisOn(bus, a)) return; // experimental, off by default (src/core/axes.js)
     const side = a.hand;
@@ -77,7 +82,7 @@ export function createHandOverlays({ S, bus }) {
     g.lineWidth = STROKE.hair;
     g.stroke();
     // fill from the dead zone to the amount, then the dot at the hand's position across the band
-    const dotU = Math.max(0, Math.min(1, h.x));
+    const dotU = Math.max(0, Math.min(1, sm.get(`${side}/x`, h.x, S.now)));
     if (active) {
       g.beginPath();
       g.moveTo(at(0.5 + AXIS_DEAD / 2), y);
@@ -121,17 +126,22 @@ export function createHandOverlays({ S, bus }) {
     S.filterLabel = null; // rect of the value label this frame (first-use labels stack above it)
     drawAxes(g, G);
     const pos = S.drawPos("right");
-    if (!pos || S.menu.state !== "closed") return;
-    if (S.filter == null) return;
+    if (!pos || S.menu.state !== "closed" || S.filter == null) {
+      sm.reset("filter");
+      sm.reset("right/top");
+      return;
+    }
+    const filterDot = sm.get("filter", S.filter, S.now, "filter");
+    const top = S.hands.right.top ? sm.get("right/top", S.hands.right.top, S.now) : null;
     const p = G.toPx(pos);
     const r = G.hs * 0.55;
     if (S.palmCovered(p, G.hs)) return;
     // Arc ends (at ±30° below horizontal from the center) sit ARC_CLEARANCE above the highest fingertip.
-    const tipY = S.hands.right.top ? G.toPx(S.hands.right.top).y : p.y - G.hs * 0.8;
+    const tipY = top ? G.toPx(top).y : p.y - G.hs * 0.8;
     const cy = Math.min(tipY, p.y) - G.hs * ARC_CLEARANCE + r * Math.sin(deg(30));
     const box = { x: p.x - r - 6, y: cy - r - 6, w: 2 * r + 12, h: r * 0.5 + 12 };
     const held = S.rightHeld || S.rightReturn;
-    const dotAt = (1 - Math.max(-1, Math.min(1, S.filter))) / 2;
+    const dotAt = (1 - Math.max(-1, Math.min(1, filterDot))) / 2; // the text below shows the exact value
     drawArc(g, {
       cx: p.x, cy, r, a0: deg(-150), a1: deg(-30),
       color: "rgba(243, 239, 231, 0.72)", lineWidth: STROKE.thin, alpha: held ? 0.45 : 1,

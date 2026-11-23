@@ -11,18 +11,34 @@
 //   level 1 = a sub-ring, opened by moving the fist THROUGH a submenu arc. Its children (setting items)
 //             are spread as a fan over everything except a narrow "back" sector that points toward the
 //             parent ring. Moving into the back sector goes back one level.
-// Nothing changes until the hand opens: open on a selected item = confirm, anywhere else = cancel all levels.
+// Auto-select (user feedback 2026-11-22): moving the fist past the select radius (SELECT_R) of an arc CONFIRMS it at
+// once — no open-hand confirm and no sound. A mode / layer arc -> flash + countdown, a setting -> flash, the current
+// item -> closes quietly (no change), a submenu arc -> its sub-ring opens after the SUB_OPEN_MS pass-through.
+// Opening the hand before anything was chosen = cancel (all levels). After ANY close the menu re-opens only once the
+// hand was seen not-fist, or REARM_MS (2 s) after the close with the fist still held (then the usual ENTER_STABLE_MS).
+//
+// Live config (src/menu/menu-config.js, read every frame): radii, cooldown, countdown, plus `requireRelease` (true =
+// the earlier flow: crossing selects, opening the hand confirms) and `holdMs` (auto-select only: the fist must stay past
+// the select radius this long first). MENU_TIMING / MENU_GEOMETRY below are the defaults; createMenuState's
+// `timing` / `geometry` options win over the live config for that instance.
+
+import { menuConfig } from "./menu-config.js";
 
 /** Timings in ms. */
 export const MENU_TIMING = Object.freeze({
   ENTER_STABLE_MS: 100, // fist must be held this long (continuously) before the menu opens
-  OPEN_DEBOUNCE_MS: 30, // hand must read "not fist" this long before it counts as opened (~2 frames)
+  OPEN_DEBOUNCE_MS: 30, // hand must read "not fist" this long before it counts as opened (~2 frames) -> cancel
+  REARM_MS: 2000, // after a close, a fist that never opened re-opens the menu only this long after the close
+  LEVEL_ARM_MS: 150, // a ring (main / sub / main after "back") selects nothing until it has grown (= GROW_MS)
   GROW_MS: 150, // ring grows from the fist (also: sub-ring grows, parent shrinks to the breadcrumb)
   FLASH_MS: 150, // confirmed arc flashes (a setting confirm is only this flash: nothing about the right hand changes)
-  COUNTDOWN_MS: 400, // "get ready" ring closes around the hand (after the flash; mode items only)
+  COUNTDOWN_MS: 400, // after the flash: the chosen arc fades out, right hand still held (mode items only)
   CANCEL_FADE_MS: 100, // ring fades on cancel
   LOST_GRACE_MS: 300, // tracking lost while open: keep the menu this long, then cancel
-  SUB_OPEN_MS: 150, // fist past the outer edge of a submenu arc this long -> the sub-ring opens
+  // Fist past the outer edge of a submenu arc this long -> the sub-ring opens. Kept as a dwell (not immediate at the
+  // threshold): the sub-ring is centered on the fist, so opening mid-motion would let the follow-through carry the fist
+  // straight into a down-facing instrument (the 65° / 115° sectors meet straight down) and auto-select it.
+  SUB_OPEN_MS: 150,
 });
 
 /** Radii as multiples of the entry hand size (wrist -> middle MCP). The sub-ring uses the same radii. */
@@ -31,7 +47,7 @@ export const MENU_GEOMETRY = Object.freeze({
   DEAD_R: 0.22, // center dead zone: no arc lit inside this radius
   INNER_R: 0.3, // drawn inner edge of the arcs (fill starts here)
   SELECT_R: 0.6, // select radius ~ 0.6 hand width; drawn outer edge of the arcs
-  DESELECT_R: 0.44, // hysteresis: once selected, stays selected until the fist is back inside this
+  DESELECT_R: 0.44, // hysteresis (submenu arcs, the only ones that stay "selected"): selected until back inside this
   SECTOR_HYST_DEG: 10, // angular hysteresis between neighbouring directions (capped at 20% of a sector)
   BACK_SPAN_DEG: 60, // sub-ring: width of the "back" sector (toward the parent ring)
   BACK_R: 0.6, // sub-ring: fist this far into the back sector -> back to the parent ring
@@ -44,11 +60,12 @@ const DIR_NAMES = Object.keys(DIRECTIONS);
 export const BACK_ID = "__back";
 
 /**
- * Item types. confirm() decides what opening the hand on a selected item does:
+ * Item types. confirm() decides what crossing the select radius of an item does (auto-select):
  *   "countdown" -> confirmed (mode change): flash + get-ready countdown, then closed     result.confirmed
  *   "flash"     -> value picked (setting): flash only, then closed                       result.setting
- *   "same"      -> no change (closes like a cancel, reason "same-item")
- *   "cancel"    -> no change (reason "submenu": a submenu arc only opens by moving through it)
+ *   "same"      -> no change (closes quietly, reason "same-item")
+ *   "cancel"    -> no change (submenu arcs: never confirmed; they open their sub-ring by moving through;
+ *                  opening the hand while one is selected = cancel, reason "submenu")
  * `submenu: true` marks a type whose `items` open as a sub-ring.
  * "layer" = a mode that plays on top of the current one (Lead): same rule as "mode".
  * Generic item metadata (all optional): `secondary: true` = also running, under the current item (hollow
@@ -121,22 +138,39 @@ export function fanLayout(n, backAngle, backSpan = MENU_GEOMETRY.BACK_SPAN_DEG) 
  * @param {{
  *   items: () => object[],
  *   currentId: () => string,
- *   onTick?: () => void,
  *   aspect?: number | (() => number),   // canvas width / height; default 1 (radial-menu.js sets it from draw())
  *   timing?: Partial<typeof MENU_TIMING>,
  *   geometry?: Partial<typeof MENU_GEOMETRY>,
  * }} opts
  */
 export function createMenuState(opts) {
-  const T = { ...MENU_TIMING, ...opts.timing };
-  const G = { ...MENU_GEOMETRY, ...opts.geometry };
+  // Re-read every update(): the live config (menu-config.js) may change between frames.
+  const liveTiming = () => ({
+    ...MENU_TIMING,
+    REARM_MS: menuConfig.cooldownMs,
+    COUNTDOWN_MS: menuConfig.countdownMs,
+    HOLD_MS: menuConfig.holdMs,
+    ...opts.timing,
+  });
+  const liveGeometry = () => ({
+    ...MENU_GEOMETRY,
+    DEAD_R: menuConfig.deadR,
+    INNER_R: menuConfig.innerR,
+    SELECT_R: menuConfig.selectR,
+    DESELECT_R: menuConfig.deselectR,
+    ...opts.geometry,
+  });
+  let T = liveTiming();
+  let G = liveGeometry();
+  let requireRelease = !!menuConfig.requireRelease;
   let aspectOpt = opts.aspect ?? 1;
   const getAspect = () => (typeof aspectOpt === "function" ? aspectOpt() : aspectOpt) || 1;
 
   // phase: "idle" (closed) | "open" | "confirm" (flash [+ countdown]; reported as "countdown" or "flash")
   let phase = "idle";
   let now = 0;
-  let armed = true; // a fist only opens the menu after the hand was seen open since the last close
+  let armed = true; // a fist opens the menu only after the hand was seen open since the last close (or REARM_MS passed)
+  let seenOpen = false; // hand seen not-fist since the selection (during the flash / countdown): re-armed at once
   let fistSince = null;
   let entrySizeSum = 0;
   let entrySizeN = 0;
@@ -158,6 +192,7 @@ export function createMenuState(opts) {
   let levelAt = 0; // when the current level started (open / sub-open / back)
   let levelFrom = null; // "sub" | "back" | null
   let passSince = null; // fist beyond the outer edge of a selected submenu arc since
+  let holdSince = null; // holdMs > 0: fist past the select radius of the selected (committable) item since
 
   // Ring: { center, items, slots, currentId, host, back, offset, dist, angle, hoverKey, hoverId, progress, selectedId, selectedAt }
   function makeRing(center, items, slots, currentId, host = null, back = null) {
@@ -228,12 +263,14 @@ export function createMenuState(opts) {
     main = makeRing({ ...handPos }, out, slots, opts.currentId?.() ?? null);
     sub = null;
     passSince = null;
+    holdSince = null;
     lostSince = null;
     openSince = null;
     confirmedId = null;
     confirmedItem = null;
     confirmKind = null;
     closeReason = null;
+    seenOpen = false;
   }
 
   function openSub(host) {
@@ -254,27 +291,23 @@ export function createMenuState(opts) {
     main.hoverKey = null;
   }
 
-  function close(reason) {
+  /** handOpen: the close comes from the hand opening (it is seen open now -> re-armed at once). */
+  function close(reason, handOpen = false) {
     phase = "idle";
     closedAt = now;
     closeReason = reason;
     fistSince = null;
     passSince = null;
+    holdSince = null;
     entrySizeSum = entrySizeN = 0;
-    if (reason === "tracking-lost") armed = false;
+    // Re-arm: at once if the hand was seen open since the selection, else on the next not-fist frame or REARM_MS.
+    armed = handOpen || (reason === "done" && seenOpen);
   }
 
   function select(rg, id) {
     if (rg.selectedId === id) return;
     rg.selectedId = id;
-    if (id) {
-      rg.selectedAt = now;
-      try {
-        opts.onTick?.();
-      } catch (e) {
-        console.error(e);
-      }
-    }
+    if (id) rg.selectedAt = now;
   }
 
   function measure(rg) {
@@ -303,13 +336,68 @@ export function createMenuState(opts) {
     rg.hoverId = item ? item.id : null;
     rg.progress = item ? Math.min(1, Math.max(0, (rg.dist - G.DEAD_R) / (G.SELECT_R - G.DEAD_R))) : 0;
 
+    // A ring selects nothing while it is still growing in (LEVEL_ARM_MS): e.g. the follow-through after a sub-ring
+    // opened under a moving fist.
+    const past = selectable && rg.dist >= G.SELECT_R && now - levelAt >= T.LEVEL_ARM_MS;
     if (rg.selectedId) {
       if (rg.dist < G.DESELECT_R) select(rg, null);
-      else if (rg.hoverId !== rg.selectedId) select(rg, selectable && rg.dist >= G.SELECT_R ? rg.hoverId : null);
-    } else if (selectable && rg.dist >= G.SELECT_R) {
+      else if (rg.hoverId !== rg.selectedId) select(rg, past ? rg.hoverId : null);
+    } else if (past) {
       select(rg, rg.hoverId);
     }
     return slot;
+  }
+
+  /**
+   * Choose the ring's selected (non-submenu) item: auto-select (the fist crossed its select radius) or, with
+   * requireRelease, the hand opening on it (handOpen).
+   */
+  function commit(rg, handOpen = false) {
+    const item = rg.items.find((i) => i.id === rg.selectedId);
+    const result = getMenuItemType(item.type).confirm(item, { currentId: rg.currentId, parent: rg.host });
+    if (result === "countdown" || result === "flash") {
+      phase = "confirm";
+      confirmedId = rg.selectedId;
+      confirmedItem = item;
+      confirmedAt = now;
+      confirmKind = result === "flash" ? "setting" : "mode";
+      seenOpen = handOpen;
+      if (result === "countdown") return { confirmed: confirmedId };
+      const host = rg.host;
+      return {
+        setting: {
+          key: host?.setting ?? host?.id ?? null, // what is being set (e.g. "sound/lead")
+          submenu: host?.id ?? null,
+          id: item.id,
+          value: item.value ?? item.id,
+        },
+      };
+    }
+    close("same-item", handOpen);
+    return { cancelled: true, reason: "same-item" };
+  }
+
+  /**
+   * Auto-select gate for the ring's selected (committable) item: true once it may be chosen. holdMs > 0 = the fist must
+   * have stayed past the select radius that long (dropping inside the radius, or another item, restarts the hold).
+   */
+  function holdDone(rg) {
+    if (rg.dist < G.SELECT_R) {
+      holdSince = null;
+      return false;
+    }
+    if (holdSince === null || holdSince.id !== rg.selectedId || holdSince.level !== (sub ? 1 : 0)) {
+      holdSince = { id: rg.selectedId, level: sub ? 1 : 0, t: now };
+    }
+    return now - holdSince.t >= (T.HOLD_MS || 0);
+  }
+
+  /** Does crossing the ring's selected item act at once? Everything except a submenu arc (or a type that says "cancel"). */
+  function committable(rg) {
+    if (!rg.selectedId) return false;
+    const item = rg.items.find((i) => i.id === rg.selectedId);
+    const type = item && getMenuItemType(item.type);
+    return !!type && !type.submenu && type.confirm(item, { currentId: rg.currentId, parent: rg.host }) !== "cancel";
   }
 
   function track(right) {
@@ -322,9 +410,11 @@ export function createMenuState(opts) {
         trackRing(main);
         return { back: true };
       }
-      return null;
+      return autoCommit(sub);
     }
     trackRing(main);
+    const ev = autoCommit(main);
+    if (ev) return ev;
     // Pass-through: a selected submenu arc opens its sub-ring once the fist stays past its outer edge.
     const selItem = main.selectedId ? main.items.find((i) => i.id === main.selectedId) : null;
     if (selItem && getMenuItemType(selItem.type)?.submenu && main.dist >= G.SELECT_R && main.hoverId === selItem.id) {
@@ -337,38 +427,25 @@ export function createMenuState(opts) {
     return null;
   }
 
+  /** Auto-select (requireRelease off): commit the selected item once its hold (holdMs) is done. */
+  function autoCommit(rg) {
+    if (requireRelease || !committable(rg)) {
+      holdSince = null;
+      return null;
+    }
+    return holdDone(rg) ? commit(rg) : null;
+  }
+
+  /**
+   * The hand opened. Auto-select: nothing was chosen yet -> cancel all levels (a submenu arc may still be selected:
+   * reason "submenu"). requireRelease: a selected item is confirmed now (the earlier flow), else cancel.
+   */
   function release() {
     const rg = ring();
-    if (!rg.selectedId) {
-      close("empty");
-      return { cancelled: true, reason: "empty" };
-    }
-    const item = rg.items.find((i) => i.id === rg.selectedId);
-    const result = getMenuItemType(item.type).confirm(item, { currentId: rg.currentId, parent: rg.host });
-    if (result === "countdown" || result === "flash") {
-      phase = "confirm";
-      confirmedId = rg.selectedId;
-      confirmedItem = item;
-      confirmedAt = now;
-      confirmKind = result === "flash" ? "setting" : "mode";
-      armed = false; // re-armed once the hand is seen open during/after the countdown
-      if (result === "countdown") return { confirmed: confirmedId };
-      const host = rg.host;
-      return {
-        setting: {
-          key: host?.setting ?? host?.id ?? null, // what is being set (e.g. "sound/lead")
-          submenu: host?.id ?? null,
-          id: item.id,
-          value: item.value ?? item.id,
-        },
-      };
-    }
-    if (result === "cancel") {
-      close("submenu");
-      return { cancelled: true, reason: "submenu" };
-    }
-    close("same-item");
-    return { cancelled: true, reason: "same-item" };
+    if (requireRelease && committable(rg)) return commit(rg, true);
+    const reason = rg.selectedId ? "submenu" : "empty";
+    close(reason, true);
+    return { cancelled: true, reason };
   }
 
   function result(extra) {
@@ -392,10 +469,15 @@ export function createMenuState(opts) {
     /** @param {object|null} right HandFrame of the right hand (or null) @param {number} t ms */
     update(right, t) {
       now = t;
+      T = liveTiming();
+      G = liveGeometry();
+      requireRelease = !!menuConfig.requireRelease;
       const hand = right && right.pos ? right : null;
 
       if (phase === "idle") {
         if (hand && hand.fist) {
+          // Cooldown: a fist held since the close re-opens the menu only REARM_MS after it.
+          if (!armed && now - closedAt >= T.REARM_MS) armed = true;
           if (!armed) return result();
           if (fistSince === null) {
             fistSince = now;
@@ -440,7 +522,7 @@ export function createMenuState(opts) {
       // phase === "confirm"
       if (hand) {
         handPos = { x: hand.pos.x, y: hand.pos.y };
-        if (!hand.fist) armed = true;
+        if (!hand.fist) seenOpen = true;
       }
       if (now - confirmedAt >= confirmMs()) {
         close("done");
@@ -501,6 +583,15 @@ export function createMenuState(opts) {
         selectedId: rg ? rg.selectedId : null,
         selectedAt: rg ? rg.selectedAt : 0,
         subPending: live && !sub && passSince !== null ? Math.min(1, (now - passSince) / T.SUB_OPEN_MS) : 0,
+        // holdMs > 0: 0..1 while the fist holds past the select radius of `holdId` (the rim fills), else 0
+        holdId: live && holdSince && rg && holdSince.id === rg.selectedId ? holdSince.id : null,
+        holdProgress:
+          live && holdSince && rg && holdSince.id === rg.selectedId
+            ? T.HOLD_MS > 0
+              ? Math.min(1, (now - holdSince.t) / T.HOLD_MS)
+              : 1
+            : 0,
+        requireRelease,
         parent: sub ? { ...ringView(main), hostId: sub.host.id } : null,
         levelAt,
         levelFrom,
@@ -520,8 +611,10 @@ export function createMenuState(opts) {
     reset() {
       phase = "idle";
       armed = true;
+      seenOpen = false;
       fistSince = null;
       passSince = null;
+      holdSince = null;
       sub = null;
       closedAt = -Infinity;
       closeReason = null;
