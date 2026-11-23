@@ -209,3 +209,24 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
   beat grid carries `rate`/`double` and is re-sent on every scheduled beat. Chip: hidden while output is off, pressing it
   opens Controls (`setPressHandler`, `newRoom`, `onStatus`), `data-gs-kind="status"`.
 - Hand input publishes `left|right/top`: the highest fingertip in display space (the filter arc anchors above it).
+- Radial menu sub-menus + settings (ws/sound-menu, generic, `src/menu/*` only):
+  - Item types: `mode`, `submenu` (`{…, items: SettingItem[] | () => SettingItem[], current?: () => id, setting?: key}`),
+    `setting` (`{id, label, icon?, color? (default: the submenu's color), value? (default: id)}`). Max 2 levels (a submenu
+    inside a submenu is dropped; at most `MAX_SUB_ITEMS` 8 children). Children are resolved when the sub-ring opens.
+  - Sub-ring: opens when a selected submenu arc has the fist past its outer edge (`SELECT_R`) for `SUB_OPEN_MS` 150 ms
+    (dipping back inside restarts the timer); center = the fist at that moment; same radii as the main ring. Children
+    form a fan over 360° minus the back sector (`BACK_SPAN_DEG` 60°, pointing at the parent): list order starts next to
+    the back sector, counter-clockwise on screen. 6 children under a down arc -> 50° sectors centered at -145 (up-left),
+    165, 115, 65, 15, -35 (up-right); none straight down. Sector hysteresis = min(10°, 20% of the span).
+    The fist reaching `BACK_R` (0.6) inside the back sector = back one level (main ring re-grows at its own entry point,
+    selection cleared). The parent ring shrinks to a breadcrumb beyond the back sector ("Back" caption).
+  - `update()` result adds `level` (0|1), `path` ([] | [submenuId]), `entered` (submenu id, frame the sub-ring opens),
+    `back` (true), `setting: {key, submenu, id, value}` (open hand on a setting; `key` = `submenu.setting ?? submenu.id`),
+    reason `"submenu"` (open hand on a submenu arc = no change), state `"flash"` (setting confirm: FLASH_MS only, no
+    countdown — the right hand's controls don't change; then `finished`). `confirmed` stays mode-only. hoverId/selectedId
+    are ids within the active ring. Snapshot: active ring at top level + `level`, `slots`, `back`, `host`, `hoverBack`,
+    `subPending` (0..1), `parent` (main ring + `hostId`), `levelAt`, `levelFrom`, `confirmKind`, `confirmedItem`.
+  - Pure helpers exported: `fanLayout(n, backAngle, backSpan)`, `pickSlot(angle, slots, prevKey, hyst)`, `BACK_ID`.
+  - Drawing: an arc with a sub-menu has an outward chevron on its outer edge (slides out while passing through; hint
+    "Keep going to open"); the sub-ring's back sector is a short dashed neutral arc; a setting confirm shows the picked
+    value pill at the hand (~0.4 s) instead of the countdown ring. Lab: `labs/menu-lab.html` (down = "Sound", 6 instruments).
