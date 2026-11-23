@@ -3,7 +3,7 @@
 // pure logic in src/modes/lead-notes.js.
 import { test as base, expect } from "@playwright/test";
 import { recordAudio, spectrum, peaks, writeWav, rms } from "./helpers/audio.js";
-import { leftHand, pinch, DESKTOP_VIEW } from "./helpers/hands.js";
+import { leftHand, rightHand, pinch, DESKTOP_VIEW } from "./helpers/hands.js";
 import { test, SCREENS, rh, preview, play, setHands, dbg, yFor, settle, setKey, setNoteSet, snapWhen } from "./helpers/lead-lab.js";
 import { makeView } from "../src/input/hand-input.js";
 import {
@@ -775,6 +775,40 @@ test.describe("audio quality", () => {
     }
     expect(peak).toBeGreaterThan(0.05);
     expect(peak, "output peak (>1 clips)").toBeLessThanOrEqual(1);
+  });
+});
+
+test.describe("mode switch", () => {
+  test("Chords -> Lead: the left hand keeps sounding (drone crossfades into the pad, no gap); Lead -> Chords works", async ({ lab: page }) => {
+    await page.evaluate(() => window.__gsTest.router.setMode("chords"));
+    await setHands(page, leftHand(1), rightHand(2, { volume: 0.5 }));
+    await settle(page, 500);
+    expect(await page.evaluate(() => window.__gsTest.synth.oscillators.length)).toBe(4);
+    await page.evaluate(() => { window.__audioCap.chunks = []; window.__audioCap.recording = true; });
+    await page.waitForTimeout(300);
+    await page.evaluate(() => window.__gsTest.router.setMode("lead"));
+    await setHands(page, leftHand(1), preview(0.5));
+    await page.waitForTimeout(900);
+    const { chunks, sampleRate } = await page.evaluate(() => {
+      window.__audioCap.recording = false;
+      return { chunks: window.__audioCap.chunks, sampleRate: window.__audioCap.sampleRate };
+    });
+    const samples = Float32Array.from(chunks.flat());
+    writeWav(`${AUDIO_DIR}/lead-switch-from-chords.wav`, samples, sampleRate);
+    const env = envelope(samples, Math.round(sampleRate * 0.01));
+    const padLevel = env.slice(-20).reduce((a, b) => a + b, 0) / 20;
+    expect(padLevel).toBeGreaterThan(0.005);
+    // from the switch to the end, the level never drops below half the final pad level (no gap)
+    const switchAt = Math.floor(0.25 / 0.01);
+    expect(Math.min(...env.slice(switchAt))).toBeGreaterThan(padLevel * 0.5);
+    expect(await page.evaluate(() => window.__gsTest.synth.oscillators.length)).toBe(0);
+    expect((await dbg(page)).pad.length).toBe(4);
+    // and back: Chords plays its drone again, the Lead voices are released
+    await page.evaluate(() => window.__gsTest.router.setMode("chords"));
+    await setHands(page, leftHand(1), rightHand(2, { volume: 0.5 }));
+    await settle(page, 400);
+    expect(await page.evaluate(() => window.__gsTest.synth.oscillators.length)).toBe(4);
+    expect((await dbg(page)).pad.length).toBe(0);
   });
 });
 

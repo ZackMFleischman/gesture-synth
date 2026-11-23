@@ -76,7 +76,7 @@ const S = ctrl.state;
 let voice = null;
 let filterParam = null;
 let masterApplied = null;
-let droneHandoffAt = null;
+const DRONE_FADE_TAU = 0.08;
 let padChord = undefined;
 let padApplied = false;
 let lastGeo = ladderGeometry(1280, 800);
@@ -114,28 +114,46 @@ function ensureParams(ctx) {
   });
 }
 
-/** Master volume: after leaving Chords, the drone is silenced (Chords.exit ramps master to 0), then stopped. */
+/**
+ * Hand-off from Chords without a gap: the Chords drone oscillators (wired straight into ctx.audio.out) are
+ * re-routed through a local fade gain and faded out under the pad, then stopped. audio.js has no per-voice
+ * gain for the drone yet (proposed change: a chord-voice gain node + synth.releaseChord(fadeS)).
+ */
+function handoffDrone(ctx) {
+  const synth = ctx.audio.synth;
+  const ac = ctx.audio.ac;
+  if (!synth || !ac || !synth.oscillators || !synth.oscillators.length) return;
+  const oscs = synth.oscillators;
+  if (typeof synth._emitOff === "function") synth._emitOff(oscs);
+  synth.oscillators = [];
+  synth.currentKey = null; // Chords re-creates its drone when it becomes active again
+  const t = ac.currentTime;
+  const fade = ac.createGain();
+  fade.gain.setValueAtTime(1, t);
+  fade.gain.setTargetAtTime(0, t, DRONE_FADE_TAU);
+  fade.connect(ctx.audio.out);
+  for (const o of oscs) {
+    try { o.disconnect(); } catch {}
+    o.connect(fade);
+    o.stop(t + DRONE_FADE_TAU * 8);
+  }
+  oscs[0].onended = () => { try { fade.disconnect(); } catch {} };
+  masterApplied = null; // re-apply master (cancels Chords' exit ramp to 0)
+}
+
+/** Master volume = ctx.masterVolume (1 until milestone 1.3 provides it). */
 function applyMaster(ctx) {
   const ac = ctx.audio.ac;
   const master = ctx.audio.master;
   if (!ac || !master) return;
-  const synth = ctx.audio.synth;
-  if (droneHandoffAt == null && synth && synth.oscillators && synth.oscillators.length) {
-    droneHandoffAt = ac.currentTime + 0.07; // let Chords' 50 ms fade finish
-  }
-  if (droneHandoffAt != null) {
-    if (ac.currentTime < droneHandoffAt) return;
-    if (synth && synth.oscillators.length) synth.stop();
-    droneHandoffAt = null;
-    masterApplied = null;
-  }
+  handoffDrone(ctx);
   const target = Math.max(0, Math.min(1, ctx.masterVolume ?? 1));
   if (masterApplied !== null && Math.abs(target - masterApplied) < 0.002) return;
   const t = ac.currentTime;
   const g = master.gain;
   if (typeof g.cancelAndHoldAtTime === "function") g.cancelAndHoldAtTime(t);
   else { const v = g.value; g.cancelScheduledValues(t); g.setValueAtTime(v, t); }
-  g.setTargetAtTime(target, t, 0.03);
+  g.setTargetAtTime(target, t, 0.05);
   masterApplied = target;
 }
 
@@ -359,7 +377,6 @@ const lead = {
     ensureParams(ctx);
     if (!voice) voice = createLeadVoice(ctx.audio, { bus: ctx.bus });
     masterApplied = null;
-    droneHandoffAt = null;
     padChord = undefined;
     padApplied = false;
     ctx.bus.set("lead/noteset", S.setId);

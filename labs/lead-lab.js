@@ -11,6 +11,7 @@ import { createAppContext } from "../src/core/app-context.js";
 import { makeView } from "../src/input/hand-input.js";
 import { drawFrame } from "../src/ui/overlay.js";
 import lead from "../src/modes/lead.js";
+import chordsMode from "../src/modes/chords.js";
 
 const stageEl = document.getElementById("stage");
 const videoEl = document.getElementById("webcam");
@@ -66,6 +67,8 @@ startEl.addEventListener("click", () => {
   startEl.style.display = "none";
 });
 
+// Chords is registered too (not active) so the Chords -> Lead hand-off can be tested here.
+registerMode(chordsMode);
 registerMode(lead);
 router.setMode("lead");
 
