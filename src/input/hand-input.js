@@ -348,6 +348,9 @@ export function createHandInput({ bus = sharedBus } = {}) {
     bus.declare(side.pinch, { type: "state", owner: "hand-input" });
     bus.declare(side.size, { type: "continuous", owner: "hand-input" }); // handSize, display-height units
   }
+  // `/gs/pinch` event: 1 when the right (mode) hand starts a pinch, 0 at release (or when the pinching
+  // hand is lost). Shared here so every mode gets it with no code.
+  bus.declare("pinch", { type: "event", owner: "hand-input" });
 
   const state = { Left: newHandState(), Right: newHandState() };
   let view = IDENTITY_VIEW;
@@ -386,6 +389,7 @@ export function createHandInput({ bus = sharedBus } = {}) {
     /** @param results HandLandmarker.detectForVideo() output */
     process(results, t) {
       const frames = [];
+      const wasRightPinch = state.Right.pinch;
       let left = null;
       let right = null;
       results.landmarks.forEach((landmarks, i) => {
@@ -401,6 +405,8 @@ export function createHandInput({ bus = sharedBus } = {}) {
       }
       publish("Left", left);
       publish("Right", right);
+      const rightPinch = !!(right && right.pinch);
+      if (rightPinch !== wasRightPinch) bus.emit("pinch", rightPinch ? 1 : 0);
       return { frames, left, right };
     },
   };

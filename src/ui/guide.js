@@ -78,7 +78,10 @@ export function createGuide({ S, doc }) {
       firstUseUntil = S.now + MOTION.firstUse;
     }
     if (!labels) firstUseUntil = 0;
-    visible = !!labels && (S.now < firstUseUntil || S.guideOpen) && !!S.drawPos("right") && S.menu.state === "closed";
+    // Hidden during an Arp pinch (S.rightHeld with the menu closed): the tempo scale + big BPM are the
+    // feedback at the hand then, and "Pinch: tempo" has done its job.
+    const pinching = S.rightHeld && S.menu.state === "closed";
+    visible = !!labels && (S.now < firstUseUntil || S.guideOpen) && !!S.drawPos("right") && S.menu.state === "closed" && !pinching;
   }
 
   function draw(g, G) {
