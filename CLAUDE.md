@@ -24,6 +24,10 @@ Node lives at `~/.local/node/bin` on this machine (not on the default PATH):
 - `npm run dev` — dev server (http://localhost:5173). `.claude/launch.json` has a `gesture-synth` preview config.
 - `npm test` — full Playwright suite (headless system Google Chrome, fake webcam). ~20s.
   - `npm run test:ui` (UI + gesture mapping), `npm run test:audio`, `npm run test:smoke` (real MediaPipe, needs network).
+- `npm run signal` — visualizer output signaling/relay server (ws://localhost:5417; `SIGNAL_PORT`). Turn the output
+  on via the chip at the top right, open `/labs/visualizer.html`, type the code. `?signal=ws://…` overrides the
+  server, `?outputRelay` forces the WebSocket relay. Output code: `src/output/` (webrtc-output.js is lazy-loaded).
+  Tests start the server on `PW_SIGNAL_PORT` (default PW_PORT + 200).
 
 ## How to verify changes yourself
 - **Gestures without a camera:** open `/?mockHands` (dev server only). MediaPipe is skipped and
