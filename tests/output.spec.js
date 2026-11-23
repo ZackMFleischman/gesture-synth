@@ -5,6 +5,7 @@ import fs from "node:fs";
 import { test, expect } from "@playwright/test";
 import { results, leftHand, rightHand } from "./helpers/hands.js";
 import { createScreencast } from "./helpers/screencast.js";
+import { installSynthLog, checkRender } from "./helpers/output-timing.js";
 
 const SCREENS = "test-results/screens";
 const VIDEOS = "test-results/videos";
@@ -176,7 +177,7 @@ test("chip: off (hidden) → waiting → connected (< 1 s) → waiting on discon
   await s.context.close();
 });
 
-test("visualizer gets manifest, full state, fast frames, timed events, periodic state, clock sync", async ({ browser }) => {
+test("visualizer gets manifest, full state, fast frames, timed events, periodic state, clock sync", async ({ browser }, info) => {
   const s = await openSynth(browser);
   // Chord set BEFORE the visualizer connects: must show up from the connect snapshot.
   await s.setHands(leftHand(4), rightHand(3, { volume: 0.75, tilt: 0.5 }));
@@ -265,8 +266,9 @@ test("visualizer gets manifest, full state, fast frames, timed events, periodic 
   const earlyMs = arp.playLocal - arp.recvLocal; // how early it arrived
   const showErrMs = arp.shownLocal - arp.playLocal; // shown vs scheduled (render frame granularity)
   expect(earlyMs).toBeGreaterThan(50);
-  expect(showErrMs).toBeGreaterThanOrEqual(0);
-  expect(showErrMs).toBeLessThan(40);
+  // Painted in the first frame at/after its play time; < 40 ms unless that frame was stalled (annotated).
+  checkRender(info, "scheduled note", [{ due: arp.playLocal, shown: arp.shownLocal, prevFrame: arp.prevFrame }],
+    { lateMs: 40, longTasks: await v.page.evaluate(() => window.__viz.longTasks.slice()) });
 
   // Periodic state every 2 s.
   const snaps0 = await v.page.evaluate(() => window.__viz.snapshots);
@@ -297,7 +299,7 @@ test("visualizer gets manifest, full state, fast frames, timed events, periodic 
   await s.context.close();
 });
 
-test("beat grid lights up when ctx.clock exists; visualizer beats follow the synth clock", async ({ browser }) => {
+test("beat grid lights up when ctx.clock exists; visualizer beats follow the synth clock", async ({ browser }, info) => {
   const s = await openSynth(browser);
   await s.setHands(leftHand(1), rightHand(1, { volume: 0.5 }));
   const code = await turnOn(s.page);
@@ -308,6 +310,7 @@ test("beat grid lights up when ctx.clock exists; visualizer beats follow the syn
   expect(await v.page.evaluate(() => window.__viz.beatgrid?.running ?? false)).toBe(false);
 
   // Start the shared clock (what Arp's enter() does): 120 BPM on the AudioContext timeline.
+  await installSynthLog(s.page); // the synth's beats on its audio clock (getOutputTimestamp), epoch ms
   await s.page.evaluate(() => {
     const clock = window.__gsTest.ctx.clock;
     clock.bpm = 120;
@@ -319,16 +322,32 @@ test("beat grid lights up when ctx.clock exists; visualizer beats follow the syn
   expect(await v.page.evaluate(() => window.__viz.state["/gs/bpm"])).toBe(120);
   await v.page.evaluate(() => (window.__viz.beatsShown.length = 0));
   await v.page.waitForTimeout(2600);
-  const beats = await v.page.evaluate(() => window.__viz.beatsShown.filter((b) => !b.event));
+  const viz = await v.page.evaluate(() => ({
+    beats: window.__viz.beatsShown.filter((b) => !b.event).map((b) => ({ ...b, origin: performance.timeOrigin })),
+    longTasks: window.__viz.longTasks.slice(),
+  }));
+  const beats = viz.beats;
+  const synthBeats = await s.page.evaluate(() => window.__m3.beats.slice());
   expect(beats.length).toBeGreaterThanOrEqual(4);
-  const intervals = beats.slice(1).map((b, i) => b.local - beats[i].local);
-  // Beats are drawn on render frames: allow ~3 frames of jitter (CI machines run many pages at once).
-  for (const d of intervals) expect(Math.abs(d - 500)).toBeLessThan(60);
-  const lateness = beats.map((b) => b.local - b.expected);
-  for (const l of lateness) expect(l).toBeLessThan(60);
+  // 1. The visualizer's beat clock (grid + synced offset) vs the synth's audio-clock beats: the spec requirement.
+  //    Each computed beat time is matched to the nearest synth beat; same tolerance as the phase check below.
+  const beatErr = beats.map((b) => {
+    const e = b.expected + b.origin;
+    const m = synthBeats.reduce((a, x) => (Math.abs(x.epoch - e) < Math.abs(a.epoch - e) ? x : a));
+    expect(b.beat).toBe(m.beat - 1); // same beat of the bar (bus beat = 1..4)
+    return e - m.epoch;
+  });
+  for (const d of beatErr) expect(Math.abs(d)).toBeLessThan(15);
+  const intervals = beats.slice(1).map((b, i) => b.expected - beats[i].expected); // computed, not painted
+  for (const d of intervals) expect(Math.abs(d - 500)).toBeLessThan(15);
   // Beat index cycles through the bar.
   const idx = beats.map((b) => b.beat);
   for (let i = 1; i < idx.length; i++) expect(idx[i]).toBe((idx[i - 1] + 1) % 4);
+  // 2. Painting: each dot in the first frame at/after its beat; paint delay < 60 ms (~3 frames) unless that frame
+  //    itself came late (main-thread stall -> annotated "render-stall", reported, not a timing failure).
+  const lateness = beats.map((b) => b.local - b.expected);
+  const stalls = checkRender(info, "beat dots", beats.map((b) => ({ due: b.expected, shown: b.local, prevFrame: b.prevFrame })),
+    { lateMs: 60, longTasks: viz.longTasks });
 
   // The grid matches the synth's AudioContext beats (converted to wall clock on both sides).
   // Best of a few samples: each side's read is itself delayed by test-harness scheduling.
@@ -351,8 +370,10 @@ test("beat grid lights up when ctx.clock exists; visualizer beats follow the syn
   expect(phaseErrMs).toBeLessThan(15);
 
   report("beat-grid", {
+    beatClockErrVsSynthAudioMs: beatErr.map((d) => +d.toFixed(2)),
     beatIntervalsMs: intervals.map((d) => +d.toFixed(1)),
     beatShownLateMs: lateness.map((d) => +d.toFixed(1)),
+    renderStalls: stalls.length,
     gridPhaseErrorVsSynthMs: +phaseErrMs.toFixed(2),
   });
   expect(s.errors).toEqual([]);

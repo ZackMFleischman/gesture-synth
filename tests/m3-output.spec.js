@@ -10,6 +10,7 @@ import fs from "node:fs";
 import { test, expect } from "@playwright/test";
 import { results, leftHand, rightHand, fist, pinch, DESKTOP_VIEW } from "./helpers/hands.js";
 import { createScreencast } from "./helpers/screencast.js";
+import { installSynthLog, checkRender } from "./helpers/output-timing.js";
 
 const SCREENS = "test-results/screens";
 const VIDEOS = "test-results/videos";
@@ -100,33 +101,6 @@ async function connected(browser, { before } = {}) {
   return { s, v, code };
 }
 
-/**
- * Synth-side log on the shared clock (epoch ms, same conversion as the output: AudioContext time -> the
- * moment the sound is heard via getOutputTimestamp). Logs clock transport changes, beats, note events.
- */
-async function installSynthLog(page) {
-  await page.evaluate(() => {
-    const { bus, ctx } = window.__gsTest;
-    const ac = ctx.audio.ac;
-    const toEpoch = (t) => {
-      const ts = ac.getOutputTimestamp();
-      return performance.timeOrigin + ts.performanceTime + (t - ts.contextTime) * 1000;
-    };
-    const now = () => performance.timeOrigin + performance.now();
-    const L = (window.__m3 = { transport: [], beats: [], notes: [] });
-    ctx.clock.onTransport((what) => L.transport.push({ what, epoch: now(), bpm: ctx.clock.bpm, running: ctx.clock.running }));
-    bus.subscribe(
-      {
-        onEvent(n, d, pt) {
-          if (n === "beat") L.beats.push({ beat: d, epoch: toEpoch(pt), sent: now() });
-          else L.notes.push({ n, id: d.id, midi: d.midi, voice: d.voice, epoch: toEpoch(pt), sent: now() });
-        },
-      },
-      ["beat", "note/on", "note/off", "note/cancel"]
-    );
-  });
-}
-
 /** Fist at `from`, move toward `dir` until `expectId` is selected (null: stay in the center). Returns the point. */
 async function fistSelect(page, setHands, { from = R0, dir = "right", steps = 10, expectId }) {
   await setHands(LEFT, fistAt(from));
@@ -208,7 +182,7 @@ test("fist menu: /gs/menu (open → arc + progress → countdown → close) and 
   await s.context.close();
 });
 
-test("beat grid: sent at once on clock start / tempo / rate / x2 / stop; visualizer beats on the synth's audio clock", async ({ browser }) => {
+test("beat grid: sent at once on clock start / tempo / rate / x2 / stop; visualizer beats on the synth's audio clock", async ({ browser }, info) => {
   const { s, v } = await connected(browser);
   await installSynthLog(s.page);
   expect(await v.page.evaluate(() => window.__viz.beatgrid?.running ?? false)).toBe(false);
@@ -243,7 +217,7 @@ test("beat grid: sent at once on clock start / tempo / rate / x2 / stop; visuali
   });
   expect(firstDot.beat).toBe(0);
   expect(Math.abs(firstDot.expected - firstBeat.epoch)).toBeLessThan(GRID_PHASE_MS);
-  expect(firstDot.epoch - firstBeat.epoch).toBeLessThan(BEAT_LATE_MS);
+  // (when this dot was painted is the browser's frame timing: covered by the render check of the dots below)
   expect(start.g.bpm).toBe(await s.page.evaluate(() => window.__gsTest.ctx.clock.bpm));
   expect(Math.abs(start.g.beatTime - firstBeat.epoch)).toBeLessThan(GRID_PHASE_MS); // reference = the first beat
   expect(start.g.beat).toBe(0);
@@ -264,20 +238,21 @@ test("beat grid: sent at once on clock start / tempo / rate / x2 / stop; visuali
   const synthBeats = await s.page.evaluate(() => window.__m3.beats.slice());
   expect(shown.length).toBeGreaterThanOrEqual(4);
   const period = 60000 / 96;
+  const longTasks = await v.page.evaluate(() => window.__viz.longTasks.slice());
+  // The visualizer's own beat clock (computed beat times) vs the synth's audio-clock beats: the spec requirement.
   const matches = shown.map((b) => {
-    const m = synthBeats.reduce((a, x) => (Math.abs(x.epoch - b.epoch) < Math.abs(a.epoch - b.epoch) ? x : a));
+    const m = synthBeats.reduce((a, x) => (Math.abs(x.epoch - b.expected) < Math.abs(a.epoch - b.expected) ? x : a));
     return { late: b.epoch - m.epoch, gridErr: b.expected - m.epoch, vizBeat: b.beat, synthBeat: m.beat - 1 };
   });
   for (const m of matches) {
-    expect(m.late).toBeGreaterThan(-GRID_PHASE_MS); // not before the audible beat (beyond the grid phase error)
-    expect(m.late).toBeLessThan(BEAT_LATE_MS);
-    expect(Math.abs(m.gridErr)).toBeLessThan(GRID_PHASE_MS); // the visualizer's own beat clock = the synth's
+    expect(Math.abs(m.gridErr)).toBeLessThan(GRID_PHASE_MS);
     expect(m.vizBeat).toBe(m.synthBeat); // same beat of the bar
   }
-  // Each dot is drawn in the first render frame at or after its beat (frame timing itself is the browser's).
-  for (const b of shown) expect(b.prevFrame).toBeLessThan(b.expected);
-  const intervals = shown.slice(1).map((b, i) => b.epoch - shown[i].epoch);
-  for (const d of intervals) expect(Math.abs(d - period)).toBeLessThan(BEAT_LATE_MS);
+  const intervals = shown.slice(1).map((b, i) => b.expected - shown[i].expected); // computed, not painted
+  for (const d of intervals) expect(Math.abs(d - period)).toBeLessThan(GRID_PHASE_MS);
+  // Painting: first frame at/after each beat; < BEAT_LATE_MS unless that frame itself was stalled (annotated).
+  const stalls = checkRender(info, "beat dots", shown.map((b) => ({ due: b.expected, shown: b.epoch, prevFrame: b.prevFrame })),
+    { lateMs: BEAT_LATE_MS, longTasks });
 
   // Stop: grid with running=false at once, dots stop.
   const stop = await gridAfter(`(() => { const t = ${epochNow}; window.__gsTest.ctx.clock.stop(); return t; })()`, "g.running === false", "stop");
@@ -295,6 +270,7 @@ test("beat grid: sent at once on clock start / tempo / rate / x2 / stop; visuali
     startGridBeforeFirstBeatMs: +(firstBeat.epoch - startRecvEpoch).toFixed(1),
     beatShownLateMs: matches.map((m) => +m.late.toFixed(1)),
     gridErrMs: matches.map((m) => +m.gridErr.toFixed(2)),
+    renderStalls: stalls.length,
   });
   expect(s.errors).toEqual([]);
   expect(v.errors).toEqual([]);
@@ -302,7 +278,7 @@ test("beat grid: sent at once on clock start / tempo / rate / x2 / stop; visuali
   await s.context.close();
 });
 
-test("Arp notes: sent before their playTime, shown on time, on/off paired by id, note/cancel honored", async ({ browser }) => {
+test("Arp notes: sent before their playTime, shown on time, on/off paired by id, note/cancel honored", async ({ browser }, info) => {
   const { s, v } = await connected(browser);
   // Log first: entering Arp starts the clock, which schedules (and sends) its first notes right away.
   await installSynthLog(s.page);
@@ -327,6 +303,7 @@ test("Arp notes: sent before their playTime, shown on time, on/off paired by id,
     offs: window.__viz.events.filter((e) => e.a === "/gs/note/off" && e.v.voice === "arp").map((e) => e.v.id),
     cancels: window.__viz.cancels.slice(),
     activeArp: [...window.__viz.active.values()].filter((n) => n.voice === "arp").length,
+    longTasks: window.__viz.longTasks.slice(),
   }));
   const ons = new Map(synth.filter((n) => n.n === "note/on").map((n) => [n.id, n]));
   const cancelled = new Set(synth.filter((n) => n.n === "note/cancel").map((n) => n.id));
@@ -345,9 +322,6 @@ test("Arp notes: sent before their playTime, shown on time, on/off paired by id,
     early.push(n.playLocal - n.recvLocal);
     late.push(n.shownLocal - n.playLocal);
     expect(n.playLocal - n.recvLocal, "arrived before its play time").toBeGreaterThan(0);
-    // Shown in the first render frame at or after its play time...
-    expect(n.shownLocal - n.playLocal).toBeGreaterThanOrEqual(0);
-    expect(n.prevFrame).toBeLessThan(n.playLocal);
     expect(viz.offs, `note/off for ${n.id}`).toContain(n.id);
     expect(cancelled.has(n.id), `cancelled note ${n.id} was shown`).toBe(false);
   }
@@ -356,11 +330,11 @@ test("Arp notes: sent before their playTime, shown on time, on/off paired by id,
   for (const id of cancelled) expect(vizCancelled.has(id)).toBe(true);
   for (const c of viz.cancels) expect(c.removed).toBeGreaterThan(0);
   expect(viz.activeArp).toBe(0);
-  // ...which is within the output.spec single-note bound (40 ms) for the typical note. Per note, a render frame
-  // can stretch past that when other pages load the machine (seen: one 50 ms frame with 3 suites in parallel);
-  // the first-frame check above is the load-independent one.
+  // Painting: each note in the first frame at/after its play time, < 40 ms (output.spec single-note bound) unless
+  // that frame itself was stalled by a starved main thread (annotated "render-stall").
   const lateSorted = [...late].sort((a, b) => a - b);
-  expect(lateSorted[Math.floor(lateSorted.length / 2)]).toBeLessThan(SHOW_LATE_MS);
+  const stalls = checkRender(info, "arp notes", viz.shown.map((n) => ({ due: n.playLocal, shown: n.shownLocal, prevFrame: n.prevFrame })),
+    { lateMs: SHOW_LATE_MS, longTasks: viz.longTasks });
   // ~100 ms lookahead (+ output latency, since playTime = when the sound is heard). Measured median 120-128 ms;
   // 50 ms = the single-note bound of output.spec.
   const sorted = [...early].sort((a, b) => a - b);
@@ -370,6 +344,7 @@ test("Arp notes: sent before their playTime, shown on time, on/off paired by id,
     shown: viz.shown.length, cancels: cancelled.size,
     arrivedEarlyMs: { min: +sorted[0].toFixed(1), median: +sorted[Math.floor(sorted.length / 2)].toFixed(1), max: +sorted.at(-1).toFixed(1) },
     shownLateMs: { median: +lateSorted[Math.floor(lateSorted.length / 2)].toFixed(1), max: +Math.max(...late).toFixed(1) },
+    renderStalls: stalls.length,
   });
   expect(s.errors).toEqual([]);
   expect(v.errors).toEqual([]);

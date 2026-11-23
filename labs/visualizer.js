@@ -43,6 +43,14 @@ const viz = {
   active: new Map(), // note id -> {note, voice, on: shownLocal}
 };
 window.__viz = viz;
+// Main-thread stalls (tests tell a starved page apart from a timing bug): long tasks in this page.
+viz.longTasks = [];
+try {
+  new PerformanceObserver((list) => {
+    for (const e of list.getEntries()) viz.longTasks.push({ start: e.startTime, duration: e.duration });
+    if (viz.longTasks.length > 200) viz.longTasks.splice(0, viz.longTasks.length - 200);
+  }).observe({ type: "longtask", buffered: true });
+} catch {}
 
 const client = createViewerClient({ signalUrl, onMessage, onStatus });
 viz.client = client;
