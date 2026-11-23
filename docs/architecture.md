@@ -163,6 +163,22 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
     controls (`data-control="bpm-tap"`).
   - main.js redraws the video frame every animation frame (no build-up of translucent overlays) and schedules the next frame
     first, so an exception in a drawing layer never stops the router/sound.
+- M1 1.6 pinch = tempo (ws/m1-pinch-tempo):
+  - Bus: hand input emits `pinch` (event, owner hand-input) = 1 when the RIGHT (mode) hand starts a pinch, 0 at its release or
+    when the pinching hand is lost (`/gs/pinch`). Left-hand pinches emit nothing. Arp publishes `arp/tempo` (state)
+    `{startBpm, bpm, delta, pinching}` while the tempo feedback shows (pinch + ~1 s), else null; `bpm` comes from the clock.
+  - Mode plugin optional `heldState()` -> `null | {phase: "held"|"return", values: {[param]: heldValue}}`: right-hand values a
+    mode holds itself. The router publishes it as `held` (`held` -> `{right: true, ...values}`, `return` -> `{...values}`);
+    the menu's own held/return wins. Arp: pinch = held `arp/gate`; after the release = return until the hand reaches it.
+  - Arp pinch rules (`PINCH_TEMPO` + pure `pinchTempo()` in src/modes/arp.js): tempo = start + round(dy / handSize * 13) BPM
+    (dy = vertical palm movement since the pinch start, up = +, display-height units; handSize latched at the start), with a
+    0.2 BPM hysteresis band, clamped to MIN_BPM..MAX_BPM, applied through `clock.bpm` (its no-lost/no-doubled-step rule).
+    While pinched: voicing = `voicingBeforePinch`, gate / filter / double time locked (double time restored from
+    PINCH_LOOKBACK_MS before the pinch, the thumb ignored for 300 ms after the release). After the release the gate stays
+    held until the hand height is within 0.02 of it or crosses it (Return); the filter crossfades back over 200 ms.
+  - Visuals: Arp `draw()` draws the tempo scale + big BPM plate at the hand (outer side if >= 150 px room); edge tracks show
+    "Gate held" next to the hollow marker during the pinch (hollow marker = the hand level at the pinch start) and drop
+    the right guide while `arp/tempo` is set; first-use labels hide during a pinch.
 - M2 Lead integration (ws/m2-lead-integration):
   - Lead is registered in main.js (menu left). It never writes the master gain and never touches `synth.oscillators`
     (Chords' `exit` releases its chord; the router owns the master). `hold(ctx)`: the lead note stops, the ladder

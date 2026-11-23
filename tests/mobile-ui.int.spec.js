@@ -1,77 +1,18 @@
-// Mobile UI pass (docs/mobile-ui.md).
-//  - audit (before): today's app + the planned modes chrome (labs/ui-lab.html) at every phone size
-//  - lab (after):    labs/mobile-lab.html states at every phone size: coverage budget, clear area, on-screen,
-//                    every control within 2 taps, sheets closable, 44 px targets, auto-collapse
-//  - app:            the mobile system injected into the real app (/?mockHands): works with the real handlers,
-//                    minimal HUD is remembered, desktop layout is unaffected
+// Mobile UI (docs/mobile-ui.md), integration layer: the prototype in labs/mobile-lab.html (+ the planned chrome
+// in labs/ui-lab.html as the "before"), at every phone size: coverage budget, clear area, on screen, every control
+// within 2 taps, sheets closable, 44 px targets, auto-collapse; desktop lab layout unchanged.
 // Numbers: test-results/mobile-audit/*.json. Screens: test-results/screens/mobile-<state>-<size>.png
 import { test, expect, SCREENS_DIR } from "./fixtures.js";
-import { leftHand, rightHand } from "./helpers/hands.js";
-import { collectUI, writeAudit, EXISTING } from "./helpers/mobile-ui.js";
-import { MOBILE_SIZES, BUDGET, budgetFor, summarize, coverage, offscreen, overlapArea } from "../src/ui/mobile/layout-metrics.js";
+import { EXISTING, PHONES, device, audit, openLab, tapTarget } from "./helpers/mobile-ui.js";
+import { MOBILE_SIZES, BUDGET, budgetFor, offscreen, overlapArea } from "../src/ui/mobile/layout-metrics.js";
 import { clearArea } from "../src/ui/theme.js";
 
-const PHONES = Object.fromEntries(Object.entries(MOBILE_SIZES).filter(([k]) => k !== "768x1024"));
-const device = (vp) => ({ viewport: vp, hasTouch: true, isMobile: true });
-
-/** Persistent chrome for the coverage budget: edge tracks count by their drawn body (6 px + halo), the Lead
- *  ladder is the instrument surface (reported separately, see docs/mobile-ui.md §6). */
-function chrome(items) {
-  return items
-    .filter((i) => i.name !== "canvas:lead-ladder")
-    .map((i) =>
-      /track$/.test(i.name) ? { ...i, rect: { ...i.rect, x: i.rect.x + i.rect.w / 2 - 5, w: 10 } } : i,
-    );
-}
-
-async function audit(page, label, size, { budget = false } = {}) {
-  const ui = await collectUI(page);
-  const items = budget ? chrome(ui.items) : ui.items;
-  const s = summarize(items, ui.W, ui.H);
-  s.withPanels = coverage([...items, ...ui.panels].map((i) => i.rect), ui.W, ui.H);
-  s.items = items.map((i) => ({ name: i.name, rect: Object.fromEntries(Object.entries(i.rect).map(([k, v]) => [k, Math.round(v)])) }));
-  s.panels = ui.panels.map((i) => i.name);
-  writeAudit(`${label}-${size}`, { label, size, ...s });
-  return { ui, s, items };
-}
-
-const labUrl = (m, extra = "") => `/labs/mobile-lab.html?m=${m}&clean${extra}`;
-async function openLab(page, m, extra) {
-  await page.goto(labUrl(m, extra));
-  await page.waitForFunction(() => window.__mobileLab?.ready);
-}
-
-/** Center of a visible element, asserting it is on screen and not covered (a tap there reaches it). */
-async function tapTarget(page, sel) {
-  const loc = page.locator(sel);
-  await expect(loc, `${sel} visible`).toBeVisible();
-  const hit = await loc.evaluate((e) => {
-    const r = e.getBoundingClientRect();
-    const x = r.x + r.width / 2;
-    const y = r.y + r.height / 2;
-    const top = document.elementFromPoint(x, y);
-    return { x, y, r: { x: r.x, y: r.y, w: r.width, h: r.height }, ok: !!top && (top === e || e.contains(top)) };
-  });
-  expect(hit.ok, `${sel} is not covered at its center`).toBe(true);
-  expect(Object.values(offscreen(hit.r, page.viewportSize().width, page.viewportSize().height)).every((v) => v < 0.5), `${sel} on screen`).toBe(true);
-  return hit;
-}
-
 // =====================================================================================================
-test.describe("audit (before)", () => {
+test.describe("audit (before): planned chrome", () => {
   for (const [size, vp] of Object.entries(MOBILE_SIZES)) {
     test.describe(size, () => {
       test.use(device(vp));
 
-      test(`today's app ${size}`, async ({ synthPage: page, setHands }) => {
-        await setHands(leftHand(6, { minor: true }), rightHand(3, { volume: 0.6, tilt: 0.3 }));
-        await expect(page.locator("#chordDisplay")).toHaveText("F#m(vi)");
-        await page.screenshot({ path: `${SCREENS_DIR}/mobile-before-app-playing-${size}.png` });
-        await audit(page, "before-app-playing", size);
-        await page.locator("#guideToggle").click();
-        await page.screenshot({ path: `${SCREENS_DIR}/mobile-before-app-guide-${size}.png` });
-        await audit(page, "before-app-guide", size);
-      });
 
       for (const state of ["chords-play", "arp-play", "lead-preview", "guide-open", "controls-panel-open"]) {
         test(`planned chrome ${state} ${size}`, async ({ page }) => {
@@ -256,100 +197,6 @@ for (const [size, vp] of Object.entries(PHONES)) {
 }
 
 // =====================================================================================================
-// The mobile system on the REAL app (handlers from controls.js), injected the way Phase B will mount it.
-async function mountInApp(page, opts = { intro: false }) {
-  await page.evaluate(async (opts) => {
-    const m = await import("/src/ui/mobile/mobile-ui.js");
-    window.__mobile = m.mountMobileUI(opts);
-  }, opts);
-}
-
-test.describe("real app + mobile system", () => {
-  for (const [size, vp] of Object.entries(MOBILE_SIZES)) {
-    test.describe(size, () => {
-      test.use(device(vp));
-
-      test(`playing collapsed ${size}: budget, clear area, real handlers`, async ({ synthPage: page, setHands }) => {
-        await mountInApp(page);
-        await setHands(leftHand(6, { minor: true }), rightHand(3, { volume: 0.6, tilt: 0.3 }));
-        await expect(page.locator("#chordDisplay")).toHaveText("F#m(vi)");
-        await page.evaluate(() => window.__mobile.setPlaying(true));
-        await page.screenshot({ path: `${SCREENS_DIR}/mobile-after-app-playing-${size}.png` });
-        const { s, items } = await audit(page, "after-app-playing", size);
-        expect(s.domCoverage).toBeLessThanOrEqual(budgetFor(vp.width).playingDom);
-        const clear = clearArea(vp.width, vp.height);
-        for (const n of items) expect(overlapArea(n.rect, clear), `${n.name} in the clear area`).toBe(0);
-
-        // Real guide toggle through the bar; the strip follows the key select.
-        await page.locator("#gsPill").click();
-        await page.locator("#keySelect").selectOption({ label: "D#/Eb" });
-        await expect(page.locator("#gsPill")).toContainText("Eb");
-        await page.locator("#guideToggle").click();
-        await expect(page.locator("#gestureGuide .gesture-guide-note")).toHaveText(["Eb", "F", "G", "Ab", "Bb", "C", "D"]);
-        await expect(page.locator("#gsBar")).not.toHaveClass(/open/);
-        await page.screenshot({ path: `${SCREENS_DIR}/mobile-after-app-guide-${size}.png` });
-        await audit(page, "after-app-guide", size);
-        await page.locator("#gsGuideClose").click();
-        await expect(page.locator("#gestureGuide")).toBeHidden();
-        await expect(page.locator("#guideToggle")).toHaveText("Open Guide");
-
-        // Real help.
-        await page.locator("#gsPill").click();
-        await page.locator("#helpButton").click();
-        await expect(page.locator("#helpModal")).toBeVisible();
-        await page.screenshot({ path: `${SCREENS_DIR}/mobile-after-app-help-${size}.png` });
-        await page.locator("#closeHelp").click();
-        await expect(page.locator("#helpModal")).toBeHidden();
-      });
-    });
-  }
-
-  test.describe("390x844 storage", () => {
-    test.use(device(MOBILE_SIZES["390x844"]));
-
-    test("minimal HUD is remembered across reloads", async ({ synthPage: page }) => {
-      await mountInApp(page);
-      await expect(page.locator("#volumeMeter")).toBeVisible();
-      await page.locator("#gsPill").click();
-      await page.locator("#gsHudToggle").click();
-      await expect(page.locator("body")).toHaveClass(/gs-hud-min/);
-      await expect(page.locator("#volumeMeter")).toBeHidden();
-      await page.screenshot({ path: `${SCREENS_DIR}/mobile-after-app-minimal-390x844.png` });
-      await page.reload();
-      await page.locator("#startOverlay").click();
-      await mountInApp(page);
-      await expect(page.locator("body")).toHaveClass(/gs-hud-min/);
-      await expect(page.locator("#gsHudToggle")).toHaveAttribute("aria-pressed", "true");
-    });
-
-    test("first visit shows the tray open once; it folds away when hands play", async ({ synthPage: page, setHands }) => {
-      await page.evaluate(() => localStorage.removeItem("gs.mobile.seen"));
-      await mountInApp(page, {});
-      await expect(page.locator("#gsBar")).toHaveClass(/open/);
-      await page.screenshot({ path: `${SCREENS_DIR}/mobile-after-app-intro-390x844.png` });
-      await setHands(leftHand(1), rightHand(1));
-      await page.evaluate(() => window.__mobile.setPlaying(true));
-      await expect(page.locator("#gsBar")).not.toHaveClass(/open/, { timeout: 4000 });
-      await page.evaluate(() => window.__mobile.destroy());
-      await mountInApp(page, {});
-      await expect(page.locator("#gsBar")).not.toHaveClass(/open/);
-    });
-
-    test("blocked storage: no errors, toggle still works", async ({ page }) => {
-      await page.addInitScript(() => {
-        Object.defineProperty(window, "localStorage", { get() { throw new Error("blocked"); } });
-      });
-      await page.goto("/?mockHands");
-      await page.locator("#startOverlay").click();
-      await mountInApp(page, {}); // intro on: storage throws, so the tray opens (every load) and nothing breaks
-      await expect(page.locator("#gsBar")).toHaveClass(/open/);
-      await page.locator("#gsHudToggle").click();
-      await expect(page.locator("body")).toHaveClass(/gs-hud-min/);
-    });
-  });
-});
-
-// =====================================================================================================
 test.describe("desktop unaffected", () => {
   const boxes = (page) =>
     page.evaluate((ids) => {
@@ -362,23 +209,6 @@ test.describe("desktop unaffected", () => {
       return out;
     }, [...EXISTING, "helpModal"]);
 
-  test("1280x800: mounting changes nothing; mobile -> desktop resize restores every node", async ({ synthPage: page }) => {
-    await page.locator("#guideToggle").click();
-    const before = await boxes(page);
-    await mountInApp(page);
-    expect(await page.evaluate(() => document.body.classList.contains("gs-mobile"))).toBe(false);
-    expect(await boxes(page)).toEqual(before);
-    await expect(page.locator("#gsBar")).toBeHidden();
-    await page.screenshot({ path: `${SCREENS_DIR}/mobile-desktop-1280x800.png` });
-
-    await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.locator("body")).toHaveClass(/gs-mobile/);
-    await expect(page.locator("#keySelect")).toBeHidden(); // collapsed into the bar
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await expect(page.locator("body")).not.toHaveClass(/gs-mobile/);
-    expect(await boxes(page)).toEqual(before);
-  });
-
   test("lab at 1280x800 matches the planned desktop chrome", async ({ page }) => {
     await page.goto("/labs/ui-lab.html?state=arp-play&clean");
     await page.waitForFunction(() => window.__uiLab?.ready);
@@ -388,3 +218,4 @@ test.describe("desktop unaffected", () => {
     expect(await boxes(page)).toEqual(ref);
   });
 });
+

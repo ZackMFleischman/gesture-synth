@@ -64,10 +64,19 @@ test.describe("mobile viewport", () => {
   test("controls stay on-screen and don't overlap", async ({ synthPage: page, setHands }) => {
     await setHands(leftHand(6, { minor: true }), rightHand(1, { volume: 0.5 }));
     await expect(page.locator("#chordDisplay")).toHaveText("F#m(vi)");
+    // Phones: the mobile system (docs/mobile-ui.md) holds the top-left controls in its collapsed bar.
+    await page.locator("#gsPill").click();
     await page.locator("#guideToggle").click();
 
-    const ids = ["keySelect", "toneSelect", "guideToggle", "gestureGuide", "volumeMeter",
+    const all = ["keySelect", "toneSelect", "guideToggle", "gestureGuide", "volumeMeter",
       "distortionDisplay", "chordDisplay", "qualityDisplay", "helpButton"];
+    const ids = [];
+    for (const id of all) {
+      if (await page.locator(`#${id}`).isVisible()) ids.push(id);
+      else expect(await page.locator(`#gsBar #${id}, #${id}`).first().evaluate((e) => !!e.closest("#gsBar") || e.id === "volumeMeter"),
+        `#${id} hidden but not in the mobile bar`).toBe(true);
+    }
+    ids.push("gsBar");
     const boxes = {};
     for (const id of ids) {
       const box = await page.locator(`#${id}`).boundingBox();

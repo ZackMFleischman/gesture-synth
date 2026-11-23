@@ -12,6 +12,7 @@ import { drawFrame } from "./src/ui/overlay.js";
 import { mountIndicators } from "./src/ui/indicators.js";
 import { mountControls } from "./src/ui/controls.js";
 import { mountModeUI } from "./src/ui/mode-ui.js";
+import { mountMobileUI } from "./src/ui/mobile/mobile-ui.js";
 import { createRadialMenu, playTick } from "./src/menu/radial-menu.js";
 import chordsMode from "./src/modes/chords.js";
 import arpMode from "./src/modes/arp.js";
@@ -72,6 +73,9 @@ registerMode(arpMode);
 registerMode(leadMode);
 router.setMode("chords");
 const modeUI = mountModeUI({ bus, ctx, registry, router, canvas: canvasEl, output: outputChip });
+// Phones + touch tablets: one collapsible bar, sheets, minimal HUD (docs/mobile-ui.md). Mount LAST: it
+// gathers the controls above into its tray. Inert (no DOM moves) on desktop.
+const mobileUI = mountMobileUI({ bus });
 
 // ---- Radial menu (right fist) ----
 router.setMenu(
@@ -90,6 +94,7 @@ if (import.meta.env.DEV) {
   window.__gsTest.ctx = ctx;
   window.__gsTest.handInput = handInput;
   window.__gsTest.output = outputChip;
+  window.__gsTest.mobile = mobileUI;
 }
 
 // ---- Main loop ----

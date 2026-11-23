@@ -21,9 +21,10 @@ async function playing(page, setHands) {
 test("start overlay", async ({ page }) => {
   await page.goto("/?mockHands");
   await expect(page.locator("#startOverlay")).toBeVisible();
-  // Wait for the steady state behind the overlay: modes UI mounted and the main loop running (the router has
-  // published the master volume, so the meter is lit). Before that the page is a transient layout, and which
-  // one the screenshot caught depended on machine load.
+  // main.js has run (modes UI mounted): without this the shot can race a dev-server reload and catch bare index.html.
+  await page.waitForFunction(() => document.body.classList.contains("gs-modes"));
+  // ... and the main loop has run (the router published the master volume, so the meter is lit): before that
+  // the shot could catch an unlit meter, depending on machine load.
   await expect(page.locator("#modeBadge")).toBeVisible();
   await expect(page.locator(".vol-bar.lit")).toHaveCount(8);
   await expect(page).toHaveScreenshot("start-overlay.png", { stylePath: STYLE });

@@ -25,6 +25,7 @@
 import "./modes.css";
 import { MODE_COLORS, clearArea, rectsOverlap } from "./theme.js";
 import { createEdgeTracks } from "./edge-tracks.js";
+import { createSafeArea } from "./mobile/safe-area.js";
 import { createHandOverlays } from "./hand-overlays.js";
 import { createBadges } from "./badges.js";
 import { createReadouts } from "./readouts.js";
@@ -198,6 +199,7 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
   let publishedSide = null;
 
   // Own canvas for the modes UI layers (see the header), right above the video canvas, under all DOM.
+  const safeArea = createSafeArea(doc); // notch insets for the edge tracks (docs/mobile-ui.md §6)
   const layer = doc.createElement("canvas");
   layer.id = "modeOverlay";
   layer.setAttribute("aria-hidden", "true");
@@ -254,7 +256,8 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
     S.covers.length = 0;
     for (const el of [S.guideOpen && doc.getElementById("gestureGuide"), S.panelOpen && doc.getElementById("controlsPanel")]) {
       if (!el) continue;
-      const r = el.getBoundingClientRect();
+      // On phones the panel lives in the mobile bottom/side sheet: the sheet is what covers the canvas.
+      const r = (el.closest("#gsControlsSheet") || el).getBoundingClientRect();
       const c = canvas.getBoundingClientRect();
       S.covers.push({ x: r.x - c.x, y: r.y - c.y, w: r.width, h: r.height });
     }
@@ -289,6 +292,7 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
         W, H, portrait: H > W, reg,
         hs: handSpan(W, H),
         toPx: (p) => ({ x: p.x * W, y: p.y * H }),
+        safe: safeArea.get(),
       };
       lg.setTransform(dpr, 0, 0, dpr, 0, 0);
       // Z-order (§5): edge tracks, hand feedback, first-use labels (all above the mode/menu canvas).
@@ -328,6 +332,7 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
     destroy() {
       unsubBus();
       for (const p of parts) p.destroy?.();
+      safeArea.destroy();
       layer.remove();
       body.classList.remove("gs-modes", "gs-right-held", "gs-no-right-track");
       delete body.dataset.mode;
