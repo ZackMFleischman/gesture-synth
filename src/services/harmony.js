@@ -57,43 +57,34 @@ export const MINOR_LABELS = {
   4: "Diminished 7th"
 };
 
-// Map the 4 right-hand finger variations depending entirely on the left-hand tilt mode
+// The 4 right-hand voicings (1-4) as semitones above the chord root. Shared by every mode
+// (Chords plays all 4 notes at once, Arp cycles through them). Derived from the original
+// getChordTones + getSolidNotes in main.js.
+export const VOICING_SEMITONES = Object.freeze({
+  major: Object.freeze({
+    1: [0, 7, 12, 16], // root, fifth, octave, octave third
+    2: [4, 7, 12, 16], // 1st inversion (third, fifth, octave, octave third)
+    3: [0, 4, 7, 11], // major 7th
+    4: [0, 4, 7, 10], // dominant 7th
+  }),
+  minor: Object.freeze({
+    1: [0, 7, 12, 15], // root, fifth, octave, octave minor third
+    2: [3, 7, 12, 15], // 1st inversion
+    3: [0, 3, 7, 10], // minor 7th
+    4: [0, 3, 6, 9], // diminished 7th
+  }),
+});
+
+/** Semitones above the root for voicing 1..4 (out-of-range voicings fall back to 1). */
+export function voicingSemitones(isMajor, voicing) {
+  const v = Math.max(1, Math.min(4, Math.round(voicing) || 1));
+  return VOICING_SEMITONES[isMajor ? "major" : "minor"][v];
+}
+
+/** The voiced frequencies for a chord-tone collection (see getChordTones) and right-hand count. */
 export function getSolidNotes(tones, rightHandCount, isMajorMode) {
   if (!tones) return [];
-
-  const {
-    root, third, fifth, octaveRoot, octaveThird,
-    maj7Tone, dom7Tone, dim7Tone, dim5Tone
-  } = tones;
-
-  if (isMajorMode) {
-    switch (rightHandCount) {
-      case 1: // Major chord (root, fifth, octave, octave third)
-        return [root, fifth, octaveRoot, octaveThird];
-      case 2: // 1st inversion (third, fifth, octave, octave third)
-        return [third, fifth, octaveRoot, octaveThird];
-      case 3: // Major 7th (root, third, fifth, maj7)
-        return [root, third, fifth, maj7Tone];
-      case 4: // Dominant 7th (root, third, fifth, dom7)
-        return [root, third, fifth, dom7Tone];
-      default:
-        return [root, fifth, octaveRoot, octaveThird];
-    }
-  } else {
-    // Minor Mode Routing
-    switch (rightHandCount) {
-      case 1: // Minor chord (root, fifth, octave, octave minor third)
-        return [root, fifth, octaveRoot, octaveThird];
-      case 2: // 1st inversion (minor third, fifth, octave, octave minor third)
-        return [third, fifth, octaveRoot, octaveThird];
-      case 3: // Minor 7th (root, third, fifth, dom7)
-        return [root, third, fifth, dom7Tone];
-      case 4: // Diminished 7th (root, minor third, diminished fifth, dim7)
-        return [root, third, dim5Tone, dim7Tone];
-      default:
-        return [root, fifth, octaveRoot, octaveThird];
-    }
-  }
+  return voicingSemitones(isMajorMode, rightHandCount).map((s) => tones.root * Math.pow(2, s / 12));
 }
 
 // ---- Chord state stabilizer ----
@@ -127,7 +118,7 @@ export function createChordStabilizer() {
   let candidateChordSince = 0;
   let lastChordSeenValidTime = 0;
 
-  return function stabilizeChordState(rawState, now) {
+  function stabilizeChordState(rawState, now) {
     if (rawState !== null) {
       lastChordSeenValidTime = now;
     }
@@ -149,7 +140,22 @@ export function createChordStabilizer() {
     }
 
     return stableChordState;
+  }
+
+  /**
+   * Makes `state` the stable (and candidate) state right now, skipping the hold time. Used when a
+   * mode resumes with known values (e.g. the locked right hand after the menu), so it does not
+   * replay an old state or wait CHORD_HOLD_TIME_MS. Keeps the identity if nothing changed.
+   */
+  stabilizeChordState.prime = (state, now) => {
+    if (!sameChordState(state, stableChordState)) stableChordState = state;
+    candidateChordState = stableChordState;
+    candidateChordSince = now - CHORD_HOLD_TIME_MS;
+    if (state !== null) lastChordSeenValidTime = now;
+    return stableChordState;
   };
+
+  return stabilizeChordState;
 }
 
 function freqToMidi(f) {
