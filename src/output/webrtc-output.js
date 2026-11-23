@@ -16,8 +16,8 @@
 // server when a direct connection can't be made (or `forceRelay`). The music never depends on this.
 
 import {
-  CHANNELS, CH, SYS, STATE_RESEND_MS, PROTOCOL_VERSION,
-  addressOf, encodeValue, clockNow, createClockSync,
+  CHANNELS, CH, SYS, STATE_RESEND_MS, PROTOCOL_VERSION, PINCH_SOURCE,
+  addressOf, encodeValue, wireTypeOf, createMenuEncoder, clockNow, createClockSync,
 } from "./protocol.js";
 
 const DIRECT_TIMEOUT_MS = 5000; // no open data channels by then -> relay
@@ -67,7 +67,11 @@ export function createWebRtcOutput({
   let stateTimer = null;
   let pingTimer = null;
   let pingSeq = 0;
-  const counters = { frames: 0, state: 0, events: 0, snapshots: 0, bytes: 0 };
+  const menuEncoder = createMenuEncoder();
+  let clockWatched = null; // the clock whose transport changes we listen to
+  let unwatchClock = null;
+  let gridQueued = false;
+  const counters = { frames: 0, state: 0, events: 0, snapshots: 0, bytes: 0, beatgrids: 0 };
 
   // ---------------------------------------------------------------- status
   let lastStatusKey = "";
@@ -335,23 +339,59 @@ export function createWebRtcOutput({
           // so a microtask flushes exactly once per frame, right after the loop body.
           queueMicrotask(flushFrame);
         }
-      } else {
-        counters.state++;
-        broadcast(CH.reliable, JSON.stringify({ a: addressOf(name), v: encodeValue(name, value), t: clockNow() }));
-        if (name === "bpm") {
-          const bg = beatGridMessage();
-          if (bg) broadcast(CH.reliable, bg);
-        }
+        return;
       }
+      if (name === "menu") {
+        // Bus state -> spec event (open / arc + progress / countdown / close).
+        const v = menuEncoder.encode(value);
+        if (v) sendEvent("menu", v, null, true);
+        return;
+      }
+      if (type === "event") {
+        // A state on the bus that the wire treats as an event.
+        sendEvent(name, value, null);
+        return;
+      }
+      counters.state++;
+      broadcast(CH.reliable, JSON.stringify({ a: addressOf(name), v: encodeValue(name, value), t: clockNow() }));
+      // `pinch` event derived from the right hand's pinch state while the bus has no `pinch` event of its own.
+      if (name === PINCH_SOURCE && !types.has("pinch")) sendEvent("pinch", !!value, null);
+      if (name === "bpm" && !(clockWatched && typeof clockWatched.onTransport === "function")) queueBeatGrid();
     },
     onEvent(name, data, playTime) {
       typeOf(name); // registers undeclared events in the manifest
-      counters.events++;
-      const now = clockNow();
-      const t = typeof playTime === "number" ? audioToShared(playTime) : now;
-      broadcast(CH.reliable, JSON.stringify({ a: addressOf(name), v: encodeValue(name, data), t, at: now }));
+      sendEvent(name, data, playTime);
     },
   };
+
+  function sendEvent(name, data, playTime, raw = false) {
+    counters.events++;
+    const now = clockNow();
+    const t = typeof playTime === "number" ? audioToShared(playTime) : now;
+    broadcast(CH.reliable, JSON.stringify({ a: addressOf(name), v: raw ? data : encodeValue(name, data), t, at: now }));
+  }
+
+  /** Beat grid at once (coalesced: start() also sets bpm, so one task can report several changes). */
+  function queueBeatGrid() {
+    if (gridQueued) return;
+    gridQueued = true;
+    queueMicrotask(() => {
+      gridQueued = false;
+      if (!unsubscribe) return;
+      const bg = beatGridMessage();
+      if (bg) broadcast(CH.reliable, bg);
+    });
+  }
+
+  /** Listens to the shared clock's start/stop/tempo/rate/double-time (the clock exists after the first gesture). */
+  function watchClock() {
+    let clock = null;
+    try { clock = getClock(); } catch {}
+    if (!clock || clock === clockWatched) return;
+    unwatchClock?.();
+    clockWatched = clock;
+    unwatchClock = typeof clock.onTransport === "function" ? clock.onTransport(queueBeatGrid) : null;
+  }
 
   function typeOf(name) {
     let type = types.get(name);
@@ -364,8 +404,18 @@ export function createWebRtcOutput({
     return type;
   }
 
+  /** bus name -> WIRE type (`menu` is a bus state but a wire event). */
   function refreshTypes() {
-    types = new Map(bus.manifest().map((s) => [s.name, s.type]));
+    types = new Map(bus.manifest().map((s) => [s.name, wireTypeOf(s.name, s.type)]));
+  }
+
+  /** Manifest as the visualizer sees it: wire types, plus the derived `pinch` event when the bus has none. */
+  function wireManifest() {
+    const list = bus.manifest().map((s) => ({ name: s.name, address: addressOf(s.name), type: wireTypeOf(s.name, s.type), owner: s.owner ?? null }));
+    if (!list.some((s) => s.name === "pinch") && list.some((s) => s.name === PINCH_SOURCE)) {
+      list.push({ name: "pinch", address: addressOf("pinch"), type: "event", owner: "output", derivedFrom: PINCH_SOURCE });
+    }
+    return list;
   }
 
   function flushFrame() {
@@ -379,15 +429,14 @@ export function createWebRtcOutput({
 
   function manifestMessage() {
     refreshTypes();
-    const v = bus.manifest().map((s) => ({ name: s.name, address: addressOf(s.name), type: s.type, owner: s.owner ?? null }));
-    return JSON.stringify({ a: SYS.manifest, v, t: clockNow() });
+    return JSON.stringify({ a: SYS.manifest, v: wireManifest(), t: clockNow() });
   }
 
   function snapshotMessage() {
     const state = {};
     const continuous = {};
     for (const s of bus.manifest()) {
-      if (s.type === "event") continue;
+      if (wireTypeOf(s.name, s.type) === "event") continue;
       const v = bus.get(s.name);
       if (v === undefined) continue;
       (s.type === "state" ? state : continuous)[addressOf(s.name)] = encodeValue(s.name, v);
@@ -415,9 +464,13 @@ export function createWebRtcOutput({
       if (typeof b === "number" && isFinite(b)) beat = ((Math.round(b) % beatsPerBar) + beatsPerBar) % beatsPerBar;
     }
     const running = clock.running ?? clock.isRunning ?? true;
+    counters.beatgrids++;
     return JSON.stringify({
       a: SYS.beatgrid,
-      v: { bpm: clock.bpm, beatTime: audioToShared(beatAc), beat: beat ?? 0, beatsPerBar, running: !!running },
+      v: {
+        bpm: clock.bpm, beatTime: audioToShared(beatAc), beat: beat ?? 0, beatsPerBar, running: !!running,
+        rate: clock.rate ?? null, double: !!(clock.doubleTime ?? false),
+      },
       t: clockNow(),
     });
   }
@@ -436,8 +489,11 @@ export function createWebRtcOutput({
   function attach() {
     if (unsubscribe) return;
     refreshTypes();
+    menuEncoder.reset();
     unsubscribe = bus.subscribe(consumer); // all names, including ones declared later
+    watchClock();
     stateTimer = setInterval(() => {
+      watchClock(); // the clock may have been created after we attached
       broadcast(CH.reliable, snapshotMessage());
       const bg = beatGridMessage();
       if (bg) broadcast(CH.reliable, bg);
@@ -459,6 +515,11 @@ export function createWebRtcOutput({
 
   function detach() {
     if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+    unwatchClock?.();
+    unwatchClock = null;
+    clockWatched = null;
+    gridQueued = false;
+    menuEncoder.reset();
     clearInterval(stateTimer);
     clearInterval(pingTimer);
     stateTimer = pingTimer = null;

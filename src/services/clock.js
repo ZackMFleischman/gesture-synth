@@ -72,6 +72,15 @@ export function createClock(ac, opts = {}) {
   const beatListeners = new Set();
   const stopListeners = new Set();
   const changeListeners = new Set();
+  const transportListeners = new Set();
+
+  // Transport / grid listeners (start, stop, tempo, rate, double time): e.g. the visualizer output
+  // re-sends its beat grid right away instead of waiting for its periodic resend.
+  function notifyTransport(what) {
+    for (const cb of transportListeners) {
+      try { cb(what); } catch (e) { console.error(e); }
+    }
+  }
 
   const ticker = createTicker(o.interval * 1000, () => schedule());
 
@@ -196,6 +205,7 @@ export function createClock(ac, opts = {}) {
       bpm = nb;
       reviseLast();
       if (bus) bus.set("bpm", bpm);
+      notifyTransport("bpm");
     },
     get rate() {
       return rate;
@@ -204,6 +214,7 @@ export function createClock(ac, opts = {}) {
       if (!RATES.includes(v) || v === rate) return;
       rate = v;
       reviseLast();
+      notifyTransport("rate");
     },
     /** Requested double time (x2 rate). Takes effect on the next beat. */
     get doubleTime() {
@@ -214,6 +225,7 @@ export function createClock(ac, opts = {}) {
       if (v === doubleTime) return;
       doubleTime = v;
       reviseLast();
+      notifyTransport("double");
     },
     /** Double time actually in effect for the latest scheduled step. */
     get doubleTimeActive() {
@@ -238,12 +250,14 @@ export function createClock(ac, opts = {}) {
       if (bus) bus.set("bpm", bpm);
       schedule();
       ticker.start();
+      notifyTransport("start");
     },
     stop() {
       if (!running) return;
       running = false;
       ticker.stop();
       for (const cb of stopListeners) cb();
+      notifyTransport("stop");
     },
     /** cb(stepIndex, time, info) for each step, ~lookahead s before it plays. Returns unsubscribe. */
     onStep(cb) {
@@ -259,6 +273,14 @@ export function createClock(ac, opts = {}) {
     onStepChange(cb) {
       changeListeners.add(cb);
       return () => changeListeners.delete(cb);
+    },
+    /**
+     * cb(what) after start/stop and tempo/rate/double-time requests ("start"|"stop"|"bpm"|"rate"|"double"),
+     * synchronously, once the clock state reflects the change. Returns unsubscribe.
+     */
+    onTransport(cb) {
+      transportListeners.add(cb);
+      return () => transportListeners.delete(cb);
     },
     onStop(cb) {
       stopListeners.add(cb);

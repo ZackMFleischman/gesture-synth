@@ -21,7 +21,9 @@ export const SYS = {
   manifest: "/gs/sys/manifest", //  v: [{name, address, type, owner}]
   state: "/gs/sys/state", //        v: { state: {address: value}, continuous: {address: value} } — full snapshot
   frame: "/gs/sys/frame", //        v: {address: value} — all continuous values that changed this frame; n: seq
-  beatgrid: "/gs/sys/beatgrid", //  v: { bpm, beatTime (shared ms of a beat), beat (index in bar), beatsPerBar }
+  beatgrid: "/gs/sys/beatgrid", //  v: { bpm, beatTime (shared ms of a beat), beat (index in bar), beatsPerBar,
+  //                                   running, rate, double } — sent on connect, at once on every clock
+  //                                   start/stop/tempo/rate/double-time change, and every 2 s
   ping: "/gs/sys/ping", //          c: sender clock ms, id
   pong: "/gs/sys/pong", //          c: echoed, h: responder clock ms, id
   hello: "/gs/sys/hello", //        v: { app, version } (synth -> visualizer, first message)
@@ -58,10 +60,62 @@ export const ADDRESS_TABLE = {
   // events (once, with the play time)
   "note/on": { address: "/gs/note/on", encode: encodeNote },
   "note/off": { address: "/gs/note/off", encode: encodeNote },
+  "note/cancel": { address: "/gs/note/cancel", encode: encodeNote }, // a scheduled note/on (same id) won't play
   beat: { address: "/gs/beat" },
-  pinch: { address: "/gs/pinch" },
-  menu: { address: "/gs/menu" },
+  pinch: { address: "/gs/pinch", encode: encodePinch }, // 1 at start, 0 at release
+  // The bus keeps `menu` as a state (object while open, null when closed); on the wire it is an EVENT per the
+  // spec table ("open, the arc under the fist, the progress, close"), built by createMenuEncoder() below.
+  menu: { address: "/gs/menu", wireType: "event" },
 };
+
+/**
+ * Right-hand pinch as an event, derived from the `right/pinch` state when no `pinch` event is declared
+ * on the bus (the output does this; see webrtc-output.js).
+ */
+export const PINCH_SOURCE = "right/pinch";
+
+/** Pinch event value -> 1/0 (accepts a boolean/number, or an object with on/down/value/pinch). */
+export function encodePinch(v) {
+  if (v && typeof v === "object") v = v.on ?? v.down ?? v.pinch ?? v.value ?? v.state;
+  return v === true || v === 1 || v === "start" || v === "down" ? 1 : 0;
+}
+
+/** Type a signal has on the wire (may differ from its bus type, e.g. `menu`). */
+export function wireTypeOf(name, busType) {
+  const e = ADDRESS_TABLE[name];
+  return (e && e.wireType) || busType;
+}
+
+/**
+ * Bus `menu` state -> `/gs/menu` events. Stateful (needs the previous value to tell open/close apart):
+ *   {phase:"open",      state:"open", arc, selected, progress}          first frame the menu is open
+ *   {phase:"update",    state:"open", arc, selected, progress}          arc under the fist / progress moved
+ *   {phase:"countdown", state:"countdown", arc, selected, confirmed, progress}   hand opened on an item
+ *   {phase:"close",     state:"closed", confirmed: id|null, cancelled: bool}
+ * `arc` = the item under the fist (hoverId), `selected` = the item whose fill completed.
+ * encode(value) returns the event value, or null when nothing changed.
+ */
+export function createMenuEncoder() {
+  let prev = null;
+  return {
+    encode(m) {
+      const open = !!(m && typeof m === "object" && m.state && m.state !== "closed");
+      if (!open) {
+        if (!prev) return null;
+        const confirmed = prev.state === "countdown" ? prev.confirmedId ?? prev.selectedId ?? null : null;
+        prev = null;
+        return { phase: "close", state: "closed", confirmed, cancelled: !confirmed };
+      }
+      const phase = !prev ? "open" : m.state === "countdown" && prev.state !== "countdown" ? "countdown" : "update";
+      prev = m;
+      const out = { phase, state: m.state, arc: m.hoverId ?? null, selected: m.selectedId ?? null, progress: num(m.progress ?? 0) };
+      if (m.state === "countdown") out.confirmed = m.confirmedId ?? m.selectedId ?? null;
+      return out;
+    },
+    get open() { return !!prev; },
+    reset() { prev = null; },
+  };
+}
 
 export function addressOf(name) {
   const e = ADDRESS_TABLE[name];
@@ -85,10 +139,14 @@ export function freqToMidi(f) {
   return Math.round(69 + 12 * Math.log2(f / 440));
 }
 
-/** Note: MIDI note + voice (chords | arp | lead | ...). */
+/**
+ * Note: MIDI note + voice (chords | arp | lead | ...) + the globally unique `id` that pairs a note/on
+ * with its note/off or note/cancel.
+ */
 export function encodeNote(d) {
   if (!d) return d;
   const out = { voice: d.voice ?? "default" };
+  if (d.id != null) out.id = d.id;
   if (typeof d.midi === "number") out.note = d.midi;
   else if (typeof d.freq === "number") out.note = freqToMidi(d.freq);
   if (typeof d.freq === "number") out.freq = Math.round(d.freq * 100) / 100;
