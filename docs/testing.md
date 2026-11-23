@@ -198,3 +198,14 @@ integration level, and **one e2e journey in the real app**. Status:
 `PW_PORT=52xx npm run verify` is green (all four layers). New behavior has tests at the layers above; new
 pages are smoke-tested automatically (add a `PAGES` entry in `pages.e2e.spec.js` for their core interaction);
 intended visual changes come with updated baselines; no assert was loosened without a measurement.
+
+## Radial menu auto-select (ws/menu-autoselect)
+- Unit: `radial-menu.unit.spec.js` / `submenu.unit.spec.js` cover auto-select, the 2 s re-arm cooldown, no tick,
+  same-item quiet close, open-hand cancel, LEVEL_ARM_MS, hysteresis (no double-fire) and the live `menuConfig`
+  (`requireRelease`, `holdMs`, runtime changes next frame); reset it in `afterEach` (`resetMenuConfig()`).
+- In-app / lab menu helpers that "select, then open the hand" still pass for a change of mode (the selection is the
+  confirm, `selectedId` stays set during the countdown), but a step that waits to SEE a selected arc without choosing it
+  (current item, screenshots of the selected state, tracking loss with the fist past the radius) must either stay inside
+  the radius or set `requireRelease: true` (`window.__gsTest`/lab: `import("/src/menu/menu-config.js")`).
+- Quick lab check + screenshots: dev server on a port, then `node scripts/menu-shots.mjs http://localhost:<port>` ->
+  `test-results/screens/menu-autoselect-{approach,bump,countdown,setting-bump}.png`.

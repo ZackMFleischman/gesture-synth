@@ -96,12 +96,12 @@ ctx = {
 
 ## Radial menu (src/menu/radial-menu.js) — generic
 ```js
-const menu = createRadialMenu({ items: () => MenuItem[], currentId: () => string, onTick?: () => void });
+const menu = createRadialMenu({ items: () => MenuItem[], currentId: () => string });  // no tick (auto-select amendment)
 // MenuItem: { id, type: "mode", label, icon, color, direction: "up"|"right"|"down"|"left" }
 menu.update(right /* HandFrame|null */, now) -> {
   state: "closed"|"open"|"countdown",  // open = right hand held/locked
   hoverId, progress /* 0..1 */, selectedId,
-  confirmed?: id,   // set on the frame the hand opens on a selected item
+  confirmed?: id,   // set on the frame the fist crosses the item's select radius (auto-select amendment)
   cancelled?: true, // open hand with nothing selected, or tracking lost > 0.3 s
 }
 menu.draw(g, ctx)   // ring, fills, rim, labels, countdown — all at the hand
@@ -120,7 +120,7 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
   `ctx.param(name, {…, onChange})`.
 - ctx: `harmony.raw`, `harmony.notes()`, `harmony.describe()`, `harmony.keyVersion`; `audio.setVolume`, `audio.synth`.
 - Radial menu `update()` result also has `reason` ("empty"|"same-item"|"tracking-lost"), `opened`, `finished`; extras `snapshot()`, `reset()`,
-  `playTick()`, `registerMenuItemType()`. Choosing the current item = `cancelled` + `reason:"same-item"`.
+  `registerMenuItemType()` (`playTick()` removed by the auto-select amendment). Choosing the current item = `cancelled` + `reason:"same-item"`.
 - Units: `pos` is 0..1 of the canvas per axis; distances that must be isotropic use canvas-width units (divide dy by aspect).
 - Mode plugin optional fields: `guide: [[emoji, label], …]` (right-hand gesture-guide rows) and `rightTrack: { param, label } | null`
   (what the right edge track shows; Lead sets null and draws its ladder).
@@ -290,7 +290,7 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
   - Menu (generic, metadata only): `registry.menuItems(activeId, { layerId })`; item type "layer" (confirm = same rule as
     "mode": the current item is a no-change); `currentId` = `router.rightModeId`. Optional item fields `secondary: true`
     (also running under the current item: hollow marker; choosing it is a change) and `confirmHint` (hint text when
-    selected; the base gets "Open hand: Lead off").
+    approached / selected; the base gets "Lead off").
   - Screen controls: the router mounts the base's rows and the layer's rows in `.gs-ctl-group[data-group=base|layer]`
     (header: mode name + "right hand held" / "right hand"). Chords shows a held Volume row (`data-control=chords-volume`)
     only under the layer. Controls-panel Mode row lights base + layer; tap tempo / gate apply to the base (`S.base`).
@@ -323,3 +323,35 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
   0.3, "Right" at raw 0.3 = display 0.7), the tests' scenes and `npm run capture` use this orientation; the tests'
   `swap` variants (and the labs' `&swap`) are the mirrored case (chord hand on the screen right). Hand-internal geometry
   (thumb direction, tilt sign) is unchanged.
+
+- Radial menu auto-select + display smoothing (ws/menu-autoselect, user feedback after real-camera testing 2026-11-22):
+  - **Auto-select:** the fist crossing an arc's select radius (`SELECT_R` 0.6) chooses it at once, no open hand: mode /
+    layer -> `confirmed` + flash + countdown; setting -> `setting` + flash; the current item -> closes quietly (`cancelled`,
+    reason `"same-item"`, no countdown). Opening the hand before anything was chosen = cancel (`"empty"`, or `"submenu"`
+    while a submenu arc is selected); tracking lost 0.3 s = cancel (unchanged). The first arc crossed wins.
+  - Submenu arcs are never chosen: the sub-ring still opens after the fist stays past the edge for `SUB_OPEN_MS` 150 ms
+    (kept as a dwell: the sub-ring centers on the fist, so opening mid-motion would let the follow-through carry the fist
+    into a down-facing instrument). Any new ring (main at open / after back, sub-ring) selects nothing for
+    `LEVEL_ARM_MS` 150 ms (= its grow-in).
+  - **Re-arm / cooldown:** after ANY close the menu opens again only once the hand was seen not-fist (also counts during
+    the flash / countdown), or `REARM_MS` 2000 ms after the close with the fist still held (then `ENTER_STABLE_MS`).
+  - **No tick:** the `onTick` option and `playTick()` are gone.
+  - **Drawing:** the chosen arc bumps (scale 1 -> 1.12 -> 1 over 180 ms about its middle) with a selection indicator (rim
+    sweeps out from the middle in 140 ms + one outline ring expanding off the arc, 260 ms). Then a mode's arc fades over
+    `COUNTDOWN_MS` 400 ms while the right hand stays held (the router still switches `mode` at the start; the new mode
+    gets the right hand at the end); NO countdown ring / mode pill at the hand any more (user: "too busy"). A setting's
+    arc fades over 220 ms; its value pill at the hand stays. Hints: "Move to choose", an item's `confirmHint` while it is
+    approached. Snapshot adds `holdId`, `holdProgress`, `requireRelease`.
+  - **Live config** `src/menu/menu-config.js` (Tweaks panel): `menuConfig` read every frame by menu-state + menu-draw,
+    `setMenuConfig(partial)`, `resetMenuConfig()`, `MENU_CONFIG_DEFAULTS` = `{requireRelease: false, holdMs: 0, deadR: 0.22,
+    innerR: 0.3, selectR: 0.6, deselectR: 0.44, cooldownMs: 2000, countdownMs: 400}` (re-exported by radial-menu.js).
+    `requireRelease: true` = the earlier flow (crossing selects, open hand confirms / cancels); `holdMs > 0` = the fist
+    must stay past the select radius that long first (rim fills; dropping inside restarts). `createMenuState`'s
+    `timing` / `geometry` options still win per instance.
+  - **Display smoothing** (`src/ui/smooth.js`, One-Euro: min cutoff 1.0 Hz, beta 2.5 per display-unit/s, d-cutoff 4 Hz,
+    restart after a 250 ms gap; presets `filter` beta 0.35, `size`, `px` beta 0.0025; `createSmoothers()` keyed per
+    visual). DISPLAY ONLY: `S.drawPos()` in mode-ui is now smoothed (`S.rawDrawPos()` = the old value) and feeds the filter
+    arc, axis scales, edge-track markers + guide lines and first-use labels; the hand span uses a smoothed size; the arc's
+    dot (filter value) + its fingertip anchor, axis dots, Arp's x2 pill / tempo scale / BPM plate (pos, size, pinch point,
+    hand box), Lead's hand anchor (guide line, set badge) and the menu's fist dot / dashed line / setting pill are
+    smoothed. Tilt -> filter cutoff, heights -> gate / volume / notes, and all menu selection math stay raw.
