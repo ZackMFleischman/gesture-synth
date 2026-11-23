@@ -63,6 +63,7 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `lead-notes.unit.spec.js` | unit | Split out of `lead.spec.js` (was Node tests inside a browser file). |
 | `output-protocol.spec.js` | unit | Right place (starts the signaling server in-process on its own port). Legacy name. |
 | `radial-menu.unit.spec.js` | unit | Split out of `radial-menu.spec.js`. |
+| `lead-layer.unit.spec.js` | unit | Lead layer rules: router (layer on top of the base, base held via hold(), same-base Return crossfade, other base = switch, layer alone without a base), registry `layer`/`secondary` items, menu same-item vs change. |
 | `recordings.unit.spec.js` | unit | New: every `tests/fixtures/**/*.expect.json` is a test. |
 | `suite-layout.unit.spec.js` | unit | New: convention guard. |
 | `reach-zones.unit.spec.js` | unit | Reach-zone math (whole hand in frame at both ends, scales 0.5–2, three views), dead zone, clamping, smoothing/hysteresis, hand-input zone/x publishing, axes table + switches, Drive gain math. |
@@ -79,12 +80,13 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `app-input.e2e.spec.js` | e2e | From `hand-input` + `gesture-reliability` (`?replay` and view geometry in the app). |
 | `audio.spec.js` | e2e | Right place: Chords pitches/expression on recorded audio. In-flight (m1-wiring). `output never clips` is `test.fail()` until the limiter lands. |
 | `bus.spec.js` | e2e (legacy) | **Mixed**: 7 Node unit tests + 3 app tests in one file. Split the `bus (unit)` block into `bus.unit.spec.js` after m1-wiring merges (it edits this file). |
-| `gain-staging.e2e.spec.js` | e2e | Gain staging around the master limiter: every chord (1344, offline render of the real engine) under the threshold at max settings; loudness linear in right volume and master; no limiting in steady loud Chords/Arp/Lead; peak <= 1. |
+| `gain-staging.e2e.spec.js` | e2e | Gain staging around the master limiter: every chord (1344, offline render of the real engine) under the threshold at max settings; loudness linear in right volume and master; no limiting in steady loud Chords/Arp/Lead and Arp + Lead / Chords + Lead (Lead layer); peak <= 1. |
 | `gestures.spec.js` | e2e | Right place (gesture → UI mapping in the app). Overlaps `hand-input.unit` on purpose: unit proves classification, this proves the wiring. |
 | `m1-ui.spec.js` | e2e | Milestone spec, right place. |
 | `mobile-ui.e2e.spec.js` | e2e | The app's mobile system: before/after audit, tray/sheets/guide strip/minimal HUD with the real handlers, first visit, blocked storage, phone first-use labels, desktop inert, real-app screens + video. |
 | `m1-pinch.spec.js` | e2e | Milestone spec (1.6 pinch = tempo): no jump at the start, voicing kept (bus + heard pitches), locks, Return, no lost/doubled step on recorded audio, visuals, screenshots + video. |
 | `m2-lead.spec.js` | e2e | Milestone spec: Lead in the app (fist menu, switches without a gap, 2.1–2.5, menu hold, clipping, layout both sides at 1280×800 / 390×844, screenshots + `test-results/videos/m2-lead.webm` with sound). Helpers: `helpers/m2-lead.js` (browser-only). |
+| `lead-layer.e2e.spec.js` | e2e | Lead layer in the app: Arp→Lead / Chords→Lead (held base values, left-hand chords reach the base, lead + base in the FFT, no gap/click), menu rules + Return crossfade, Controls panel while layered, badge/pill/meter/layout at 1280×800 + 390×844, screens `layer-*.png`, `test-results/videos/lead-layer.webm` with sound. Visualizer `/gs/layer`: in `m3-output.spec.js`. |
 | `output.spec.js` | e2e | Right place (app + visualizer, two contexts). Its demo-video test is the slowest e2e test (~19 s). |
 | `m3-output.spec.js` | e2e | M3 3.3: output hooked into the modes app (beat grid, menu/mode, Arp notes, manifest, pinch, screens + video). |
 | `output-m3.unit.spec.js` | unit | M3 3.3 pure mapping + clock transport notifications. |

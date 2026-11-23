@@ -38,7 +38,7 @@ export function createGuide({ S, doc, bus }) {
   }
   /** Sideways axes (every mode, src/core/axes.js) that are switched on: "Right hand sideways → Drive". */
   const axisRows = () => AXES.filter((a) => bus?.get?.(`${a.id}/on`) !== false).map((a) => ["↔", a.guide]);
-  const renderKey = () => `${S.modeId}|${axisRows().length}|${AXES.map((a) => bus?.get?.(`${a.id}/on`) !== false).join()}`;
+  const renderKey = () => `${S.modeId}|${S.layerId ? S.baseId : ""}|${axisRows().length}|${AXES.map((a) => bus?.get?.(`${a.id}/on`) !== false).join()}`;
 
   function append() {
     if (!guideEl) return;
@@ -86,7 +86,6 @@ export function createGuide({ S, doc, bus }) {
     guideEl.append(frag);
     renderedFor = renderKey();
   }
-  const renderKey = () => `${S.modeId}|${S.layerId ? S.baseId : ""}`;
 
   // controls.js replaces the guide's innerHTML on key change: put our rows back.
   const observer = new MutationObserver(() => {
