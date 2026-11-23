@@ -3,6 +3,7 @@
 // URL flags: ?manualClock (time only advances via __menuLab.step(ms)), ?noCamera (dark backdrop only).
 
 import { createRadialMenu, playTick } from "../src/menu/radial-menu.js";
+import { listInstruments } from "../src/instruments/index.js";
 
 const params = new URLSearchParams(location.search);
 const MANUAL = params.has("manualClock");
@@ -20,15 +21,9 @@ const MODES = [
   { id: "arp", type: "mode", label: "Arp", icon: ICONS.arp, color: "#4fb3ff", direction: "right" },
   { id: "lead", type: "mode", label: "Lead", icon: ICONS.lead, color: "#c08cff", direction: "left" },
 ];
-// Sub-ring children, in fan order: next to the back sector (up-left), around the bottom, to up-right.
-const INSTRUMENTS = [
-  { id: "warm", label: "Warm", icon: "M3 15l4.5-6 4.5 6 4.5-6 4.5 6" },
-  { id: "bright", label: "Bright", icon: "M3 16l6-8v8l6-8v8l6-8" },
-  { id: "retro", label: "Retro", icon: "M3 16V8h4.5v8H12V8h4.5v8H21" },
-  { id: "organ", label: "Organ", icon: "M5 20V10M9.5 20V6M14 20V4M18.5 20V8M3 20h18" },
-  { id: "electric", label: "Electric", icon: "M13 3L6 13h5l-1 8 7-10h-5l1-8" },
-  { id: "sax", label: "Sax", icon: "M9 3v11a4 4 0 0 0 8 0v-2M9 6.5h3M9 10h3" },
-];
+// Sub-ring children = the registered instrument plugins (src/instruments), in fan order: next to the back sector
+// (up-left), around the bottom, to up-right.
+const INSTRUMENTS = listInstruments().map((d) => ({ id: d.id, label: d.label, icon: d.icon }));
 // Which instrument the Sound arc sets: the base mode's, or the lead's while Lead is on (Phase 2 semantics).
 const sounds = { chords: "warm", arp: "warm", lead: "bright" };
 const soundTarget = () => currentId;
