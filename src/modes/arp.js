@@ -46,12 +46,12 @@ export const PINCH_TEMPO = Object.freeze({
 // looks like a pinch forming (index curled, thumb tip near the index tip) waits PINCH_LOOKBACK_MS
 // (300 ms) instead: it reads 3 fingers for a few frames before the pinch is detected, and a 100 ms hold
 // alone would let an approach of > 100 ms through.
-export const VOICING_HOLD = Object.freeze({
+export const VOICING_HOLD = { // mutable: Tweaks may change MS at runtime (read live)
   /** ms a new count must be stable (normal shapes). */
   MS: CHORD_HOLD_TIME_MS,
   /** pinchDistance (hand sizes) below which a curled-index shape counts as a pinch approach. */
   APPROACH_DISTANCE: 0.8,
-});
+};
 
 /** Pure: is this frame a pinch forming (index curled, thumb tip near the index tip, not pinched yet)? */
 export function isPinchApproach(f) {
