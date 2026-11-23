@@ -120,15 +120,21 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
 
   // `held` (state): while the menu holds the right hand {right: true, [rightTrack.param]: heldValue};
   // during the crossfade back to the hand {[param]: heldValue}; otherwise null. Built on transitions only.
-  function publishHeld(phase) {
+  // A mode can hold right-hand values itself (Arp pinch) through the optional `mode.heldState()` ->
+  // null | { phase: "held"|"return", values: {[param]: heldValue} }; the menu wins over it.
+  function publishHeld(phase, values = null, src = "menu") {
     const id = active ? active.id : null;
-    if (phase === heldPhase && id === heldFor) return;
-    heldPhase = phase;
+    const key = phase ? `${src}|${phase}` : null;
+    if (key === heldPhase && id === heldFor) return;
+    heldPhase = key;
     heldFor = id;
     if (!phase) { bus.set("held", null); return; }
-    const p = active?.rightTrack?.param;
     const h = phase === "held" ? { right: true } : {};
-    if (p) h[p] = bus.get(p) ?? null;
+    if (values) Object.assign(h, values);
+    else {
+      const p = active?.rightTrack?.param;
+      if (p) h[p] = bus.get(p) ?? null;
+    }
     bus.set("held", h);
   }
 
@@ -229,8 +235,13 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
         frame = { ...frame, height: lerp(locked.height, frame.height, e), tilt: lerp(locked.tilt, frame.tilt, e) };
       }
     }
-    publishHeld(resumePending || resumeStart !== null ? "return" : null);
     active.update(frame, ctx);
+    if (resumePending || resumeStart !== null) publishHeld("return");
+    else {
+      const mh = active.heldState ? active.heldState() : null;
+      if (mh) publishHeld(mh.phase, mh.values, "mode");
+      else publishHeld(null);
+    }
   }
 
   function draw(g) {

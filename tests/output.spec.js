@@ -530,6 +530,8 @@ test.describe("mobile viewport", () => {
     await page.evaluate(() => window.__gsTest.output.setOutput(true));
     await expect(page.locator("#outputChip")).toBeVisible();
     await expect(page.locator("#outputChip")).toHaveAttribute("data-state", "waiting");
+    // Phones: the top-left controls live in the mobile bar's tray (docs/mobile-ui.md).
+    if (!(await page.locator("#guideToggle").isVisible())) await page.locator("#gsPill").click();
     await page.locator("#guideToggle").click();
     const chip = await page.locator("#outputChip").boundingBox();
     expect(chip.x).toBeGreaterThanOrEqual(0);
@@ -537,7 +539,7 @@ test.describe("mobile viewport", () => {
     expect(chip.width).toBeLessThanOrEqual(40); // D12: dot only below 520 px
     const overlaps = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
     const ids = ["keySelect", "toneSelect", "guideToggle", "gestureGuide", "volumeMeter", "distortionDisplay",
-      "chordDisplay", "qualityDisplay", "helpButton"];
+      "chordDisplay", "qualityDisplay", "helpButton", "gsBar"];
     // ...and the modes UI chrome (mode badge, Controls toggle, transport, ...: every visible [data-gs-kind] element).
     const extra = await page.evaluate(() => [...document.querySelectorAll("[data-gs-kind]")]
       .filter((e) => e.id && e.id !== "outputChip" && e.getClientRects().length && getComputedStyle(e).display !== "none")
@@ -545,7 +547,7 @@ test.describe("mobile viewport", () => {
     expect(extra.length).toBeGreaterThan(0);
     for (const id of [...ids, ...extra]) {
       const box = await page.locator(`#${id}`).boundingBox();
-      if (!box) continue;
+      if (!box) continue; // folded into the collapsed mobile bar (checked as #gsBar)
       expect(overlaps(chip, box), `#outputChip overlaps #${id}`).toBe(false);
     }
     await page.screenshot({ path: `${SCREENS}/output-chip-mobile.png`, clip: { x: 0, y: 0, width: 390, height: 200 } });

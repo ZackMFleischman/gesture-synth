@@ -18,6 +18,10 @@ Hand tracking: MediaPipe HandLandmarker (wasm + model loaded from CDN at runtime
 - `src/services/` — `audio.js` (SynthEngine + `ctx.audio` facade, emits `note/on|off`), `harmony.js`
   (key, chord tones, voicings, names, chord stabilizer), `analytics.js` (Clarity, prod-only).
 - `src/core/` — `bus.js` (signal bus + `createParam`), `registry.js` (`registerMode`, menu items).
+- `src/ui/mobile/` — phone/touch-tablet layout (docs/mobile-ui.md): `mobile-ui.js` (`mountMobileUI`, mounted last in
+  main.js: one collapsible bar, Controls/Help sheets, guide strip, minimal HUD; inert on desktop), `mobile.css`
+  (all under `body.gs-mobile`), `layout-metrics.js` (pure coverage/clear-area math), `safe-area.js` (notch insets for canvas).
+  Lab: `/labs/mobile-lab.html?m=<state>`. `__gsTest.mobile` in DEV.
 - `src/ui/` — `overlay.js` (video + landmark dots), `indicators.js` (chord/quality/meter/filter — read
   from the bus), `controls.js` (key/tone selects, guide, help, start overlay).
 

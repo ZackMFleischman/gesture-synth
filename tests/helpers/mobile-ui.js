@@ -1,5 +1,7 @@
 // Helpers for tests/mobile-ui.spec.js: collect what UI is on screen (DOM boxes + lab canvas regions).
 import fs from "node:fs";
+import { expect } from "@playwright/test";
+import { MOBILE_SIZES, summarize, coverage, offscreen } from "../../src/ui/mobile/layout-metrics.js";
 import path from "node:path";
 
 /** Existing controls from index.html. */
@@ -72,4 +74,51 @@ export function writeAudit(name, row) {
   const dir = "test-results/mobile-audit";
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(row, null, 1));
+}
+
+// ---- shared by tests/mobile-ui.int.spec.js + tests/mobile-ui.e2e.spec.js ----
+export const PHONES = Object.fromEntries(Object.entries(MOBILE_SIZES).filter(([k]) => k !== "768x1024"));
+export const device = (vp) => ({ viewport: vp, hasTouch: true, isMobile: true });
+
+/** Persistent chrome for the coverage budget: edge tracks count by their drawn body (6 px + halo), the Lead
+ *  ladder is the instrument surface (reported separately, see docs/mobile-ui.md §6). */
+export function chrome(items) {
+  return items
+    .filter((i) => i.name !== "canvas:lead-ladder")
+    .map((i) =>
+      /track$/.test(i.name) ? { ...i, rect: { ...i.rect, x: i.rect.x + i.rect.w / 2 - 5, w: 10 } } : i,
+    );
+}
+
+export async function audit(page, label, size, { budget = false } = {}) {
+  const ui = await collectUI(page);
+  const items = budget ? chrome(ui.items) : ui.items;
+  const s = summarize(items, ui.W, ui.H);
+  s.withPanels = coverage([...items, ...ui.panels].map((i) => i.rect), ui.W, ui.H);
+  s.items = items.map((i) => ({ name: i.name, rect: Object.fromEntries(Object.entries(i.rect).map(([k, v]) => [k, Math.round(v)])) }));
+  s.panels = ui.panels.map((i) => i.name);
+  writeAudit(`${label}-${size}`, { label, size, ...s });
+  return { ui, s, items };
+}
+
+export const labUrl = (m, extra = "") => `/labs/mobile-lab.html?m=${m}&clean${extra}`;
+export async function openLab(page, m, extra) {
+  await page.goto(labUrl(m, extra));
+  await page.waitForFunction(() => window.__mobileLab?.ready);
+}
+
+/** Center of a visible element, asserting it is on screen and not covered (a tap there reaches it). */
+export async function tapTarget(page, sel) {
+  const loc = page.locator(sel);
+  await expect(loc, `${sel} visible`).toBeVisible();
+  const hit = await loc.evaluate((e) => {
+    const r = e.getBoundingClientRect();
+    const x = r.x + r.width / 2;
+    const y = r.y + r.height / 2;
+    const top = document.elementFromPoint(x, y);
+    return { x, y, r: { x: r.x, y: r.y, w: r.width, h: r.height }, ok: !!top && (top === e || e.contains(top)) };
+  });
+  expect(hit.ok, `${sel} is not covered at its center`).toBe(true);
+  expect(Object.values(offscreen(hit.r, page.viewportSize().width, page.viewportSize().height)).every((v) => v < 0.5), `${sel} on screen`).toBe(true);
+  return hit;
 }

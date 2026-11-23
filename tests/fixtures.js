@@ -11,6 +11,11 @@ export const SCREENS_DIR = "test-results/screens";
 export const test = base.extend({
   page: async ({ page }, use) => {
     await page.addInitScript(AUDIO_TAP_SCRIPT);
+    // The mobile UI shows its tray open once on a first visit (docs/mobile-ui.md M1); tests start as a returning
+    // player. tests/mobile-ui.spec.js clears this to test the first visit.
+    await page.addInitScript(() => {
+      try { localStorage.setItem("gs.mobile.seen", "1"); } catch { /* storage blocked in this test */ }
+    });
     const errors = [];
     page.on("pageerror", (err) => errors.push(err));
     await use(page);

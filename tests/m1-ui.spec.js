@@ -40,13 +40,17 @@ function checkLayout({ existing, newDom, canvas, clear }, vp) {
   const fresh = [...newDom, ...canvas];
   const persistent = fresh.filter((r) => r.kind === "edge" || r.kind === "status");
   const panels = fresh.filter((r) => r.kind === "panel");
-  expect(persistent.length, "new persistent elements found").toBeGreaterThan(3);
+  // Phones: the mobile system (docs/mobile-ui.md) folds the badge + Controls toggle into its bar and hides
+  // the meter while collapsed, so only the edge tracks (+ transport) remain as new persistent elements.
+  expect(persistent.length, "new persistent elements found").toBeGreaterThan(vp.width < 600 ? 1 : 3);
   for (const n of [...persistent, ...panels]) {
     const r = n.rect;
     expect(r.x, `${n.name} left`).toBeGreaterThanOrEqual(0);
     expect(r.y, `${n.name} top`).toBeGreaterThanOrEqual(0);
     expect(r.x + r.w, `${n.name} right`).toBeLessThanOrEqual(vp.width);
     expect(r.y + r.h, `${n.name} bottom`).toBeLessThanOrEqual(vp.height);
+    // A mobile bottom sheet is a user-opened layer above everything (it may cover the chord while open).
+    if (n.name.endsWith("(sheet)")) continue;
     for (const e of existing) expect(overlap(r, e.rect), `${n.name} overlaps existing ${e.name}`).toBe(false);
   }
   for (let i = 0; i < persistent.length; i++)
@@ -76,6 +80,12 @@ async function noHandFeedbackUnder(page, sel) {
     const palm = { x: arc.rect.x + arc.rect.w / 2, y: arc.rect.y + (arc.rect.w - 12) / 2 + 6, w: 1, h: 1 };
     expect(overlap(palm, panel), `filter arc drawn for a hand under ${sel}`).toBe(false);
   }
+}
+
+/** Clicks a control; on phones it lives in the mobile bar's tray, so open the tray first. */
+async function tapControl(page, sel) {
+  if (!(await page.locator(sel).isVisible()) && (await page.locator("#gsPill").isVisible())) await page.locator("#gsPill").click();
+  await page.locator(sel).click();
 }
 
 async function toArp(page) {
@@ -117,7 +127,7 @@ for (const [vpName, vp] of Object.entries(VIEWPORTS)) {
     test("controls-open", async ({ synthPage: page, setHands }) => {
       await toArp(page);
       await setHands(...scene(vp));
-      await page.locator("#controlsToggle").click();
+      await tapControl(page, "#controlsToggle");
       await expect(page.locator("#controlsPanel")).toBeVisible();
       await frames(page, 4);
       await shot(page, "controls-open", vpName);
@@ -128,7 +138,7 @@ for (const [vpName, vp] of Object.entries(VIEWPORTS)) {
     test("guide-open", async ({ synthPage: page, setHands }) => {
       await toArp(page);
       await setHands(...scene(vp));
-      await page.locator("#guideToggle").click();
+      await tapControl(page, "#guideToggle");
       await frames(page, 4);
       await shot(page, "guide-open", vpName);
       await noHandFeedbackUnder(page, "#gestureGuide");

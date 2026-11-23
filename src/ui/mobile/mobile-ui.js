@@ -26,6 +26,7 @@ export const INTRO_STORAGE_KEY = "gs.mobile.seen";
 export const AUTO_COLLAPSE_MS = 2500;
 /** A hand counts as gone after this long without a position (ms). */
 const HAND_STALE_MS = 600;
+const HAND_POLL_MS = 200;
 
 const MODE_NAMES = { chords: "Chords", arp: "Arp", lead: "Lead" };
 
@@ -258,7 +259,8 @@ export function mountMobileUI(o = {}) {
   on(bar, "change", () => ((lastTouch = now()), refresh()));
   // Tap anywhere outside the expanded bar collapses it.
   on(doc, "pointerdown", (e) => {
-    if (open && !bar.contains(e.target)) setOpen(false);
+    // The start overlay tap ("click to enable audio") must not fold the first-visit tray it reveals.
+    if (open && !bar.contains(e.target) && !e.target.closest?.("#startOverlay")) setOpen(false);
   }, true);
   on(doc, "keydown", (e) => {
     if (e.key !== "Escape" || !mobile) return;
@@ -281,23 +283,17 @@ export function mountMobileUI(o = {}) {
     if (badge) mo.observe(badge, { childList: true, characterData: true, subtree: true });
   };
 
-  // Hands playing (optional bus): any hand position seen in the last HAND_STALE_MS.
+  // Hands playing (optional bus): a hand position seen in the last HAND_STALE_MS. Polled with bus.get (not
+  // subscribed), so the hand-position producers stay free (bus.wants() stays false; see output.spec).
   let lastHand = -Infinity;
-  let handTimer = 0;
-  let unsubBus = null;
-  if (o.bus?.subscribe) {
-    unsubBus = o.bus.subscribe(
-      {
-        onSet(name, v) {
-          if (!v) return;
-          lastHand = now();
-          if (!playing) setPlaying(true);
-          clearTimeout(handTimer);
-          handTimer = setTimeout(() => now() - lastHand >= HAND_STALE_MS - 5 && setPlaying(false), HAND_STALE_MS);
-        },
-      },
-      ["left/pos", "right/pos"],
-    );
+  let pollTimer = 0;
+  if (o.bus?.get) {
+    pollTimer = setInterval(() => {
+      if (!mobile) return;
+      if (o.bus.get("left/pos") || o.bus.get("right/pos")) lastHand = now();
+      const on = now() - lastHand < HAND_STALE_MS;
+      if (on !== playing) setPlaying(on);
+    }, HAND_POLL_MS);
   }
 
   // ---------------------------------------------------------------- layout switch
@@ -353,8 +349,7 @@ export function mountMobileUI(o = {}) {
     },
     destroy() {
       clearTimeout(collapseTimer);
-      clearTimeout(handTimer);
-      unsubBus?.();
+      clearInterval(pollTimer);
       mo.disconnect();
       off.forEach((f) => f());
       moveOut();

@@ -138,6 +138,9 @@ export function matchToSchedule(onsets, scheduled, recStartAc) {
   return { offset, pairs, errors };
 }
 
+// Pure (unit-testable) half: tests/helpers/schedule-match.js.
+export { matchToScheduleAnyOffset } from "./schedule-match.js";
+
 export const stats = (xs) => {
   const abs = xs.map(Math.abs);
   return {

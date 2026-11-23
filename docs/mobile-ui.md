@@ -1,14 +1,16 @@
 # Mobile UI: compact, minimizable chrome for phones and tablets
 
-Status: Phase A (design + prototype + tests) on branch `ws/mobile-ui`. Phase B (adoption in the real app) waits for
-`ws/m1-ui` to merge. Change requests go through the lead.
+Status: **Phase B done** (adopted in the real app: `main.js` mounts `mountMobileUI({ bus })` last). Lead decisions:
+L1 yes (meter hidden while collapsed on all phones), L2 tablets keep the system, L3 2.5 s, L4 no (help title unchanged),
+L5 yes (the pill replaces `#modeBadge` on phones). Lead ladder numbers (§6) are with the Lead integration agent.
 
 - Prototype: `labs/mobile-lab.html?m=<state>` (dev server; open with a phone viewport in devtools). States:
   `playing-collapsed`, `expanded`, `controls-sheet`, `guide-sheet`, `help`, `minimal-hud`, `mode-chords`, `mode-arp`,
   `mode-lead`, `menu`. Landscape = a landscape viewport. `&layout=mobile|desktop` forces the system on/off.
 - Code to adopt: `src/ui/mobile/mobile-ui.js` (`mountMobileUI`), `src/ui/mobile/mobile.css`,
   `src/ui/mobile/layout-metrics.js` (pure metrics; also used by the tests).
-- Tests: `tests/mobile-ui.spec.js` (+ `tests/helpers/mobile-ui.js`). Numbers land in `test-results/mobile-audit/*.json`,
+- Tests (by layer, docs/testing.md): `tests/mobile-layout.unit.spec.js`, `tests/mobile-ui.int.spec.js` (lab),
+  `tests/mobile-ui.e2e.spec.js` (app) + `tests/helpers/mobile-ui.js`. Numbers land in `test-results/mobile-audit/*.json`,
   screens in `test-results/screens/mobile-*.png`.
 
 User feedback this implements: *"It wasn't great for mobile before. The UI elements were taking up too much room and
@@ -118,7 +120,7 @@ center (28 px), transport bottom-right, controls = side sheet from the right (�
 | `#controlsToggle` / `#controlsPanel` | in the tray | toggle in row 2 → bottom/side sheet | same |
 | `#guideToggle` / `#gestureGuide` | in the tray | toggle in row 2 → strip under the pill, ✕ | same |
 | `#helpButton` / `#helpModal` | in the tray | header `?` → bottom sheet | same |
-| `#volumeMeter` | 34×38 top right (hidden < 360 px wide with the modes UI: the right track shows the same value, L1) | visible | hidden |
+| `#volumeMeter` | hidden on phones with the modes UI (the right track shows the same value, L1); 34×38 when shown | visible | hidden |
 | `#distortionDisplay` | 11 px on a plate, under the meter | same | hidden |
 | `#chordDisplay`, `#qualityDisplay` | 34/11 px (28 px on short screens) | same | same |
 | `#transport` (Arp) | above the chord; bottom-right in landscape | same | hidden |
@@ -203,3 +205,15 @@ don't cache `getBoundingClientRect()` of those nodes at mount (they move into th
 rows as `.gesture-guide-row.gs-guide-mode` + `.gs-guide-sep` / `.gs-guide-head` (the strip layout keys on them); and give
 new top-left controls an id so they can be added to the tray list (`MOVES` in `mobile-ui.js`). Canvas hit regions
 (`covers` in mode-ui.js) should be recomputed when panels open, since the panel is now a bottom/side sheet.
+
+## 10. Phase B notes (as built)
+- Hands-playing comes from polling `bus.get("left/pos" | "right/pos")` every 200 ms while on a phone, not from a
+  subscription, so the producers stay lazy (`output.spec › output off` checks `bus.wants()`).
+- The start-overlay tap does not fold the first-visit tray. Test fixtures mark the first visit as seen
+  (`gs.mobile.seen`); `mobile-ui.e2e` clears it to test the intro.
+- Edge tracks: `trackX(side, G)` in `edge-tracks.js` adds the safe-area inset (`G.safe` from
+  `src/ui/mobile/safe-area.js`, read through a probe element, re-read on resize). The Arp first-use "Gate" label uses it.
+- Phones (W < 600 or H < 500): first-use labels only `Gate` + `Filter` (`PHONE_FIRST_USE` in `guide.js`).
+- `mode-ui.js`: an open panel inside the mobile sheet covers the canvas by the sheet's box.
+- Not done here (owned elsewhere): Lead ladder width (lead.js), a glyph in the output chip dot (status-chip.js).
+  The `modes.css` `max-width: 519px` block stays (mobile rules win by specificity; its chip-under-panel rule is still useful).

@@ -59,15 +59,18 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `audio-capture.unit.spec.js` | unit | New: capture-glitch policy. |
 | `gesture-reliability.unit.spec.js` | unit | Split out of `gesture-reliability.spec.js` (browser parts moved). |
 | `hand-input.unit.spec.js` | unit | Split out of `hand-input.spec.js` (app geometry test moved to e2e). |
+| `mobile-layout.unit.spec.js` | unit | Mobile layout math (coverage, clear area, hand zones, budgets) + safe-area edge-track x. |
 | `lead-notes.unit.spec.js` | unit | Split out of `lead.spec.js` (was Node tests inside a browser file). |
 | `output-protocol.spec.js` | unit | Right place (starts the signaling server in-process on its own port). Legacy name. |
 | `radial-menu.unit.spec.js` | unit | Split out of `radial-menu.spec.js`. |
 | `recordings.unit.spec.js` | unit | New: every `tests/fixtures/**/*.expect.json` is a test. |
 | `suite-layout.unit.spec.js` | unit | New: convention guard. |
+| `pinch-tempo.unit.spec.js` | unit | Pinch -> tempo mapping, the `pinch` bus event, `matchToScheduleAnyOffset` (helpers/schedule-match.js). |
 | `arp.spec.js` | integration | Right place for engine timing (±3 ms) on recorded audio. Lab-only: **app-level timing owed** (M1). Includes a WAV demo (not a gate-worthy assert; keep, it's cheap). |
 | `gesture-test.int.spec.js` | integration | From `gesture-reliability.spec.js`. |
 | `lead.spec.js` | integration | Right place for Lead UX checks 2.1–2.5 in the lab. Lab-only: **app journeys owed** (M2). Mode-switch test (Chords→Lead) belongs in e2e once Lead is registered in the app. |
 | `lead-demo.spec.js` | integration | Demo artifact (melody WAV + screenshots), 1 assert. Keep; candidate for a non-gating demo tag later. |
+| `mobile-ui.int.spec.js` | integration | Mobile system prototype in `labs/mobile-lab.html` (+ planned chrome as the before): budgets, clear area, 2-tap reach, sheets, 44 px targets, auto-collapse. |
 | `menu-lab.int.spec.js` | integration | From `radial-menu.spec.js` (lab visuals). |
 | `radial-menu-video.spec.js` | integration | Demo video, few asserts, slowest integration test (~15 s). Same note as `lead-demo`. |
 | `ui-lab.spec.js` | integration | Layout contract on mock-ups. Duplicated by `m1-ui.spec.js` for every state the real app can show; after M1/M2 keep only states the app can't reach yet, then retire. |
@@ -77,6 +80,8 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `bus.spec.js` | e2e (legacy) | **Mixed**: 7 Node unit tests + 3 app tests in one file. Split the `bus (unit)` block into `bus.unit.spec.js` after m1-wiring merges (it edits this file). |
 | `gestures.spec.js` | e2e | Right place (gesture → UI mapping in the app). Overlaps `hand-input.unit` on purpose: unit proves classification, this proves the wiring. |
 | `m1-ui.spec.js` | e2e | Milestone spec, right place. |
+| `mobile-ui.e2e.spec.js` | e2e | The app's mobile system: before/after audit, tray/sheets/guide strip/minimal HUD with the real handlers, first visit, blocked storage, phone first-use labels, desktop inert, real-app screens + video. |
+| `m1-pinch.spec.js` | e2e | Milestone spec (1.6 pinch = tempo): no jump at the start, voicing kept (bus + heard pitches), locks, Return, no lost/doubled step on recorded audio, visuals, screenshots + video. |
 | `output.spec.js` | e2e | Right place (app + visualizer, two contexts). Its demo-video test is the slowest e2e test (~19 s). |
 | `m3-output.spec.js` | e2e | M3 3.3: output hooked into the modes app (beat grid, menu/mode, Arp notes, manifest, pinch, screens + video). |
 | `output-m3.unit.spec.js` | unit | M3 3.3 pure mapping + clock transport notifications. |
@@ -98,6 +103,8 @@ that need a browser: none.
   (`tests/fixtures.js`), which also fail the test on any uncaught page error.
 - **Replay** (`?replay=/tests/fixtures/x.json`, dev only, real time, `&replayLoop`): real or synthetic
   recordings through the real pipeline. In Node: `replayThrough(loadRecordingFile(f))` → HandFrames.
+- **App audio timing**: the app's tap sits ~170 ms (2 blocks) behind `playbackTime`, more than half an arp step, so
+  `matchToSchedule` can lock onto the wrong step; use `matchToScheduleAnyOffset` (`helpers/schedule-match.js`) there.
 - **Audio capture** (`tests/helpers/audio.js`): `recordAudio(page, ms)` → `{ samples, sampleRate, health }`;
   `spectrum` / `assertNotes` / `peaks` / `centroid`; arp-specific onset/length/pitch/click analysis in
   `helpers/arp-analysis.js`. Write WAVs to `test-results/audio/` for ears.
@@ -163,7 +170,7 @@ integration level, and **one e2e journey in the real app**. Status:
 | M1 arp timing ±3 ms, no drift | arp-patterns (clock) | arp.spec | **owed (M1 wiring)** |
 | M1 menu state machine, cancel = no change | radial-menu.unit | menu-lab.int | m1-integration (in flight) |
 | M1 no click/gap on mode switch | — | lead.spec (Chords→Lead) | m1-integration (Chords↔Arp, in flight) |
-| M1 height/thumb/pinch roles | hand-input.unit | arp.spec | m1-integration + m1-ui; **pinch = tempo on audio owed** |
+| M1 height/thumb/pinch roles | hand-input.unit, pinch-tempo.unit | arp.spec | m1-integration + m1-ui + m1-pinch (pinch = tempo on recorded audio, ±3 ms) |
 | M2 preview == played, no flicker, set/octave rules | lead-notes.unit | lead.spec | **owed (M2)** |
 | M3 chip < 1 s, zero work when off, visualizer data | output-protocol, output-m3.unit (menu/pinch/note-id mapping, clock.onTransport) | — | output.spec (chip, Q4 Output row, relay, zero work), m3-output (beat grid at once + on the audio clock, fist menu → /gs/menu + /gs/mode, Arp notes early/on time/paired/cancel, manifest, pinch, Lead state) |
 
@@ -171,7 +178,6 @@ integration level, and **one e2e journey in the real app**. Status:
 | Gap | Milestone that delivers it |
 |---|---|
 | Arp timing in the real app (record in `/?mockHands` with Arp active, `matchToSchedule`, ±3 ms, inside `retryOnCaptureGlitch`) | M1 wiring |
-| Pinch = tempo (1.6) heard on recorded audio in the app (not only the transport readout) | M1 wiring |
 | Split `bus.spec.js` → `bus.unit.spec.js` (Node block) + app block | M1 wiring merge (lead) |
 | Remove `test.fail()` from `audio.spec › output never clips` once the master limiter lands | M1 wiring |
 | Re-baseline `visual.e2e` after m1-wiring merges (main.js changes meter/volume roles); add baselines for Arp chrome, menu open, controls panel | M1 wiring + M1 UI |
