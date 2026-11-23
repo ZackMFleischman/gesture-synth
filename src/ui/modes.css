@@ -142,6 +142,12 @@ body.gs-modes #outputPopover { top: 46px; right: var(--gs-gutter); }
 #controlsPanel .gs-v { display: flex; align-items: center; gap: 6px; min-width: 0; }
 #controlsPanel .gs-sep { grid-column: 1 / -1; height: 1px; background: #3a3428; margin: 1px 0; }
 #controlsPanel .gs-full { grid-column: 1 / -1; }
+#controlsPanel [data-row][hidden] { display: none; }
+.gs-select {
+  background: #1a1a1a; color: #e8a13d; border: 1px solid #3a3428; border-radius: 4px;
+  font: 12px monospace; padding: 3px 4px; min-width: 0; max-width: 100%;
+}
+.gs-select:focus-visible { outline: 2px solid #e8a13d; outline-offset: 1px; }
 .gs-hand {
   display: inline-flex; margin-left: auto; padding-left: 4px; color: var(--gs-quiet);
   visibility: hidden;

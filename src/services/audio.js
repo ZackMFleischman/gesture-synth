@@ -41,8 +41,26 @@
 //  - a limiter + soft clipper on the master: the output never exceeds ±1
 //  - releaseChord(fade): click-free chord fade-out (used when leaving Chords)
 //  - note/on, note/off (paired by a global `id`) and note/cancel on the bus
+//  - instruments (src/instruments/*, plugins): the BASE instrument (Chords + Arp; the tone select) and the LEAD
+//    instrument (the Lead layer; null = follows the base until one is picked). Chords' notes are instrument SOURCES
+//    (the original three are plain OscillatorNodes, as before) through the chord instance gain into the instrument's
+//    POST chain (chordRack) -> chordGain. Switching the base instrument re-voices a sounding chord with an
+//    equal-power crossfade (releaseChord + a fresh chord with its 30 ms fade-in): no gap, no click.
+//    Bus (state, owner audio): `sound/base`, `sound/lead` (effective lead instrument id).
 
 import { bus as sharedBus } from "../core/bus.js";
+// Instrument plugins (src/instruments/index.js registers the built-ins). The engine only uses the registry, the
+// plugin interface and its traits: it never names an instrument.
+import {
+  createSource,
+  createRack,
+  prepareInstruments,
+  instrumentFromTone,
+  toneOf,
+  isInstrument,
+  defaultInstrumentId,
+  traitsOf,
+} from "../instruments/index.js";
 
 const CHORD_VOICE = "chords";
 /** Level of each chord oscillator (4 summed). Worst case stays under the limiter threshold (see header). */
@@ -114,6 +132,23 @@ function makeImpulse(ac) {
   return buf;
 }
 
+const BASIC_WAVES = ["triangle", "sawtooth", "square"];
+
+/** Ends chord sources at t: traits.releaseTailS null = stop at once (plain oscillators, the original behavior); else
+ *  release() (damped string, key-up fade) and stop after the tail. */
+function endSources(srcs, t) {
+  for (const s of srcs) {
+    try {
+      const tail = traitsOf(s.instrument).releaseTailS;
+      if (tail == null || !s.release) s.stop();
+      else {
+        s.release(t);
+        s.stop(t + tail);
+      }
+    } catch {}
+  }
+}
+
 let noteIdCounter = 0;
 /** Globally unique note id (pairs note/on with note/off or note/cancel across all voices). */
 export const nextNoteId = () => ++noteIdCounter;
@@ -144,11 +179,14 @@ export class SynthEngine {
     this.masterGain = null;
     this.limiter = null;
     this.clipper = null;
-    this.oscillators = [];
+    this.oscillators = []; // the chord's sources (OscillatorNodes for warm / bright / retro)
     this.oscIds = [];
+    this.instrument = instrumentFromTone(waveform) || defaultInstrumentId(); // base instrument (Chords + Arp)
+    this.leadInstrument = null; // Lead layer's instrument; null = same as the base
+    this.chordRack = null;
+    this._instListeners = new Set();
     this.chordInstance = null; // GainNode the current chord's oscillators feed
     this.currentKey = null;
-    this.waveform = waveform;
     this.onFirstSound = onFirstSound;
     this.hasPlayedFirstSound = false;
     this.masterVolume = 0;
@@ -159,6 +197,71 @@ export class SynthEngine {
     bus.declare("note/on", { type: "event", owner: "audio" });
     bus.declare("note/off", { type: "event", owner: "audio" });
     bus.declare("note/cancel", { type: "event", owner: "audio" });
+    bus.declare("sound/base", { type: "state", owner: "audio" });
+    bus.declare("sound/lead", { type: "state", owner: "audio" });
+    this._publishInstruments();
+  }
+
+  /** Tone-select value of the base instrument (triangle | sawtooth | square | organ | electric | sax). */
+  get waveform() {
+    return toneOf(this.instrument);
+  }
+  set waveform(tone) {
+    const id = instrumentFromTone(tone);
+    if (id) this.setInstrument("base", id);
+  }
+
+  /** Effective instrument of a target: "base" (Chords / Arp) or "lead" (the Lead layer; follows the base until set). */
+  getInstrument(target = "base") {
+    return target === "lead" ? this.leadInstrument ?? this.instrument : this.instrument;
+  }
+
+  /**
+   * Sets an instrument. target "base" re-voices a sounding chord (crossfade); "lead" changes the Lead voice (it
+   * listens via onInstrument). id null for "lead" = follow the base again. Returns true if something changed.
+   */
+  setInstrument(target, id) {
+    if (target === "lead") {
+      if (id !== null && !isInstrument(id)) return false;
+      if (id === this.leadInstrument) return false;
+      const before = this.getInstrument("lead");
+      this.leadInstrument = id;
+      this._publishInstruments();
+      if (this.getInstrument("lead") !== before) this._notifyInstrument("lead");
+      return true;
+    }
+    if (!isInstrument(id) || id === this.instrument) return false;
+    const leadBefore = this.getInstrument("lead");
+    this.instrument = id;
+    if (this.ctx && this.chordInstance && this.oscillators.length) {
+      const freqs = this.oscillators.map((o) => o.frequency.value);
+      this.releaseChord(0.06);
+      this.playNotes(freqs);
+    } else {
+      this.currentKey = null;
+    }
+    this._publishInstruments();
+    this._notifyInstrument("base");
+    if (this.getInstrument("lead") !== leadBefore) this._notifyInstrument("lead");
+    return true;
+  }
+
+  /** fn(target, id) on every effective instrument change. Returns an unsubscribe function. */
+  onInstrument(fn) {
+    this._instListeners.add(fn);
+    return () => this._instListeners.delete(fn);
+  }
+
+  _notifyInstrument(target) {
+    const id = this.getInstrument(target);
+    for (const fn of this._instListeners) {
+      try { fn(target, id); } catch (e) { console.error(e); }
+    }
+  }
+
+  _publishInstruments() {
+    this.bus.set("sound/base", this.instrument);
+    this.bus.set("sound/lead", this.getInstrument("lead"));
   }
 
   ensureContext() {
@@ -187,6 +290,9 @@ export class SynthEngine {
 
     this.chordGain = ac.createGain();
     this.chordGain.gain.value = 0;
+    this.chordRack = createRack(ac, this.chordGain); // instrument POST chains of the chord voice
+    // One-time instrument setup (e.g. an AudioWorklet) in the background; offline renders load lazily on first use.
+    if (!(typeof OfflineAudioContext !== "undefined" && ac instanceof OfflineAudioContext)) prepareInstruments(ac);
 
     this.baseGain = ac.createGain();
     this.baseGain.gain.value = 1;
@@ -330,20 +436,22 @@ export class SynthEngine {
       const g = ac.createGain();
       g.gain.setValueAtTime(0, ac.currentTime);
       g.gain.linearRampToValueAtTime(CHORD_LEVEL, ac.currentTime + CHORD_ATTACK);
-      g.connect(this.chordGain);
+      g.connect(this.chordRack.input(this.instrument));
       this.chordInstance = g;
     }
 
-    // Chord change: swap the oscillators (original behavior).
+    // Chord change: swap the sources (original behavior for plain oscillators; others end softly per their
+    // traits.releaseTailS). traits.strumMs > 0 strums the voicing low to high.
     this._emitOff();
-    this.oscillators.forEach((osc) => { try { osc.stop(); } catch {} });
-    this.oscillators = freqs.map((freq) => {
-      const osc = ac.createOscillator();
-      osc.type = this.waveform;
-      osc.frequency.value = freq;
-      osc.connect(this.chordInstance);
-      osc.start();
-      return osc;
+    const t = ac.currentTime;
+    endSources(this.oscillators, t);
+    const inst = this.instrument;
+    const order = freqs.map((f, i) => [f, i]).sort((a, b) => a[0] - b[0]).map(([, i]) => i);
+    const strum = (traitsOf(inst).strumMs || 0) / 1000;
+    this.oscillators = freqs.map((freq, i) => {
+      const src = createSource(ac, inst, freq, t + strum * order.indexOf(i), { voice: "chords" });
+      src.connect(this.chordInstance);
+      return src;
     });
     this.currentKey = key;
     this._emitOn(freqs);
@@ -400,7 +508,7 @@ export class SynthEngine {
     const t1 = t0 + Math.max(0.01, dur);
     const osc = ac.createOscillator();
     const env = ac.createGain();
-    osc.type = type || this.waveform;
+    osc.type = type || (BASIC_WAVES.includes(this.waveform) ? this.waveform : "triangle");
     osc.frequency.value = freq;
     env.gain.setValueAtTime(0, t0);
     env.gain.linearRampToValueAtTime(gain, t0 + 0.005);
@@ -452,6 +560,12 @@ export function createAudioFacade(synth) {
     /** Chords' chord-voice GainNode (fixed level while a chord plays; 0 = rest). */
     get chordGain() { return synth.chordGain; },
     get waveform() { return synth.waveform; },
+    /** Instrument id of a target ("base": Chords / Arp, "lead": the Lead layer). src/services/instruments.js */
+    instrument: (target = "base") => synth.getInstrument(target),
+    /** Sets the base or lead instrument (Sound menu, tone select, Controls). */
+    setInstrument: (target, id) => synth.setInstrument(target, id),
+    /** fn(target, id) on every instrument change; returns unsubscribe. */
+    onInstrument: (fn) => synth.onInstrument(fn),
     get masterVolume() { return synth.masterVolume; },
     playChord: (freqs) => synth.playNotes(freqs),
     releaseChord: (fade) => synth.releaseChord(fade),
@@ -466,8 +580,10 @@ export function createAudioFacade(synth) {
     setLayerFilter: (tilt) => synth.updateFilterSweep(tilt, synth.layerFilter),
     /** Lead layer on/off (router): the base eases down a little to make room for the lead. */
     setLayerMix: (on) => synth.setLayerMix(on),
+    /** Tone-select value (triangle | sawtooth | square | organ | electric | sax) = the base instrument. */
     setWaveform: (type) => {
-      synth.waveform = type;
+      const id = instrumentFromTone(type);
+      if (id) synth.setInstrument("base", id);
       synth.currentKey = null; // forces sound refresh
     },
     /** Drive 0..1 (src/core/axes.js: right hand sideways). */

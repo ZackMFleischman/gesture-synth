@@ -14,6 +14,7 @@ import { mountControls } from "./src/ui/controls.js";
 import { mountModeUI } from "./src/ui/mode-ui.js";
 import { mountMobileUI } from "./src/ui/mobile/mobile-ui.js";
 import { createRadialMenu, playTick } from "./src/menu/radial-menu.js";
+import { soundMenuItem, registerInstrument, listInstruments } from "./src/instruments/index.js";
 import chordsMode from "./src/modes/chords.js";
 import arpMode from "./src/modes/arp.js";
 import leadMode from "./src/modes/lead.js";
@@ -68,7 +69,7 @@ const outputChip = mountStatusChip({ bus, ctx, parent: stageEl });
 // ---- end OUTPUT HOOK ----
 
 // ---- Modes ----
-// Menu directions: Chords up, Arp right, Lead left; down stays free.
+// Menu directions: Chords up, Arp right, Lead left; down = Sound (instrument sub-menu, below).
 registerMode(chordsMode);
 registerMode(arpMode);
 registerMode(leadMode);
@@ -82,7 +83,19 @@ const mobileUI = mountMobileUI({ bus });
 router.setMenu(
   createRadialMenu({
     // Lead is a layer: its arc turns it on over the current base; the base arc then has a hollow marker.
-    items: () => (audio.ac ? registry.menuItems(router.modeId, { layerId: router.layerId }) : []), // modes need the AudioContext
+    // Down = Sound: a sub-ring of the registered instruments. It sets the base instrument (Chords / Arp), or the
+    // Lead's while the Lead layer is on; the accent is the right-hand mode's color.
+    items: () =>
+      audio.ac // modes need the AudioContext
+        ? [
+            ...registry.menuItems(router.modeId, { layerId: router.layerId }),
+            soundMenuItem({
+              layerOn: !!router.layerId,
+              color: router.rightMode?.color || "#e8a13d",
+              current: () => audio.instrument(router.layerId ? "lead" : "base"),
+            }),
+          ]
+        : [],
     currentId: () => router.rightModeId,
     onTick: () => { if (audio.ac) playTick(audio.ac, audio.out); },
   })
@@ -107,6 +120,7 @@ if (import.meta.env.DEV) {
   window.__gsTest.handInput = handInput;
   window.__gsTest.output = outputChip;
   window.__gsTest.mobile = mobileUI;
+  window.__gsTest.instruments = { registerInstrument, listInstruments };
 }
 
 // ---- Main loop ----
