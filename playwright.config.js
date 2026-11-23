@@ -2,6 +2,9 @@ import { defineConfig } from "@playwright/test";
 
 // Parallel agents/worktrees must each use their own port: PW_PORT=52xx npm test
 const PORT = Number(process.env.PW_PORT) || 5199;
+// Signaling server for the output tests (tests/output.spec.js): PW_SIGNAL_PORT or PORT + 200.
+export const SIGNAL_PORT = Number(process.env.PW_SIGNAL_PORT) || PORT + 200;
+process.env.PW_SIGNAL_PORT = String(SIGNAL_PORT); // visible to the test workers
 
 export default defineConfig({
   testDir: "tests",
@@ -23,10 +26,18 @@ export default defineConfig({
       ],
     },
   },
-  webServer: {
-    command: `npx vite --port ${PORT} --strictPort`,
-    url: `http://localhost:${PORT}`,
-    // Never reuse: a server on this port may be serving a different worktree.
-    reuseExistingServer: false,
-  },
+  webServer: [
+    {
+      command: `npx vite --port ${PORT} --strictPort`,
+      url: `http://localhost:${PORT}`,
+      // Never reuse: a server on this port may be serving a different worktree.
+      reuseExistingServer: false,
+    },
+    {
+      command: `node server/signal.js`,
+      env: { SIGNAL_PORT: String(SIGNAL_PORT) },
+      url: `http://localhost:${SIGNAL_PORT}/health`,
+      reuseExistingServer: false,
+    },
+  ],
 });
