@@ -12,6 +12,7 @@ import {
   createLeadController,
   validCount,
   midiToFreq,
+  noteName,
   NOTE_SETS,
   OCTAVE_MIN,
   OCTAVE_MAX,
@@ -35,7 +36,7 @@ const LOOK = {
   lineChord: 56, // chord-note line length
   widthThin: 1.5,
   widthChord: 4,
-  topPx: 176, // top note line (below the filter readout)
+  topPx: 196, // top note line (below the filter readout; up arrow reachable without the hand leaving the frame)
   bottomInset: 140, // bottom note line = H - this (palm must still reach the down arrow above the frame edge)
   arrowGap: 28, // arrow centre beyond the end lines
   arrowSize: 18,
@@ -45,7 +46,7 @@ const LOOK = {
   lineMoveMs: 150, // chord-note lines move to the new chord
   slideMs: 200, // ladder slide on an octave change
   flashMs: 150, // confirm flash
-  badgeLingerMs: 600, // at-hand badge after a confirmed set change
+  badgeLingerMs: 500, // at-hand badge after a confirmed set change
   dimDuringHold: 0.4,
 };
 
@@ -275,12 +276,12 @@ function plateLabel(g, text, x, y, { size = 13, weight = 600, color = C.ink, ali
 }
 
 /** 4 segments of growing height (= more notes). */
-function drawSetSegments(g, x, yBase, { active, scale = 1, target = null, progress = 0, flash = 0, alpha = 1 }) {
+function drawSetSegments(g, x, yBase, { active, scale = 1, hScale = 1, target = null, progress = 0, flash = 0, alpha = 1 }) {
   const w = 6 * scale, gap = 3 * scale;
   g.save();
   g.globalAlpha *= alpha;
   for (let i = 1; i <= 4; i++) {
-    const h = (4 + i * 3.5) * scale;
+    const h = (4 + i * 3.5) * (scale / (scale > 1.5 ? 1.25 : 1)) * hScale;
     const sx = x + (i - 1) * (w + gap);
     const sy = yBase - h;
     roundRect(g, sx, sy, w, h, Math.min(2 * scale, w / 2));
@@ -310,13 +311,18 @@ function drawSetSegments(g, x, yBase, { active, scale = 1, target = null, progre
   return { w: 4 * w + 3 * gap, h: (4 + 4 * 3.5) * scale };
 }
 
+/**
+ * Octave arrow. States: available (outline), lit (cursor on it: solid fill, 1.25x), hold (ring fills),
+ * confirmed (solid flash), grey (at the limit: solid grey outline, never lights up).
+ */
 function drawArrow(g, cx, cy, dir, { lit, grey, progress, flash = 0 }) {
-  const s = LOOK.arrowSize;
+  const big = (lit || progress > 0) && !grey ? 1.25 : 1;
+  const s = LOOK.arrowSize * big;
+  const r = s * 1.05;
   g.save();
-  // hit target / ring backing
   g.beginPath();
-  g.arc(cx, cy, s * 1.05, 0, Math.PI * 2);
-  g.fillStyle = grey ? "rgba(0,0,0,0.15)" : "rgba(0,0,0,0.32)";
+  g.arc(cx, cy, r, 0, Math.PI * 2);
+  g.fillStyle = flash > 0 ? withAlpha(LEAD_COLOR, 0.35 + 0.5 * flash) : "rgba(0,0,0,0.4)";
   g.fill();
   g.beginPath();
   const d = dir === "up" ? -1 : 1;
@@ -325,34 +331,30 @@ function drawArrow(g, cx, cy, dir, { lit, grey, progress, flash = 0 }) {
   g.lineTo(cx + s * 0.55, cy - d * s * 0.32);
   g.closePath();
   g.lineJoin = "round";
-  if (grey) {
-    // At the limit: grey, never lights up.
-    g.globalAlpha = 0.55;
-    strokeHalo(g, "rgba(150,150,150,0.8)", 1.5, [2, 3]);
-  } else {
-    g.fillStyle = lit ? LEAD_COLOR : "rgba(0,0,0,0.35)";
+  if (flash > 0) {
+    g.fillStyle = "#fff";
     g.fill();
-    strokeHalo(g, lit ? "#fff" : "rgba(243, 239, 231, 0.85)", lit ? 2 : 1.5);
+  } else if (grey) {
+    strokeHalo(g, "rgba(140,140,140,0.9)", 1.5);
+  } else {
+    g.fillStyle = lit || progress > 0 ? LEAD_COLOR : "rgba(0,0,0,0.35)";
+    g.fill();
+    strokeHalo(g, lit || progress > 0 ? "#fff" : "rgba(243, 239, 231, 0.85)", lit ? 2 : 1.5);
   }
-  g.globalAlpha = 1;
-  const r = s * 1.05;
   if (progress > 0) {
     g.beginPath();
-    g.arc(cx, cy, r, 0, Math.PI * 2);
+    g.arc(cx, cy, r + 3, 0, Math.PI * 2);
     g.lineWidth = 3;
-    g.strokeStyle = withAlpha(LEAD_COLOR, 0.25);
+    g.strokeStyle = withAlpha(LEAD_COLOR, 0.3);
     g.stroke();
     g.beginPath();
-    g.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+    g.arc(cx, cy, r + 3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
     g.lineCap = "round";
-    strokeHalo(g, LEAD_COLOR, 3);
+    strokeHalo(g, LEAD_COLOR, 3.5);
   }
   if (flash > 0) {
-    // Confirmed: the full ring flashes.
     g.beginPath();
-    g.arc(cx, cy, r + 2 * (1 - flash), 0, Math.PI * 2);
-    g.fillStyle = withAlpha(LEAD_COLOR, 0.45 * flash);
-    g.fill();
+    g.arc(cx, cy, r + 3 + 4 * (1 - flash), 0, Math.PI * 2);
     g.lineWidth = 3;
     g.strokeStyle = `rgba(255,255,255,${flash})`;
     g.stroke();
@@ -442,7 +444,8 @@ const lead = {
     const lines = currentLines(now);
     const span = geo.bottom - geo.top;
     const holding = S.setHoldTarget != null && S.setHoldProgress > 0;
-    const ladderAlpha = holding ? LOOK.dimDuringHold : 1;
+    const lostNow = !S.present && S.lostSince != null;
+    const ladderAlpha = holding || lostNow ? LOOK.dimDuringHold : 1;
 
     g.save();
     // ---- Soft dark backing so the ladder reads over bright video ----
@@ -483,37 +486,48 @@ const lead = {
     const hoverUp = S.hover === "up" && S.present;
     const hoverDown = S.hover === "down" && S.present;
     const octFlash = Math.max(0, 1 - (now - S.octaveChangedAt) / LOOK.flashMs);
+    const upFlash = S.octaveDir > 0 ? octFlash : 0;
+    const downFlash = S.octaveDir < 0 ? octFlash : 0;
+    const upGrey = S.octave >= OCTAVE_MAX;
+    const downGrey = S.octave <= OCTAVE_MIN;
     drawArrow(g, geo.cx, geo.upY, "up", {
-      lit: hoverUp && S.octave < OCTAVE_MAX,
-      grey: S.octave >= OCTAVE_MAX && !(octFlash > 0 && S.octaveDir > 0),
+      lit: hoverUp && !upGrey,
+      grey: upGrey,
       progress: S.pinchMode === "arrow" && S.arrowDir > 0 ? S.arrowProgress : 0,
-      flash: S.octaveDir > 0 ? octFlash : 0,
+      flash: upFlash,
     });
     drawArrow(g, geo.cx, geo.downY, "down", {
-      lit: hoverDown && S.octave > OCTAVE_MIN,
-      grey: S.octave <= OCTAVE_MIN && !(octFlash > 0 && S.octaveDir < 0),
+      lit: hoverDown && !downGrey,
+      grey: downGrey,
       progress: S.pinchMode === "arrow" && S.arrowDir < 0 ? S.arrowProgress : 0,
-      flash: S.octaveDir < 0 ? octFlash : 0,
+      flash: downFlash,
     });
-    // Octave marks: 4 short dashes stacked beside the up arrow (lowest octave at the bottom), one lit.
+    // Arrow label: the value in change (only while the cursor is on an arrow).
+    if (hoverUp || hoverDown) {
+      const up = hoverUp;
+      const grey = up ? upGrey : downGrey;
+      const label = grey ? (up ? "Top octave" : "Bottom octave") : up ? "Octave up" : "Octave down";
+      plateLabel(g, label, geo.cx - LOOK.arrowSize * 1.35 - 30, up ? geo.upY : geo.downY, {
+        size: 14, weight: 700, align: "right", color: grey ? "rgba(200,200,200,0.9)" : C.ink,
+        stroke: grey ? null : withAlpha(LEAD_COLOR, 0.8),
+      });
+    }
+    // Octave marks: 4 dots in a column left of the ladder's top end (lowest octave at the bottom), one lit.
     {
-      const mx = geo.cx - LOOK.arrowSize - 22;
       const n = OCTAVE_MAX - OCTAVE_MIN + 1;
-      const step = 7;
-      const y0 = geo.upY + ((n - 1) * step) / 2;
-      roundRect(g, mx - 11, y0 - (n - 1) * step - 7, 22, (n - 1) * step + 14, 6);
-      g.fillStyle = "rgba(20,20,20,0.5)";
+      const step = 11;
+      const mx = geo.cx - LOOK.arrowSize * 1.35 - 10; // inner side of the up arrow
+      const yTop = geo.upY - ((n - 1) * step) / 2;
+      roundRect(g, mx - 8, yTop - 8, 16, (n - 1) * step + 16, 8);
+      g.fillStyle = "rgba(20,20,20,0.55)";
       g.fill();
       for (let i = OCTAVE_MIN; i <= OCTAVE_MAX; i++) {
-        const y = y0 - (i - OCTAVE_MIN) * step;
+        const y = yTop + (OCTAVE_MAX - i) * step;
         const on = i === S.octave;
         g.beginPath();
-        g.moveTo(mx - (on ? 7 : 5), y);
-        g.lineTo(mx + (on ? 7 : 5), y);
-        g.lineCap = "round";
-        g.lineWidth = on ? 3.5 : 2;
-        g.strokeStyle = on ? (octFlash > 0 ? "#fff" : LEAD_COLOR) : C.quiet;
-        g.stroke();
+        g.arc(mx, y, on ? 4.5 : 2.5, 0, Math.PI * 2);
+        g.fillStyle = on ? (octFlash > 0 ? "#fff" : LEAD_COLOR) : "rgba(243, 239, 231, 0.5)";
+        g.fill();
       }
     }
 
@@ -522,7 +536,12 @@ const lead = {
     let idx = S.pinchMode === "note" ? S.playIdx : S.preview;
     let cursorMidi = idx != null ? S.ladder.notes[idx]?.midi : null;
     if (cursorMidi == null && lost) cursorMidi = view.lastPreviewMidi;
-    const cl = cursorMidi != null ? lines.find((l) => l.midi === cursorMidi && !l.old) : null;
+    let cl = cursorMidi != null ? lines.find((l) => l.midi === cursorMidi && !l.old) : null;
+    if (!cl && cursorMidi != null) {
+      // The ladder is being rebuilt (chord/set change): never let the cursor blink out.
+      const n = S.ladder.notes.find((x) => x.midi === cursorMidi);
+      cl = { midi: cursorMidi, u: n ? n.u : (cursorMidi - S.ladder.low) / 24 };
+    }
     const onArrow = !lost && S.hover && S.pinchMode !== "note";
     if (cl || onArrow) {
       const cy = onArrow ? (S.hover === "up" ? geo.upY : geo.downY) : uToY(geo, cl.u);
@@ -530,7 +549,7 @@ const lead = {
       const playing = S.pinchMode === "note" && !lost;
       const nameRight = geo.right - LOOK.lineChord - 12;
       // Dotted guide from the hand to the cursor (stops at the name plate).
-      if (view.hand && !lost && view.hand.x < nameRight - 90) {
+      if (view.hand && !lost && !onArrow && view.hand.x < nameRight - 90) {
         g.save();
         g.beginPath();
         g.moveTo(view.hand.x, view.hand.y);
@@ -582,7 +601,7 @@ const lead = {
         if (!lost) {
           const name = S.ladder.notes[idx]?.name ?? "";
           plateLabel(g, name, nameRight, cy, {
-            size: LOOK.nameSize,
+            size: W < 600 ? 22 : LOOK.nameSize,
             weight: 700,
             align: "right",
             color: playing ? "#111" : C.ink,
@@ -592,7 +611,7 @@ const lead = {
           });
         }
       }
-      if (lost) plateLabel(g, "Hand lost", nameRight, cy, { size: 11, color: C.warn, align: "right", stroke: withAlpha(C.warn, 0.6) });
+      if (lost) plateLabel(g, "Hand lost", nameRight, cy, { size: 13, weight: 700, color: C.warn, align: "right", stroke: withAlpha(C.warn, 0.7) });
     }
 
     // ---- Note-set badge (status, top left row) ----
@@ -603,49 +622,68 @@ const lead = {
       const label = NOTE_SETS[S.setId].name;
       g.font = `600 12px ${FONT}`;
       const tw = g.measureText(label).width;
-      const w = 10 + 33 + 8 + tw + 10;
-      roundRect(g, bx, by - 13, w, 26, 13);
+      const segW = 4 * 7 + 3 * 3;
+      const w = 10 + segW + 8 + tw + 12;
+      roundRect(g, bx, by - 14, w, 28, 14);
       g.fillStyle = C.plate;
       g.fill();
       g.lineWidth = 1.5;
       g.strokeStyle = withAlpha(LEAD_COLOR, 0.8);
       g.stroke();
-      drawSetSegments(g, bx + 10, by + 8, { active: S.setId, flash: setFlash });
+      drawSetSegments(g, bx + 10, by + 9, { active: S.setId, flash: setFlash, scale: 7 / 6, hScale: 1.05 });
       g.fillStyle = C.ink;
       g.textAlign = "left";
       g.textBaseline = "middle";
-      g.fillText(label, bx + 51, by + 1);
+      g.fillText(label, bx + 10 + segW + 8, by + 1);
     }
 
-    // ---- At-hand note-set badge: hold fill, then flash, then fade ----
+    // ---- At-hand note-set badge (hand only): approach fill, selected rim + flash, then fade ----
     const since = now - S.setChangedAt;
-    if (holding || since < LOOK.badgeLingerMs) {
+    if (view.hand && !lost && (holding || since < LOOK.badgeLingerMs)) {
       const alpha = holding ? 1 : 1 - easeOut(Math.max(0, since - LOOK.flashMs) / (LOOK.badgeLingerMs - LOOK.flashMs));
-      // Beside the hand on the inner side, so the fingers doing the count stay visible.
-      const anchor = view.hand || { x: geo.right - LOOK.lineChord - 60, y: cl ? uToY(geo, cl.u) : (geo.top + geo.bottom) / 2 };
-      const hs = Math.max(60, view.handSize || 90);
-      const ax = Math.max(70, Math.min(anchor.x - hs * 1.5, geo.right - LOOK.lineChord - 200));
-      const ay = Math.min(H - 60, Math.max(70, anchor.y - hs * 0.4));
       const target = holding ? S.setHoldTarget : null;
       const label = NOTE_SETS[holding ? S.setHoldTarget : S.setId].name;
+      const sc = 2.2;
+      const segW = (4 * 6 + 3 * 3) * sc;
       g.save();
       g.globalAlpha = alpha;
       g.font = `700 15px ${FONT}`;
       const tw = g.measureText(label).width;
-      const bw = Math.max(4 * 11 + 3 * 5, tw) + 24;
-      roundRect(g, ax - bw / 2, ay - 40, bw, 72, 12);
+      const bw = Math.max(segW, tw) + 28;
+      const bh = 92;
+      // Beside the hand on the inner side, so the fingers doing the count stay visible.
+      const hs = Math.max(50, view.handSize || 90);
+      const ax = Math.max(bw / 2 + 8, view.hand.x - hs * 0.6 - bw / 2);
+      const ay = Math.min(H - bh / 2 - 8, Math.max(bh / 2 + 8, view.hand.y - hs * 0.2));
+      const confirmed = !holding;
+      roundRect(g, ax - bw / 2, ay - bh / 2, bw, bh, 12);
       g.fillStyle = C.plate;
       g.fill();
-      g.lineWidth = holding ? 1.5 : 2;
-      g.strokeStyle = setFlash > 0 ? "#fff" : withAlpha(LEAD_COLOR, holding ? 0.6 : 1);
+      g.lineWidth = confirmed ? 3 : 1.5;
+      g.strokeStyle = setFlash > 0 ? "#fff" : confirmed ? LEAD_COLOR : withAlpha(LEAD_COLOR, 0.55);
       g.stroke();
-      drawSetSegments(g, ax - (4 * 11 + 3 * 5) / 2, ay + 6, {
-        active: S.setId, scale: 1.8, target, progress: S.setHoldProgress, flash: setFlash,
-      });
-      g.fillStyle = holding ? C.ink : LEAD_COLOR;
+      drawSetSegments(g, ax - segW / 2, ay + 8, { active: S.setId, scale: sc, target, progress: S.setHoldProgress, flash: setFlash });
+      g.fillStyle = confirmed ? LEAD_COLOR : C.ink;
+      g.font = `${confirmed ? 800 : 600} 15px ${FONT}`;
       g.textAlign = "center";
       g.textBaseline = "middle";
-      g.fillText(label, ax, ay + 20);
+      g.fillText(label, ax, ay + 24);
+      // Hold progress along the bottom edge (grows with the hold time).
+      const px0 = ax - bw / 2 + 12;
+      const pw = bw - 24;
+      const py = ay + bh / 2 - 8;
+      g.lineCap = "round";
+      g.lineWidth = 4;
+      g.beginPath();
+      g.moveTo(px0, py);
+      g.lineTo(px0 + pw, py);
+      g.strokeStyle = "rgba(243, 239, 231, 0.18)";
+      g.stroke();
+      g.beginPath();
+      g.moveTo(px0, py);
+      g.lineTo(px0 + pw * (holding ? S.setHoldProgress : 1), py);
+      g.strokeStyle = LEAD_COLOR;
+      g.stroke();
       g.restore();
     }
     g.restore();
@@ -667,7 +705,7 @@ const lead = {
           border-radius:4px; padding:3px 7px; cursor:pointer; min-width:26px; }
         .lead-controls button[aria-pressed="true"] { background:${LEAD_COLOR}; color:#111; border-color:${LEAD_COLOR}; }
         .lead-controls button:disabled { opacity:0.35; cursor:default; }
-        .lead-controls .oct { min-width:14px; text-align:center; }
+        .lead-controls .oct { min-width:28px; text-align:center; }
         @media (max-width: 700px) { .lead-controls { right:auto; left:12px; bottom:auto; top:128px; gap:6px; padding:5px 6px; }
           .lead-controls .lbl { display:none; } .lead-controls button { padding:3px 5px; min-width:22px; } }
         .lead-pad { position:absolute; top:0; right:0; bottom:0; width:170px; z-index:3; cursor:crosshair; touch-action:none; }
@@ -689,12 +727,12 @@ const lead = {
     const [octDown, octUp] = root.querySelectorAll("[data-oct]");
     function refresh() {
       for (const b of setBtns) b.setAttribute("aria-pressed", String(Number(b.dataset.set) === S.setId));
-      octLbl.textContent = String(S.octave - OCTAVE_MIN + 1);
+      octLbl.textContent = S.ladder.notes.length ? noteName(S.ladder.low, S.keyName) : String(S.octave);
       octDown.disabled = S.octave <= OCTAVE_MIN;
       octUp.disabled = S.octave >= OCTAVE_MAX;
     }
     refresh();
-    const off = ctx.bus.subscribe({ onSet: refresh }, ["lead/noteset", "lead/octave"]);
+    const off = ctx.bus.subscribe({ onSet: refresh }, ["lead/noteset", "lead/octave", "chord"]);
 
     const now = () => (ctx.now || win.performance.now());
     function setSet(n) {

@@ -364,7 +364,9 @@ test.describe("2.1 screen controls + ladder", () => {
     // at 150 ms they are on the new notes
     const lad = await page.evaluate(() => window.__gsTest.lead._controller.state.ladder.notes.map((n) => n.midi));
     expect(end.lines.map((l) => l.midi)).toEqual(lad);
-    await setHands(page, leftHand(5));
+    await setHands(page, leftHand(4), preview(0.45, 0.66));
+    await settle(page, 300);
+    await setHands(page, leftHand(5), preview(0.45, 0.66));
     await snapWhen(page, "chord-change", (s, now) => s.chord?.degree === 5 && now - s.contextChangedAt > 60);
   });
 
