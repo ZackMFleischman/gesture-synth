@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Lead lab</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #111; overflow: hidden; font-family: monospace; }
+  #stage { position: fixed; inset: 0; width: 100vw; height: 100dvh; }
+  #webcam { display: none; }
+  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .bar { position: absolute; left: 12px; display: flex; gap: 6px; align-items: center; z-index: 5; }
+  .bar select, .bar button { background: #1a1a1a; color: #e8a13d; border: 1px solid #3a3428; border-radius: 4px;
+    font: 13px monospace; padding: 4px 8px; cursor: pointer; }
+  .bar button[aria-pressed="true"] { background: #e8a13d; color: #111; }
+  #row1 { top: 12px; }
+  #row2 { top: 48px; }
+  #row3 { top: 84px; }
+  #row3 .lbl { color: rgba(243,239,231,0.6); font-size: 12px; margin-right: 2px; }
+  #chordDisplay { position: absolute; bottom: 35px; left: 50%; transform: translateX(-50%); color: #e8a13d;
+    font: bold 28px monospace; text-shadow: 0 0 6px #000, 0 0 2px #000; z-index: 4; pointer-events: none; }
+  #startOverlay { position: absolute; inset: 0; background: rgba(0,0,0,0.6); color: #e8a13d; z-index: 10;
+    display: flex; align-items: center; justify-content: center; font: 20px monospace; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="webcam" autoplay playsinline muted></video>
+  <canvas id="overlay"></canvas>
+  <div class="bar" id="row1">
+    <select id="keySelect" title="Key">
+      <option value="220.00" data-note="A" selected>A</option>
+      <option value="233.08" data-note="Bb">A#/Bb</option>
+      <option value="246.94" data-note="B">B</option>
+      <option value="261.63" data-note="C">C</option>
+      <option value="277.18" data-note="Db">C#/Db</option>
+      <option value="293.66" data-note="D">D</option>
+      <option value="311.13" data-note="Eb">D#/Eb</option>
+      <option value="329.63" data-note="E">E</option>
+      <option value="349.23" data-note="F">F</option>
+      <option value="369.99" data-note="Gb">F#/Gb</option>
+      <option value="392.00" data-note="G">G</option>
+      <option value="415.30" data-note="Ab">G#/Ab</option>
+    </select>
+  </div>
+  <div class="bar" id="row2">
+    <select id="toneSelect" title="Tone">
+      <option value="triangle" selected>Warm Synth</option>
+      <option value="sawtooth">Bright Synth</option>
+      <option value="square">Retro Synth</option>
+    </select>
+  </div>
+  <div class="bar" id="row3" role="group" aria-label="Pad chord (left hand)">
+    <span class="lbl">Pad</span>
+    <button data-deg="0" title="No screen chord (left hand only)">off</button>
+    <button data-deg="1">I</button><button data-deg="2">II</button><button data-deg="3">III</button>
+    <button data-deg="4">IV</button><button data-deg="5">V</button><button data-deg="6">VI</button>
+    <button data-deg="7">VII</button>
+    <button id="minorToggle" title="Minor (left tilt)">min</button>
+  </div>
+  <div id="chordDisplay">--</div>
+  <div id="modeControls"></div>
+  <div id="startOverlay">click to start the Lead lab</div>
+</div>
+<script type="module" src="./lead-lab.js"></script>
+</body>
+</html>

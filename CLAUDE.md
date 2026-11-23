@@ -13,7 +13,8 @@ Hand tracking: MediaPipe HandLandmarker (wasm + model loaded from CDN at runtime
   `camera.js` = camera + MediaPipe setup; `replay.js` = record/replay of raw results (DEV).
 - `src/router.js` — left hand -> chord (via harmony); right hand -> radial menu hook (`router.setMenu`) ->
   active mode. Publishes `mode`.
-- `src/modes/*.js` — mode plugins (`chords.js` = the original right-hand behavior + energy wave).
+- `src/modes/*.js` — mode plugins (`chords.js` = the original right-hand behavior + energy wave; `lead.js` +
+  `lead-notes.js` (pure: note sets, snapping, octave/set state machine) + `lead-voice.js` (mono lead + pad)).
 - `src/services/` — `audio.js` (SynthEngine + `ctx.audio` facade, emits `note/on|off`), `harmony.js`
   (key, chord tones, voicings, names, chord stabilizer), `analytics.js` (Clarity, prod-only).
 - `src/core/` — `bus.js` (signal bus + `createParam`), `registry.js` (`registerMode`, menu items).
@@ -39,6 +40,9 @@ Node lives at `~/.local/node/bin` on this machine (not on the default PATH):
   `rightHand(quality, {volume, tilt, thumb})`, `fist({...})`, `pinch({distance, ...})`; every builder
   also takes `pos` (display space), `view` and `scale`. `window.__gsTest` also exposes `synth`, `bus`,
   `router`, `ctx`, `handInput` (DEV only — never in the build).
+- **Lead lab:** `/labs/lead-lab.html` (`?mockHands` for tests) runs Lead full-screen on the real ctx
+  (`src/core/app-context.js`); mouse on the ladder strip, A-row/Q-row keys, 1-4 sets, -/= octave, Pad chord buttons.
+  `window.__gsTest.lead._debug()` = controller state + drawn ladder; `__gsTest.freeze(true)` holds the frame.
 - **Gesture test page:** `/labs/gesture-test.html` (dev server; also `?mockHands`, `?replay=`). Live HandFrame
   values per hand, threshold sliders (live-edit `setThresholds()` in hand-input.js), flicker counters, and a
   **Record** button that downloads raw MediaPipe results as JSON (`src/input/replay.js` format).
