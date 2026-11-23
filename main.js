@@ -11,6 +11,7 @@ import { initAnalytics, trackClarityEvent } from "./src/services/analytics.js";
 import { drawFrame } from "./src/ui/overlay.js";
 import { mountIndicators } from "./src/ui/indicators.js";
 import { mountControls } from "./src/ui/controls.js";
+import { mountModeUI } from "./src/ui/mode-ui.js";
 import { createRadialMenu, playTick } from "./src/menu/radial-menu.js";
 import chordsMode from "./src/modes/chords.js";
 import arpMode from "./src/modes/arp.js";
@@ -37,12 +38,10 @@ if (import.meta.env.DEV) {
 }
 
 // ---- Services + ctx + router (src/core/app-context.js; the labs use the same wiring) ----
-// Container for the active mode's screen controls (empty for Chords).
+// Container for the active mode's screen controls (empty for Chords). The router mounts the mode's
+// rows here; the Controls panel (src/ui/controls-panel.js) adopts this node.
 const modeControlsEl = document.createElement("div");
 modeControlsEl.id = "modeControls";
-// Hidden until the Controls panel (src/ui/controls-panel.js, docs/ui-integration.md D8) shows it;
-// unstyled it would sit on top of the key/tone selects.
-modeControlsEl.hidden = true;
 stageEl.appendChild(modeControlsEl);
 
 const { synth, audio, harmony, handInput, ctx, router } = createAppContext({
@@ -55,7 +54,9 @@ const { synth, audio, harmony, handInput, ctx, router } = createAppContext({
 
 // ---- UI ----
 mountControls({ harmony, audio, synth, canvasEl });
-mountIndicators(meterBus(bus));
+// indicators.js renders `volume` (now the master) on the meter too; src/ui/readouts.js (mounted with the
+// modes UI below, after it) re-renders the meter from the active mode's rightTrack param.
+mountIndicators(bus);
 
 // ---- OUTPUT HOOK (milestone 3) ----
 // Status chip only. The WebRTC output module is dynamic-imported when the user turns the
@@ -68,6 +69,7 @@ const outputChip = mountStatusChip({ bus, ctx, parent: stageEl });
 registerMode(chordsMode);
 registerMode(arpMode);
 router.setMode("chords");
+const modeUI = mountModeUI({ bus, ctx, registry, router, canvas: canvasEl, output: outputChip });
 
 // ---- Radial menu (right fist) ----
 router.setMenu(
@@ -86,35 +88,6 @@ if (import.meta.env.DEV) {
   window.__gsTest.ctx = ctx;
   window.__gsTest.handInput = handInput;
   window.__gsTest.output = outputChip;
-}
-
-/**
- * Bus view for the existing indicators (src/ui/indicators.js, untouched): its 8-bar meter reads
- * `volume`, which is now the master volume. Per docs/ui-integration.md D5 the meter shows what the
- * right height controls in the active mode (mode.rightTrack.param: Chords = chords/volume,
- * Arp = arp/gate), so this view serves that param under the name `volume`.
- * TODO(ui): drop once src/ui/readouts.js drives the meter from mode.rightTrack directly.
- */
-function meterBus(b) {
-  const meterParam = () => registry.getMode(b.get("mode"))?.rightTrack?.param ?? null;
-  return {
-    get: (name) => (name === "volume" ? (meterParam() ? b.get(meterParam()) ?? 0 : 0) : b.get(name)),
-    subscribe(consumer, filter) {
-      const wanted = (n) => (Array.isArray(filter) ? filter.includes(n) : true);
-      return b.subscribe(
-        {
-          onSet(name, v) {
-            if (name === "mode") {
-              const p = meterParam();
-              consumer.onSet?.("volume", p ? b.get(p) ?? 0 : 0);
-            } else if (name === meterParam()) consumer.onSet?.("volume", v ?? 0);
-            else if (name !== "volume" && wanted(name)) consumer.onSet?.(name, v);
-          },
-        },
-        (n) => n !== "volume" && (n === "mode" || n.endsWith("/volume") || n.endsWith("/gate") || wanted(n))
-      );
-    },
-  };
 }
 
 // ---- Main loop ----
@@ -154,28 +127,32 @@ async function main() {
   // Latest HandFrames; refreshed only when a new video frame arrives.
   let left = null;
   let right = null;
+  let lastResults = { landmarks: [], handedness: [] };
 
   function loop() {
+    // Schedule the next frame first: an exception in one drawing layer must never stop the
+    // router (sound, left hand). It still surfaces as an uncaught error (and fails the tests).
+    requestAnimationFrame(loop);
     const timestampNow = performance.now();
 
-    // 1. New camera frame -> landmarks -> HandFrames (+ draw video and landmark dots)
+    // 1. New camera frame -> landmarks -> HandFrames
     if (videoEl.currentTime !== lastVideoTime) {
       lastVideoTime = videoEl.currentTime;
 
-      const results = handLandmarker.detectForVideo(videoEl, timestampNow);
-      drawFrame(g, videoEl, results, canvasEl.width, canvasEl.height);
-
+      lastResults = handLandmarker.detectForVideo(videoEl, timestampNow);
       syncView();
-      ({ left, right } = handInput.process(results, timestampNow));
+      ({ left, right } = handInput.process(lastResults, timestampNow));
     }
+    // Video + landmark dots are redrawn every animation frame: this clears the canvas, so the
+    // translucent mode/menu drawings below never build up between camera frames.
+    drawFrame(g, videoEl, lastResults, canvasEl.width, canvasEl.height);
 
     // 2. Router: left hand -> chord, right hand -> menu / active mode
     router.update(left, right, timestampNow);
 
     // 3. Mode (and menu) drawing on top of the video
     router.draw(g);
-
-    requestAnimationFrame(loop);
+    modeUI.draw(g);
   }
 
   loop();

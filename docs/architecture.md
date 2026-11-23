@@ -154,3 +154,12 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
     `{freq, midi, voice, id}`; `note/on` pairs with `note/off` or `note/cancel` by the globally unique `id`.
   - Router option `aspect()` (canvas w/h): the menu gets `handSize / aspect` (HandFrame.handSize is in display-HEIGHT units,
     the menu measures in canvas-WIDTH units).
+  - For the modes UI: `menu` also has `confirmedId` during the countdown; `held` (state) = `{right: true, [rightTrack.param]:
+    heldValue}` while the menu holds the right hand, `{[param]: heldValue}` during the 200 ms crossfade back, else null;
+    hand input publishes `left/size`, `right/size` (handSize, display-height units). `ctx.setMasterVolume(v)` (router) =
+    Controls slider: wins while bus `ui/override` lists `"master"`. Modes skip hand writes for params listed in `ui/override`
+    (Arp: `arp/gate`). Arp publishes `filter` + `chord` + `voicing`; its bottom bar moved to `arp.drawTransport()` (lab only;
+    the app uses src/ui/transport.js); `draw()` = energy wave + x2 pill at the hand (`drawX2Pill`). Tap tempo is in Arp's
+    controls (`data-control="bpm-tap"`).
+  - main.js redraws the video frame every animation frame (no build-up of translucent overlays) and schedules the next frame
+    first, so an exception in a drawing layer never stops the router/sound.

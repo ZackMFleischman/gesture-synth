@@ -133,7 +133,7 @@ export const CHORDS_EXIT_FADE = 0.4;
 function ensureParams(ctx) {
   if (volumeParam) return;
   // Right height = chord-voice volume (multiplied with the master volume from the left height).
-  volumeParam = ctx.param("chords/volume", { type: "continuous", value: 0, min: 0, max: 1 });
+  volumeParam = ctx.param("chords/volume", { type: "continuous", min: 0, max: 1 });
   filterParam = ctx.param("filter", {
     type: "continuous",
     min: -1,
@@ -189,7 +189,7 @@ export default {
     held.thumb = false;
     held.volume = locked ? Math.max(0, Math.min(1, locked.height)) : held.volume;
     view.volume = held.volume;
-    volumeParam.value = held.volume;
+    if (locked) volumeParam.value = held.volume;
     // Start the pad right now (same call as the previous mode's exit), not on the next frame:
     // a slow frame must not open a gap in the sound.
     if (ctx.rightLocked) this.hold(ctx);

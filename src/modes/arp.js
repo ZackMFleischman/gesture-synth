@@ -13,6 +13,7 @@ import { createArpVoice } from "./arp-voice.js";
 import { arpNoteAt, midiToHz, PATTERNS, PATTERN_LABELS } from "./arp-patterns.js";
 import { RATES, MIN_BPM, MAX_BPM } from "../services/clock.js";
 import { drawEnergy } from "./chords.js";
+import { drawX2Pill } from "../ui/hand-overlays.js";
 
 export const ARP_COLOR = "#4fb3ff"; // placeholder accent (see requirements: mode colors TBD)
 const REBIND_MARGIN = 0.008; // s: steps starting later than now + this can still be re-bound
@@ -138,6 +139,8 @@ export function createArpMode() {
       { name: "arp/rate", type: "state" },
       { name: "arp/double", type: "state" },
       { name: "voicing", type: "state" },
+      { name: "filter", type: "continuous" }, // right tilt (ctx.audio.setFilter publishes it)
+      { name: "chord", type: "state" }, // the left-hand chord (chord display, energy wave)
     ],
     menuItems: [],
     guide: [["✊", "Menu"], ["↕", "Gate"], ["👍", "Double time"], ["🤏", "Tempo"]],
@@ -178,7 +181,9 @@ export function createArpMode() {
         } else {
           if (right.voicingCount >= 1 && right.voicingCount <= 4) voicing = right.voicingCount;
           if (ctx.harmony) ctx.harmony.voicing = voicing;
-          params.gate.value = clamp01(right.height);
+          // A screen control listed in `ui/override` wins until the hand moves (the panel decides that).
+          const ov = ctx.bus?.get?.("ui/override");
+          if (!(Array.isArray(ov) && ov.includes("arp/gate"))) params.gate.value = clamp01(right.height);
           ctx.audio.setFilter(right.tilt);
           tilt = right.tilt;
           const thumb = !!right.fingers?.thumb;
@@ -249,6 +254,26 @@ export function createArpMode() {
       // The energy wave stays in every mode (docs/ui-integration.md §3): gate = thickness here.
       const ch = c.harmony?.chord;
       drawEnergy(g, params?.gate.value ?? 0, ch ? voicing : 0, tilt, ch ? ch.roman : null);
+      // Tempo / beat / step dots are src/ui/transport.js in the app; here only the x2 pill at the hand
+      // (docs/ui-integration.md §6: shown with the thumb out, hidden while the menu holds the hand or the hand is lost).
+      const clock = c.clock;
+      const bus = c.bus;
+      if (!clock || !(clock.doubleTime || clock.doubleTimeActive) || bus.get("right/held")) return;
+      const pos = bus.get("right/pos");
+      const size = bus.get("right/size");
+      if (!pos || !(size > 0)) return;
+      const p = c.toCanvas(pos);
+      drawX2Pill(g, {
+        x: p.x,
+        y: p.y,
+        hs: size * g.canvas.height * 1.9, // hand span in px (same as src/ui/mode-ui.js)
+        color: ARP_COLOR,
+        filled: !!(clock.doubleTimeActive && clock.doubleTime),
+      });
+    },
+
+    /** The old minimal tempo/beat/step bar (labs/arp-lab.html; the app uses src/ui/transport.js). */
+    drawTransport(g, c = ctx) {
       drawArp(g, c, steps);
     },
   };
@@ -317,6 +342,19 @@ function buildControls(mode, container, ctx) {
   const bpm = el("span", { class: "arp-bpm", "data-control": "bpm" });
   minus.addEventListener("click", () => set({ bpm: ctx.clock.bpm - 1 }));
   plus.addEventListener("click", () => set({ bpm: ctx.clock.bpm + 1 }));
+  // Tap tempo: the average interval of the last taps (a pause > 2 s starts over).
+  const tap = el("button", { type: "button", class: "arp-btn", "aria-label": "Tap tempo", text: "Tap", "data-control": "bpm-tap" });
+  const taps = [];
+  tap.addEventListener("click", () => {
+    const t = performance.now();
+    if (taps.length && t - taps[taps.length - 1] > 2000) taps.length = 0;
+    taps.push(t);
+    if (taps.length > 5) taps.shift();
+    if (taps.length >= 2) {
+      const bpmTapped = 60000 / ((taps[taps.length - 1] - taps[0]) / (taps.length - 1));
+      set({ bpm: Math.max(MIN_BPM, Math.min(MAX_BPM, Math.round(bpmTapped))) });
+    }
+  });
 
   const rate = segmented("rate", RATES.map((r) => [r, RATE_LABELS.get(r)]), (r) => set({ rate: r }));
   const pattern = segmented("pattern", PATTERNS.map((p) => [p, PATTERN_LABELS[p]]), (p) => set({ pattern: p }));
@@ -331,7 +369,7 @@ function buildControls(mode, container, ctx) {
   const style = el("style", { text: CONTROLS_CSS });
   const panel = el("div", { class: "arp-controls" }, [
     style,
-    row("Tempo", el("div", { class: "arp-row" }, [minus, bpm, plus])),
+    row("Tempo", el("div", { class: "arp-row" }, [minus, bpm, plus, tap])),
     row("Rate", rate.el),
     row("Pattern", pattern.el),
     row("Octaves", octaves.el),

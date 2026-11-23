@@ -62,8 +62,15 @@ export function createMasterVolume(opts = {}) {
     },
     get value() { return value; },
     get anchor() { return anchor; },
+    /** Jump the smoothed value (e.g. to a screen-control value), so the hand takes over smoothly from there. */
+    setValue(v) { value = Math.max(0, Math.min(1, v)); },
   };
 }
+
+const isOverridden = (bus, name) => {
+  const o = bus.get("ui/override");
+  return Array.isArray(o) && o.includes(name);
+};
 
 const lerp = (a, b, k) => a + (b - a) * k;
 const smooth = (k) => k * k * (3 - 2 * k);
@@ -82,14 +89,48 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
   let resumePending = false;
   let resumeStart = null;
   let lastMenuKey = "";
+  let masterOverride = null; // screen control value (Controls panel) while `ui/override` lists "master"
+  let heldPhase = null; // null | "held" | "return" (what the `held` signal currently says)
+  let heldFor = null; // mode id the `held` object was built for
 
   bus.declare("mode", { type: "state", owner: "router" });
   bus.declare("volume", { type: "continuous", owner: "router" });
   bus.declare("menu", { type: "state", owner: "router" });
   bus.declare("right/held", { type: "state", owner: "router" });
+  bus.declare("held", { type: "state", owner: "router" });
   bus.set("right/held", false);
   bus.set("menu", null);
+  bus.set("held", null);
   ctx.rightLocked = null;
+
+  /** Controls panel master slider: the screen value wins until the left hand moves (`ui/override`). */
+  ctx.setMasterVolume = (v) => {
+    masterOverride = Math.max(0, Math.min(1, Number(v) || 0));
+    master.setValue(masterOverride);
+    applyMaster(masterOverride);
+  };
+
+  function applyMaster(mv) {
+    if (mv === lastMaster) return;
+    lastMaster = mv;
+    ctx.masterVolume = mv;
+    ctx.audio?.setMasterVolume?.(mv);
+    bus.set("volume", mv);
+  }
+
+  // `held` (state): while the menu holds the right hand {right: true, [rightTrack.param]: heldValue};
+  // during the crossfade back to the hand {[param]: heldValue}; otherwise null. Built on transitions only.
+  function publishHeld(phase) {
+    const id = active ? active.id : null;
+    if (phase === heldPhase && id === heldFor) return;
+    heldPhase = phase;
+    heldFor = id;
+    if (!phase) { bus.set("held", null); return; }
+    const p = active?.rightTrack?.param;
+    const h = phase === "held" ? { right: true } : {};
+    if (p) h[p] = bus.get(p) ?? null;
+    bus.set("held", h);
+  }
 
   function setMode(id) {
     const next = registry.getMode(id);
@@ -114,7 +155,13 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
     const key = `${r.state}|${r.hoverId}|${r.selectedId}|${p}`;
     if (key === lastMenuKey) return;
     lastMenuKey = key;
-    bus.set("menu", { state: r.state, hoverId: r.hoverId, selectedId: r.selectedId, progress: p });
+    bus.set("menu", {
+      state: r.state,
+      hoverId: r.hoverId,
+      selectedId: r.selectedId,
+      confirmedId: r.state === "countdown" ? r.selectedId : null,
+      progress: p,
+    });
   }
 
   /**
@@ -125,13 +172,11 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
     ctx.now = now;
 
     // ---- Left hand: master volume (every mode, also while the menu is open) ----
+    // (A screen-control override wins until the hand moves: the panel drops "master" from ui/override.)
+    if (masterOverride !== null && !isOverridden(bus, "master")) masterOverride = null;
     const mv = master.update(left ? left.height : null, now);
-    if (mv !== lastMaster) {
-      lastMaster = mv;
-      ctx.masterVolume = mv;
-      ctx.audio?.setMasterVolume?.(mv);
-      bus.set("volume", mv);
-    }
+    if (masterOverride !== null) master.setValue(masterOverride); // hand takes over smoothly from here
+    applyMaster(masterOverride !== null ? masterOverride : mv);
 
     // ---- Left hand: chord ----
     harmony.updateLeft(
@@ -164,6 +209,7 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
 
     if (held) {
       // Values stay locked; the left hand (chord changes, master volume) stays live.
+      publishHeld("held");
       if (active.hold) active.hold(ctx);
       return;
     }
@@ -183,6 +229,7 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
         frame = { ...frame, height: lerp(locked.height, frame.height, e), tilt: lerp(locked.tilt, frame.tilt, e) };
       }
     }
+    publishHeld(resumePending || resumeStart !== null ? "return" : null);
     active.update(frame, ctx);
   }
 

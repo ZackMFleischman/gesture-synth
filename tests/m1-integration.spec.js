@@ -392,6 +392,26 @@ test.describe("1.3 left height = master volume", () => {
     expect(rms((await recordAudio(page, 300)).samples)).toBeLessThan(0.002);
   });
 
+  test("Controls slider (ctx.setMasterVolume) wins until the left hand moves (ui/override)", async ({ synthPage: page, setHands }) => {
+    await setHands(leftHand(1), openRight(1));
+    await page.waitForTimeout(500);
+    await page.evaluate(() => {
+      window.__gsTest.bus.set("ui/override", ["master"]);
+      window.__gsTest.ctx.setMasterVolume(0.3);
+    });
+    await page.waitForTimeout(300);
+    expect(await bus(page, "volume")).toBeCloseTo(0.3, 5);
+    expect(await page.evaluate(() => window.__gsTest.ctx.masterVolume)).toBeCloseTo(0.3, 5);
+    // The panel drops the override once the hand moves; the hand then takes over smoothly.
+    await page.evaluate(() => window.__gsTest.bus.set("ui/override", []));
+    await page.waitForTimeout(80);
+    const mid = await bus(page, "volume");
+    await page.waitForTimeout(700);
+    expect(mid).toBeGreaterThan(0.3);
+    expect(mid).toBeLessThan(2 / 3 - 0.02);
+    expect(await bus(page, "volume")).toBeCloseTo(2 / 3, 2);
+  });
+
   test("master volume works in Arp too", async ({ synthPage: page, setHands }) => {
     await setHands(LEFT, openRight(1));
     await page.waitForTimeout(300);
