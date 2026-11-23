@@ -179,3 +179,7 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
   - Visuals: Arp `draw()` draws the tempo scale + big BPM plate at the hand (outer side if >= 150 px room); edge tracks show
     "Gate held" next to the hollow marker during the pinch (hollow marker = the hand level at the pinch start) and drop
     the right guide while `arp/tempo` is set; first-use labels hide during a pinch.
+  - Arp voicing hold (UX 1.6 follow-up): a new right-hand finger count must be stable CHORD_HOLD_TIME_MS (100 ms) before Arp
+    applies it to scheduled steps and the bus `voicing`; a pinch forming (index curled, pinchDistance < 0.8 hand sizes, not
+    pinched yet) waits PINCH_LOOKBACK_MS (300 ms). `VOICING_HOLD`, `voicingHoldMs()`, `isPinchApproach()` in src/modes/arp.js.
+    Pinch start still restores `voicingBeforePinch`; `arp.set({voicing})` (screen/lab) applies at once; Chords is unchanged.
