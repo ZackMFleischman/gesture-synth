@@ -3,10 +3,17 @@
 //   right fingers -> note set 1-4 (held 0.3 s)        tilt  -> shared filter
 //   pinch held 0.3 s on an octave arrow (pinch must start on it) -> octave +/-1
 //   thumb: no function (the pinch uses it)
-// Screen controls (2.1): mouse on the ladder, keyboard, note-set + octave buttons.
+// Screen controls (2.1): mouse on the ladder, keyboard, note-set + octave buttons (rows in the Controls panel).
 //
-// Publishes: lead/noteset, lead/octave (state); chord (state, the pad chord); filter (continuous);
-// note/on + note/off with voice "lead" (and "pad" for the pad notes).
+// The note ladder sits on the screen edge of the right (expression) hand: bus `ui/sides`.expr (published by
+// src/ui/mode-ui.js; "right" when nobody publishes it, e.g. in labs/lead-lab.html). Mirrored when swapped.
+// The master volume is the router's (left height); Chords' `exit` releases its own chord. Lead touches neither.
+//
+// Publishes: lead/noteset, lead/octave (state); chord + voicing (state: the pad chord, voicing 1 = the pad's
+// triad, so the chord/quality displays and the energy wave read it); filter (continuous, right tilt);
+// note/on + note/off with voice "lead" (and "pad" for the pad notes), ids from ctx.audio.nextNoteId.
+// hold(ctx) (radial menu holds the right hand): the lead note stops, the ladder dims, the pad keeps playing
+// and follows the left-hand chord.
 
 import {
   createLeadController,
@@ -18,6 +25,7 @@ import {
   OCTAVE_MAX,
 } from "./lead-notes.js";
 import { createLeadVoice } from "./lead-voice.js";
+import { drawEnergy } from "./chords.js";
 import { MODE_COLORS, COLORS, FONT as THEME_FONT, MOTION, withAlpha, easeOut } from "../ui/theme.js";
 
 // ---- Look: shared tokens from src/ui/theme.js; Lead-specific geometry below ----
@@ -31,19 +39,33 @@ const C = {
   warn: COLORS.warn, // hand lost (UI pass D2: coral, not amber)
 };
 const FONT = THEME_FONT.family;
-const LOOK = {
-  edgeInset: 8, // ladder lines end this far from the right edge
+/** Below this canvas width the ladder is narrower (docs/ui-integration.md Q5): 44 px wide, 22 px note name. */
+export const NARROW_PX = 520;
+const SIZE_WIDE = {
+  edgeInset: 8, // ladder lines end this far from the screen edge
   lineThin: 40, // scale-note line length
   lineChord: 56, // chord-note line length
   widthThin: 1.5,
   widthChord: 4,
-  topPx: 196, // top note line (below the filter readout; up arrow reachable without the hand leaving the frame)
-  bottomInset: 140, // bottom note line = H - this (palm must still reach the down arrow above the frame edge)
   arrowGap: 28, // arrow centre beyond the end lines
   arrowSize: 18,
   cursorR: 12,
   nameSize: 28,
-  badge: { x: 200, y: 25 }, // top-left status row, right of the mode badge slot
+};
+const SIZE_NARROW = {
+  edgeInset: 6,
+  lineThin: 26,
+  lineChord: 38, // 6 + 38 = 44 px from the edge
+  widthThin: 1.5,
+  widthChord: 3.5,
+  arrowGap: 24,
+  arrowSize: 14,
+  cursorR: 10,
+  nameSize: 22,
+};
+const LOOK = {
+  topPx: 196, // top note line (below the filter readout / left column; up arrow reachable without the hand leaving the frame)
+  bottomInset: 140, // bottom note line = H - this (palm must still reach the down arrow above the frame edge)
   lineMoveMs: MOTION.base, // chord-note lines move to the new chord (150 ms)
   slideMs: MOTION.slow, // ladder slide on an octave change (200 ms)
   flashMs: MOTION.base, // confirm flash
@@ -51,30 +73,59 @@ const LOOK = {
   dimDuringHold: 0.4,
 };
 
-const MENU_HELD_MS = 150;
-
 const STEP_KEYS = ["KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK", "KeyL", "Semicolon", "Quote",
   "KeyQ", "KeyW", "KeyE", "KeyR", "KeyT", "KeyY", "KeyU", "KeyI", "KeyO", "KeyP", "BracketLeft", "BracketRight"];
 
-
-/** Ladder geometry in canvas px. */
-export function ladderGeometry(W, H) {
-  const right = W - LOOK.edgeInset;
+/**
+ * Ladder geometry in canvas px. side = screen edge of the expression hand ("left" | "right"); inset = safe-area
+ * inset on that edge. `dir` points from the edge inward; `edge` = outer end of the lines, `inner` = inner end of
+ * the chord lines.
+ */
+export function ladderGeometry(W, H, side = "right", inset = 0) {
+  const sz = W < NARROW_PX ? SIZE_NARROW : SIZE_WIDE;
+  const dir = side === "left" ? 1 : -1;
+  const edge = side === "left" ? inset + sz.edgeInset : W - inset - sz.edgeInset;
   const top = Math.min(LOOK.topPx, Math.round(H * 0.24));
   const bottom = Math.max(top + 120, H - LOOK.bottomInset);
-  const cx = right - LOOK.lineChord / 2;
-  return { W, H, right, top, bottom, cx, upY: top - LOOK.arrowGap, downY: bottom + LOOK.arrowGap };
+  return {
+    W, H, side, dir, sz, edge, top, bottom,
+    narrow: W < NARROW_PX,
+    inner: edge + dir * sz.lineChord,
+    cx: edge + (dir * sz.lineChord) / 2,
+    upY: top - sz.arrowGap,
+    downY: bottom + sz.arrowGap,
+  };
 }
 const uToY = (geo, u) => geo.bottom - u * (geo.bottom - geo.top);
 const yToU = (geo, y) => (geo.bottom - y) / (geo.bottom - geo.top);
+const ox = (geo, d) => geo.edge + geo.dir * d; // x at distance d inward from the line ends
+
+// ---- Safe-area insets (landscape phones): measured with a probe element, re-read when the size changes ----
+let insetProbe = null;
+let insetFor = "";
+let insets = { left: 0, right: 0 };
+function safeInsets(W, H) {
+  if (typeof document === "undefined") return insets;
+  const k = `${W}x${H}`;
+  if (k === insetFor) return insets;
+  insetFor = k;
+  if (!insetProbe) {
+    insetProbe = document.createElement("div");
+    insetProbe.setAttribute("aria-hidden", "true");
+    insetProbe.style.cssText = "position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;" +
+      "padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)";
+    document.body.appendChild(insetProbe);
+  }
+  const cs = getComputedStyle(insetProbe);
+  insets = { left: parseFloat(cs.paddingLeft) || 0, right: parseFloat(cs.paddingRight) || 0 };
+  return insets;
+}
 
 // ---- Mode state (module singleton, like chords.js) ----
 const ctrl = createLeadController();
 const S = ctrl.state;
 let voice = null;
 let filterParam = null;
-let masterApplied = null;
-const DRONE_FADE_TAU = 0.08;
 let padChord = undefined;
 let padApplied = false;
 let lastGeo = ladderGeometry(1280, 800);
@@ -89,8 +140,8 @@ const virt = {
 
 // What draw() renders.
 const view = {
-  lastUpdateAt: -Infinity, // the router skips update() while the radial menu holds the right hand
-  domBadge: false, // a DOM #noteSetBadge exists (src/ui/badges.js): skip the canvas status badge
+  held: false, // the radial menu holds the right hand (router calls hold() instead of update())
+  resumeGuard: false, // after a hold: a pinch still closed from before must open once before it plays
   hand: null, // {x,y} canvas px of the right palm (null = none / screen control)
   handSize: 0,
   usingVirtual: false,
@@ -102,6 +153,9 @@ const view = {
   slideDir: 0,
   lastPreviewMidi: null,
   now: 0,
+  regions: [], // [{name, kind: "edge"|"hand", rect}] drawn this frame (layout tests)
+  padEl: null, // mouse strip on the ladder (screen control)
+  padKey: "",
 };
 
 function ensureParams(ctx) {
@@ -114,49 +168,6 @@ function ensureParams(ctx) {
   });
 }
 
-/**
- * Hand-off from Chords without a gap: the Chords drone oscillators (wired straight into ctx.audio.out) are
- * re-routed through a local fade gain and faded out under the pad, then stopped. audio.js has no per-voice
- * gain for the drone yet (proposed change: a chord-voice gain node + synth.releaseChord(fadeS)).
- */
-function handoffDrone(ctx) {
-  const synth = ctx.audio.synth;
-  const ac = ctx.audio.ac;
-  if (!synth || !ac || !synth.oscillators || !synth.oscillators.length) return;
-  const oscs = synth.oscillators;
-  if (typeof synth._emitOff === "function") synth._emitOff(oscs);
-  synth.oscillators = [];
-  synth.currentKey = null; // Chords re-creates its drone when it becomes active again
-  const t = ac.currentTime;
-  const fade = ac.createGain();
-  fade.gain.setValueAtTime(1, t);
-  fade.gain.setTargetAtTime(0, t, DRONE_FADE_TAU);
-  fade.connect(ctx.audio.out);
-  for (const o of oscs) {
-    try { o.disconnect(); } catch {}
-    o.connect(fade);
-    o.stop(t + DRONE_FADE_TAU * 8);
-  }
-  oscs[0].onended = () => { try { fade.disconnect(); } catch {} };
-  masterApplied = null; // re-apply master (cancels Chords' exit ramp to 0)
-}
-
-/** Master volume = ctx.masterVolume (1 until milestone 1.3 provides it). */
-function applyMaster(ctx) {
-  const ac = ctx.audio.ac;
-  const master = ctx.audio.master;
-  if (!ac || !master) return;
-  handoffDrone(ctx);
-  const target = Math.max(0, Math.min(1, ctx.masterVolume ?? 1));
-  if (masterApplied !== null && Math.abs(target - masterApplied) < 0.002) return;
-  const t = ac.currentTime;
-  const g = master.gain;
-  if (typeof g.cancelAndHoldAtTime === "function") g.cancelAndHoldAtTime(t);
-  else { const v = g.value; g.cancelScheduledValues(t); g.setValueAtTime(v, t); }
-  g.setTargetAtTime(target, t, 0.05);
-  masterApplied = target;
-}
-
 function updatePad(ctx) {
   const chord = ctx.harmony.chord;
   const live = !!ctx.audio.ac;
@@ -165,6 +176,14 @@ function updatePad(ctx) {
   padApplied = live;
   if (!live) return;
   voice.setPad(chord ? ctx.harmony.notes(chord.roman, chord.isMajor, 1) : null);
+}
+
+/** Chord display / quality / energy wave read these. The pad plays voicing 1 (the triad + octave). */
+function publishChord(ctx) {
+  const c = ctx.harmony.chord ?? null;
+  ctx.bus.set("chord", c);
+  ctx.bus.set("voicing", c ? 1 : 0);
+  ctx.bus.set("chords/octave", false);
 }
 
 function handleEvents(evs, ctx) {
@@ -314,9 +333,9 @@ function drawSetSegments(g, x, yBase, { active, scale = 1, hScale = 1, target = 
  * Octave arrow. States: available (outline), lit (cursor on it: solid fill, 1.25x), hold (ring fills),
  * confirmed (solid flash), grey (at the limit: solid grey outline, never lights up).
  */
-function drawArrow(g, cx, cy, dir, { lit, grey, progress, flash = 0 }) {
+function drawArrow(g, cx, cy, dir, size, { lit, grey, progress, flash = 0 }) {
   const big = (lit || progress > 0) && !grey ? 1.25 : 1;
-  const s = LOOK.arrowSize * big;
+  const s = size * big;
   const r = s * 1.05;
   g.save();
   g.beginPath();
@@ -361,6 +380,23 @@ function drawArrow(g, cx, cy, dir, { lit, grey, progress, flash = 0 }) {
   g.restore();
 }
 
+/** Places the mouse strip (screen control) over the ladder band on the expression edge. */
+function placePad(geo) {
+  const el = view.padEl;
+  if (!el) return;
+  const w = geo.sz.lineChord + geo.sz.edgeInset + 64;
+  const top = Math.max(0, geo.upY - 40);
+  const h = geo.downY + 40 - top;
+  const key = `${geo.side}|${w}|${top}|${h}`;
+  if (key === view.padKey) return;
+  view.padKey = key;
+  el.style.top = `${top}px`;
+  el.style.height = `${h}px`;
+  el.style.width = `${w}px`;
+  el.style.left = geo.side === "left" ? "0px" : "auto";
+  el.style.right = geo.side === "left" ? "auto" : "0px";
+}
+
 // ---- The mode ----
 
 const lead = {
@@ -372,18 +408,25 @@ const lead = {
   signals: [
     { name: "lead/noteset", type: "state" },
     { name: "lead/octave", type: "state" },
+    { name: "chord", type: "state" }, // the pad chord (chord display, energy wave)
+    { name: "voicing", type: "state" },
+    { name: "filter", type: "continuous" }, // right tilt
   ],
 
   enter(ctx) {
-    view.domBadge = typeof document !== "undefined" && !!document.getElementById("noteSetBadge");
     ensureParams(ctx);
-    if (!voice) voice = createLeadVoice(ctx.audio, { bus: ctx.bus });
-    masterApplied = null;
+    if (!voice) voice = createLeadVoice(ctx.audio, { bus: ctx.bus, nextId: ctx.audio.nextNoteId });
+    view.held = false;
+    view.resumeGuard = !!ctx.rightLocked; // entered via the menu: wait for an open hand before playing
     padChord = undefined;
     padApplied = false;
+    // Start the pad right now (same frame as the previous mode's exit): a slow frame must not open a gap.
+    ctrl.setContext(ctx.harmony.keyName, ctx.harmony.chord, ctx.now);
+    updatePad(ctx);
+    if (ctx.rightLocked && filterParam) filterParam.value = ctx.rightLocked.tilt;
     ctx.bus.set("lead/noteset", S.setId);
     ctx.bus.set("lead/octave", S.octave);
-    ctx.bus.set("voicing", 0); // the quality display has no meaning here
+    publishChord(ctx);
   },
 
   exit() {
@@ -391,14 +434,29 @@ const lead = {
     if (voice) voice.stop();
     padChord = undefined;
     padApplied = false;
+    view.held = false;
+  },
+
+  /** Menu holds the right hand: the lead note stops, the ladder dims; the pad follows the left-hand chord. */
+  hold(ctx) {
+    const now = ctx.now;
+    view.now = now;
+    if (!voice) lead.enter(ctx);
+    view.held = true;
+    view.resumeGuard = true;
+    view.hand = null;
+    if (S.pinchMode !== "none") handleEvents(ctrl.release(), ctx);
+    ctrl.setContext(ctx.harmony.keyName, ctx.harmony.chord, now);
+    updatePad(ctx);
+    captureLadderChange(now);
+    publishChord(ctx);
   },
 
   update(right, ctx) {
     const now = ctx.now;
     view.now = now;
-    view.lastUpdateAt = now;
     if (!voice) lead.enter(ctx);
-    applyMaster(ctx);
+    view.held = false;
     ctrl.setContext(ctx.harmony.keyName, ctx.harmony.chord, now);
     updatePad(ctx);
 
@@ -426,6 +484,11 @@ const lead = {
     } else {
       input = null;
     }
+    // After the menu let go: a pinch still closed from before never plays; it has to open once.
+    if (view.resumeGuard) {
+      if (input && input.pinch && !useVirtual) input.pinch = false;
+      else if (input) view.resumeGuard = false;
+    }
 
     handleEvents(ctrl.step(input, now), ctx);
     // Keyboard notes drive the cursor; once released the cursor stays there for the arrow keys.
@@ -433,36 +496,47 @@ const lead = {
     captureLadderChange(now);
     if (S.preview != null) view.lastPreviewMidi = S.ladder.notes[S.preview].midi;
 
-    ctx.bus.set("chord", ctx.harmony.chord);
+    publishChord(ctx);
   },
 
   draw(g, ctx) {
     const now = ctx ? ctx.now : view.now;
     const W = g.canvas.width;
     const H = g.canvas.height;
-    const geo = (lastGeo = ladderGeometry(W, H));
+    const sides = ctx?.bus?.get?.("ui/sides");
+    const side = sides && sides.expr === "left" ? "left" : "right";
+    const geo = (lastGeo = ladderGeometry(W, H, side, safeInsets(W, H)[side]));
+    const sz = geo.sz;
+    const dir = geo.dir;
+    const alignIn = side === "left" ? "left" : "right"; // labels on the inner side of the ladder
+    view.regions = [];
+    const reg = (name, kind, rect) => (rect && view.regions.push({ name, kind, rect }), rect);
+    placePad(geo);
     captureLadderChange(now);
     const lines = currentLines(now);
     const span = geo.bottom - geo.top;
-    // Held: the radial menu has the right hand (update() not called). Ladder dims, nothing sounds.
-    const menuHeld = now - view.lastUpdateAt > MENU_HELD_MS;
-    if (menuHeld && S.pinchMode !== "none") {
-      ctrl.release();
-      if (voice) voice.noteOff();
-    }
+    // Held: the radial menu has the right hand (hold() instead of update()). Ladder dims, nothing sounds.
+    const menuHeld = view.held;
     const holding = !menuHeld && S.setHoldTarget != null && S.setHoldProgress > 0;
     const lostNow = !S.present && S.lostSince != null;
     const ladderAlpha = holding || lostNow || menuHeld ? LOOK.dimDuringHold : 1;
 
+    // ---- Energy wave behind the chord display (every mode; the pad chord here) ----
+    if (ctx?.harmony) {
+      const ch = ctx.harmony.chord;
+      drawEnergy(g, S.pinchMode === "note" ? 0.7 : 0.3, ch ? 1 : 0, filterParam?.value ?? 0, ch ? ch.roman : null);
+    }
+
     g.save();
     // ---- Soft dark backing so the ladder reads over bright video ----
     {
-      const x0 = geo.right - LOOK.lineChord - 8;
-      const grad = g.createLinearGradient(x0, 0, W, 0);
+      const x0 = ox(geo, sz.lineChord + 8);
+      const xEdge = side === "left" ? 0 : W;
+      const grad = g.createLinearGradient(x0, 0, xEdge, 0);
       grad.addColorStop(0, "rgba(0,0,0,0)");
       grad.addColorStop(0.35, "rgba(0,0,0,0.22)");
       grad.addColorStop(1, "rgba(0,0,0,0.3)");
-      roundRect(g, x0, geo.top - 16, W - x0, span + 32, 10);
+      roundRect(g, Math.min(x0, xEdge), geo.top - 16, Math.abs(xEdge - x0), span + 32, 10);
       g.fillStyle = grad;
       g.fill();
     }
@@ -470,7 +544,8 @@ const lead = {
     // ---- Ladder lines (clipped to the ladder band during slides) ----
     g.save();
     g.beginPath();
-    g.rect(geo.right - LOOK.lineChord - 10, geo.top - 14, LOOK.lineChord + 20, span + 28);
+    const clipX = Math.min(ox(geo, -10), ox(geo, sz.lineChord + 10));
+    g.rect(clipX, geo.top - 14, sz.lineChord + 20, span + 28);
     g.clip();
     g.lineCap = "round";
     // thin first, chord lines on top
@@ -478,89 +553,99 @@ const lead = {
       for (const l of lines) {
         if (l.isChord !== pass) continue;
         const y = uToY(geo, l.u);
-        const len = l.isChord ? LOOK.lineChord : LOOK.lineThin;
+        const len = l.isChord ? sz.lineChord : sz.lineThin;
         g.globalAlpha = ladderAlpha * l.alpha;
         g.beginPath();
-        g.moveTo(geo.right - len, y);
-        g.lineTo(geo.right, y);
-        strokeHalo(g, l.isChord ? LEAD_COLOR : "rgba(243, 239, 231, 0.6)", l.isChord ? LOOK.widthChord : LOOK.widthThin);
+        g.moveTo(ox(geo, len), y);
+        g.lineTo(geo.edge, y);
+        strokeHalo(g, l.isChord ? LEAD_COLOR : "rgba(243, 239, 231, 0.6)", l.isChord ? sz.widthChord : sz.widthThin);
       }
     }
     g.restore();
     g.globalAlpha = 1;
 
     // ---- Octave arrows + marks ----
-    const hoverUp = S.hover === "up" && S.present;
-    const hoverDown = S.hover === "down" && S.present;
+    const hoverUp = S.hover === "up" && S.present && !menuHeld;
+    const hoverDown = S.hover === "down" && S.present && !menuHeld;
     const octFlash = Math.max(0, 1 - (now - S.octaveChangedAt) / LOOK.flashMs);
     const upFlash = S.octaveDir > 0 ? octFlash : 0;
     const downFlash = S.octaveDir < 0 ? octFlash : 0;
     const upGrey = S.octave >= OCTAVE_MAX;
     const downGrey = S.octave <= OCTAVE_MIN;
-    drawArrow(g, geo.cx, geo.upY, "up", {
+    g.save();
+    g.globalAlpha = menuHeld ? LOOK.dimDuringHold : 1;
+    drawArrow(g, geo.cx, geo.upY, "up", sz.arrowSize, {
       lit: hoverUp && !upGrey,
       grey: upGrey,
-      progress: S.pinchMode === "arrow" && S.arrowDir > 0 ? S.arrowProgress : 0,
+      progress: !menuHeld && S.pinchMode === "arrow" && S.arrowDir > 0 ? S.arrowProgress : 0,
       flash: upFlash,
     });
-    drawArrow(g, geo.cx, geo.downY, "down", {
+    drawArrow(g, geo.cx, geo.downY, "down", sz.arrowSize, {
       lit: hoverDown && !downGrey,
       grey: downGrey,
-      progress: S.pinchMode === "arrow" && S.arrowDir < 0 ? S.arrowProgress : 0,
+      progress: !menuHeld && S.pinchMode === "arrow" && S.arrowDir < 0 ? S.arrowProgress : 0,
       flash: downFlash,
     });
+    // Octave marks: 4 dots in a column on the inner side of the up arrow (lowest octave at the bottom), one lit.
+    const n = OCTAVE_MAX - OCTAVE_MIN + 1;
+    const step = geo.narrow ? 9 : 11;
+    const mx = geo.cx + dir * (sz.arrowSize * 1.35 + 10);
+    const yTop = geo.upY - ((n - 1) * step) / 2;
+    roundRect(g, mx - 8, yTop - 8, 16, (n - 1) * step + 16, 8);
+    g.fillStyle = "rgba(20,20,20,0.55)";
+    g.fill();
+    for (let i = OCTAVE_MIN; i <= OCTAVE_MAX; i++) {
+      const y = yTop + (OCTAVE_MAX - i) * step;
+      const on = i === S.octave;
+      g.beginPath();
+      g.arc(mx, y, on ? 4.5 : 2.5, 0, Math.PI * 2);
+      g.fillStyle = on ? (octFlash > 0 ? "#fff" : LEAD_COLOR) : "rgba(243, 239, 231, 0.5)";
+      g.fill();
+    }
+    g.restore();
+    {
+      // The ladder's persistent footprint (lines, arrows incl. their lit size + ring, octave marks).
+      const ar = sz.arrowSize * 1.25 * 1.05 + 5;
+      const xs = [geo.edge, geo.inner, geo.cx - ar, geo.cx + ar, mx - 8, mx + 8];
+      const x0 = Math.min(...xs);
+      const x1 = Math.max(...xs);
+      reg("lead-ladder", "edge", { x: x0, y: geo.upY - ar, w: x1 - x0, h: geo.downY + ar - (geo.upY - ar) });
+    }
     // Arrow label: the value in change (only while the cursor is on an arrow).
     if (hoverUp || hoverDown) {
       const up = hoverUp;
       const grey = up ? upGrey : downGrey;
       const label = grey ? (up ? "Top octave" : "Bottom octave") : up ? "Octave up" : "Octave down";
-      plateLabel(g, label, geo.cx - LOOK.arrowSize * 1.35 - 30, up ? geo.upY : geo.downY, {
-        size: 14, weight: 700, align: "right", color: grey ? "rgba(200,200,200,0.9)" : C.ink,
+      reg("lead-arrow-label", "hand", plateLabel(g, label, geo.cx + dir * (sz.arrowSize * 1.35 + 30), up ? geo.upY : geo.downY, {
+        size: geo.narrow ? 12 : 14, weight: 700, align: alignIn, color: grey ? "rgba(200,200,200,0.9)" : C.ink,
         stroke: grey ? null : withAlpha(LEAD_COLOR, 0.8),
-      });
-    }
-    // Octave marks: 4 dots in a column left of the ladder's top end (lowest octave at the bottom), one lit.
-    {
-      const n = OCTAVE_MAX - OCTAVE_MIN + 1;
-      const step = 11;
-      const mx = geo.cx - LOOK.arrowSize * 1.35 - 10; // inner side of the up arrow
-      const yTop = geo.upY - ((n - 1) * step) / 2;
-      roundRect(g, mx - 8, yTop - 8, 16, (n - 1) * step + 16, 8);
-      g.fillStyle = "rgba(20,20,20,0.55)";
-      g.fill();
-      for (let i = OCTAVE_MIN; i <= OCTAVE_MAX; i++) {
-        const y = yTop + (OCTAVE_MAX - i) * step;
-        const on = i === S.octave;
-        g.beginPath();
-        g.arc(mx, y, on ? 4.5 : 2.5, 0, Math.PI * 2);
-        g.fillStyle = on ? (octFlash > 0 ? "#fff" : LEAD_COLOR) : "rgba(243, 239, 231, 0.5)";
-        g.fill();
-      }
+      }));
     }
 
     // ---- Cursor + note name ----
     const lost = !S.present;
-    let idx = S.pinchMode === "note" ? S.playIdx : S.preview;
+    const idx = S.pinchMode === "note" ? S.playIdx : S.preview;
     let cursorMidi = idx != null ? S.ladder.notes[idx]?.midi : null;
     if (cursorMidi == null && lost) cursorMidi = view.lastPreviewMidi;
     let cl = cursorMidi != null ? lines.find((l) => l.midi === cursorMidi && !l.old) : null;
     if (!cl && cursorMidi != null) {
       // The ladder is being rebuilt (chord/set change): never let the cursor blink out.
-      const n = S.ladder.notes.find((x) => x.midi === cursorMidi);
-      cl = { midi: cursorMidi, u: n ? n.u : (cursorMidi - S.ladder.low) / 24 };
+      const nn = S.ladder.notes.find((x) => x.midi === cursorMidi);
+      cl = { midi: cursorMidi, u: nn ? nn.u : (cursorMidi - S.ladder.low) / 24 };
     }
-    const onArrow = !lost && S.hover && S.pinchMode !== "note";
+    const onArrow = !lost && !menuHeld && S.hover && S.pinchMode !== "note";
     if (cl || onArrow) {
       const cy = onArrow ? (S.hover === "up" ? geo.upY : geo.downY) : uToY(geo, cl.u);
       const cx = geo.cx;
-      const playing = S.pinchMode === "note" && !lost;
-      const nameRight = geo.right - LOOK.lineChord - 12;
+      const playing = S.pinchMode === "note" && !lost && !menuHeld;
+      const nameX = ox(geo, sz.lineChord + 12);
       // Dotted guide from the hand to the cursor (stops at the name plate).
-      if (view.hand && !lost && !menuHeld && !onArrow && view.hand.x < nameRight - 90) {
+      const handInside = view.hand && (view.hand.x - nameX) * dir > 90;
+      if (view.hand && handInside && !lost && !menuHeld && !onArrow) {
         g.save();
         g.beginPath();
         g.moveTo(view.hand.x, view.hand.y);
-        g.lineTo(onArrow ? geo.cx - LOOK.arrowSize - 40 : nameRight - 80, cy);
+        g.lineTo(nameX + dir * 80, cy);
         g.lineWidth = 4;
         g.strokeStyle = "rgba(0,0,0,0.3)";
         g.lineCap = "round";
@@ -572,8 +657,9 @@ const lead = {
         g.restore();
       }
       if (!onArrow) {
-        const r = LOOK.cursorR;
+        const r = sz.cursorR;
         g.save();
+        if (menuHeld) g.globalAlpha = LOOK.dimDuringHold;
         if (lost) {
           g.beginPath();
           g.arc(cx, cy, r, 0, Math.PI * 2);
@@ -604,47 +690,25 @@ const lead = {
           g.fill();
           strokeHalo(g, LEAD_COLOR, 3);
         }
-        g.restore();
-        if (!lost) {
+        if (!lost && !menuHeld) {
           const name = S.ladder.notes[idx]?.name ?? "";
-          plateLabel(g, name, nameRight, cy, {
-            size: W < 600 ? 22 : LOOK.nameSize,
+          reg("lead-note-name", "hand", plateLabel(g, name, nameX, cy, {
+            size: sz.nameSize,
             weight: 700,
-            align: "right",
+            align: alignIn,
             color: playing ? "#111" : C.ink,
             fill: playing ? LEAD_COLOR : C.plate,
-            padX: 10,
+            padX: geo.narrow ? 7 : 10,
             padY: 4,
-          });
+          }));
         }
+        g.restore();
       }
-      if (lost) plateLabel(g, "Hand lost", nameRight, cy, { size: 13, weight: 700, color: C.warn, align: "right", stroke: withAlpha(C.warn, 0.7) });
-    }
-
-    // ---- Note-set badge (status, top left row; canvas fallback until the DOM #noteSetBadge exists) ----
-    const setFlash = Math.max(0, 1 - (now - S.setChangedAt) / LOOK.flashMs);
-    if (!view.domBadge) {
-      const bx = LOOK.badge.x;
-      const by = LOOK.badge.y;
-      const label = NOTE_SETS[S.setId].name;
-      g.font = `600 12px ${FONT}`;
-      const tw = g.measureText(label).width;
-      const segW = 4 * 7 + 3 * 3;
-      const w = 10 + segW + 8 + tw + 12;
-      roundRect(g, bx, by - 14, w, 28, 14);
-      g.fillStyle = C.plate;
-      g.fill();
-      g.lineWidth = 1.5;
-      g.strokeStyle = withAlpha(LEAD_COLOR, 0.8);
-      g.stroke();
-      drawSetSegments(g, bx + 10, by + 9, { active: S.setId, flash: setFlash, scale: 7 / 6, hScale: 1.05 });
-      g.fillStyle = C.ink;
-      g.textAlign = "left";
-      g.textBaseline = "middle";
-      g.fillText(label, bx + 10 + segW + 8, by + 1);
+      if (lost) reg("lead-lost", "hand", plateLabel(g, "Hand lost", nameX, cy, { size: 13, weight: 700, color: C.warn, align: alignIn, stroke: withAlpha(C.warn, 0.7) }));
     }
 
     // ---- At-hand note-set badge (hand only): approach fill, selected rim + flash, then fade ----
+    const setFlash = Math.max(0, 1 - (now - S.setChangedAt) / LOOK.flashMs);
     const since = now - S.setChangedAt;
     if (view.hand && !lost && !menuHeld && (holding || since < LOOK.badgeLingerMs)) {
       const alpha = holding ? 1 : 1 - easeOut(Math.max(0, since - LOOK.flashMs) / (LOOK.badgeLingerMs - LOOK.flashMs));
@@ -658,9 +722,9 @@ const lead = {
       const tw = g.measureText(label).width;
       const bw = Math.max(segW, tw) + 28;
       const bh = 92;
-      // Beside the hand on the inner side, so the fingers doing the count stay visible.
+      // Beside the hand on the inner side (towards the screen centre), so the fingers doing the count stay visible.
       const hs = Math.max(50, view.handSize || 90);
-      const ax = Math.max(bw / 2 + 8, view.hand.x - hs * 0.6 - bw / 2);
+      const ax = Math.min(W - bw / 2 - 8, Math.max(bw / 2 + 8, view.hand.x + dir * (hs * 0.6 + bw / 2)));
       const ay = Math.min(H - bh / 2 - 8, Math.max(bh / 2 + 8, view.hand.y - hs * 0.2));
       const confirmed = !holding;
       roundRect(g, ax - bw / 2, ay - bh / 2, bw, bh, 12);
@@ -669,6 +733,7 @@ const lead = {
       g.lineWidth = confirmed ? 3 : 1.5;
       g.strokeStyle = setFlash > 0 ? "#fff" : confirmed ? LEAD_COLOR : withAlpha(LEAD_COLOR, 0.55);
       g.stroke();
+      reg("lead-set-badge", "hand", { x: ax - bw / 2, y: ay - bh / 2, w: bw, h: bh });
       drawSetSegments(g, ax - segW / 2, ay + 8, { active: S.setId, scale: sc, target, progress: S.setHoldProgress, flash: setFlash });
       g.fillStyle = confirmed ? LEAD_COLOR : C.ink;
       g.font = `${confirmed ? 800 : 600} 15px ${FONT}`;
@@ -696,44 +761,49 @@ const lead = {
     g.restore();
   },
 
+  /**
+   * Screen controls: rows for the Controls panel (note set, octave, how to play with mouse/keyboard), plus the
+   * mouse strip on the ladder (appended to #stage, not to the panel: it must work while the panel is closed).
+   */
   controls(container, ctx) {
     const doc = container.ownerDocument || document;
     const win = doc.defaultView || window;
     const root = doc.createElement("div");
     root.className = "lead-controls";
     root.innerHTML = `
-      <style>
-        .lead-controls { position:absolute; right:150px; bottom:14px; z-index:5; display:flex; gap:10px; align-items:center;
-          font:12px monospace; color:#f3efe7; background:rgba(20,20,20,0.78); border:1px solid rgba(192,140,255,0.45);
-          border-radius:8px; padding:6px 10px; user-select:none; }
-        .lead-controls .grp { display:flex; gap:3px; align-items:center; }
-        .lead-controls .lbl { color:rgba(243,239,231,0.6); margin-right:4px; }
-        .lead-controls button { font:12px monospace; color:#f3efe7; background:#1a1a1a; border:1px solid #444;
-          border-radius:4px; padding:3px 7px; cursor:pointer; min-width:26px; }
-        .lead-controls button[aria-pressed="true"] { background:${LEAD_COLOR}; color:#111; border-color:${LEAD_COLOR}; }
-        .lead-controls button:disabled { opacity:0.35; cursor:default; }
-        .lead-controls .oct { min-width:28px; text-align:center; }
-        @media (max-width: 700px) { .lead-controls { right:auto; left:12px; bottom:auto; top:128px; gap:6px; padding:5px 6px; }
-          .lead-controls .lbl { display:none; } .lead-controls button { padding:3px 5px; min-width:22px; } }
-        .lead-pad { position:absolute; top:0; right:0; bottom:0; width:170px; z-index:3; cursor:crosshair; touch-action:none; }
-      </style>
-      <div class="grp" role="group" aria-label="Note set"><span class="lbl">Notes</span>
-        ${[1, 2, 3, 4].map((n) => `<button data-set="${n}" title="${NOTE_SETS[n].name} (key ${n})">${n}</button>`).join("")}
+      <div class="lead-row"><span class="lead-label">Notes</span>
+        <div class="lead-seg" role="group" aria-label="Note set" data-control="noteset">
+          ${[1, 2, 3, 4].map((n) => `<button type="button" data-set="${n}" title="${NOTE_SETS[n].name} (key ${n})">${n}</button>`).join("")}
+        </div><span class="lead-setname" data-hook="setname"></span>
       </div>
-      <div class="grp" role="group" aria-label="Octave"><span class="lbl">Octave</span>
-        <button data-oct="-1" title="Octave down (-)">−</button><span class="oct"></span><button data-oct="1" title="Octave up (=)">+</button>
+      <div class="lead-row"><span class="lead-label">Octave</span>
+        <button type="button" class="lead-btn" data-oct="-1" data-control="octave-down" aria-label="Octave down" title="Octave down (-)">−</button><span class="lead-oct" data-control="octave"></span><button type="button" class="lead-btn" data-oct="1" data-control="octave-up" aria-label="Octave up" title="Octave up (=)">+</button>
+      </div>
+      <div class="lead-row lead-hint" data-control="lead-play-help"><span class="lead-label">Play</span>
+        <span>Mouse on the ladder · keys A–' (Q–] higher) · 1–4 notes · −/= octave</span>
       </div>`;
     const pad = doc.createElement("div");
     pad.className = "lead-pad";
+    pad.id = "leadPad";
     pad.title = "Lead: hover to preview, press to play";
+    pad.style.cssText = "position:absolute;z-index:3;cursor:crosshair;touch-action:none;";
     container.appendChild(root);
-    container.appendChild(pad);
+    (doc.getElementById("stage") || container).appendChild(pad);
+    view.padEl = pad;
+    view.padKey = "";
+    placePad(lastGeo);
 
     const setBtns = [...root.querySelectorAll("[data-set]")];
-    const octLbl = root.querySelector(".oct");
+    const setName = root.querySelector('[data-hook="setname"]');
+    const octLbl = root.querySelector(".lead-oct");
     const [octDown, octUp] = root.querySelectorAll("[data-oct]");
     function refresh() {
-      for (const b of setBtns) b.setAttribute("aria-pressed", String(Number(b.dataset.set) === S.setId));
+      for (const b of setBtns) {
+        const on = Number(b.dataset.set) === S.setId;
+        b.setAttribute("aria-pressed", String(on));
+        b.classList.toggle("on", on);
+      }
+      setName.textContent = NOTE_SETS[S.setId].name;
       octLbl.textContent = S.ladder.notes.length ? noteName(S.ladder.low, S.keyName) : String(S.octave);
       octDown.disabled = S.octave <= OCTAVE_MIN;
       octUp.disabled = S.octave >= OCTAVE_MAX;
@@ -760,7 +830,7 @@ const lead = {
 
     // Pointer on the ladder strip = a virtual right hand (hover = preview, press = play).
     const yOf = (e) => {
-      const r = (ctx.canvas || doc.getElementById("overlay") || pad).getBoundingClientRect();
+      const r = (doc.getElementById("overlay") || pad).getBoundingClientRect();
       return (e.clientY - r.top) / Math.max(1, r.height);
     };
     pad.addEventListener("pointerenter", (e) => { virt.inside = true; virt.y = yOf(e); virt.keyIdx = null; touchVirtual(); });
@@ -789,6 +859,7 @@ const lead = {
       if (ni >= 0) {
         if (!e.repeat && ni < S.ladder.notes.length && !virt.keys.includes(ni)) virt.keys.push(ni);
       } else if (k === "Space") {
+        if (e.target && e.target.tagName === "BUTTON") return; // space activates a focused button
         if (virt.keyIdx == null) virt.keyIdx = S.preview ?? Math.floor(S.ladder.notes.length / 2);
         virt.space = true;
       } else if (k === "ArrowUp" || k === "ArrowDown") {
@@ -821,20 +892,21 @@ const lead = {
       win.removeEventListener("keyup", onKeyUp);
       root.remove();
       pad.remove();
+      if (view.padEl === pad) view.padEl = null;
       Object.assign(virt, { inside: false, down: false, keys: [], space: false, keyIdx: null, touched: false, anchor: null });
     };
   },
 
   menuItems: [],
-  /** The right edge shows the note ladder (drawn here), not a generic track. */
+  /** The expression edge shows the note ladder (drawn here), not a generic track. */
   rightTrack: null,
   /** Right-hand rows for the gesture guide. */
   guide: [
-    ["🤏", "Pinch: play"],
-    ["↕️", "Height: note"],
-    ["☝️✌️", "Fingers: notes"],
-    ["🔼", "Arrow: octave"],
-    ["↔️", "Tilt: filter"],
+    ["✊", "Menu"],
+    ["↕", "Note"],
+    ["🤏", "Play"],
+    ["☝️", "Note set"],
+    ["🔼", "Pinch arrow: octave"],
   ],
 
   /** Test/debug hook: controller state + what draw() renders (canvas px). Not part of the mode contract. */
@@ -844,7 +916,9 @@ const lead = {
     const idx = S.pinchMode === "note" ? S.playIdx : S.preview;
     const note = idx != null ? S.ladder.notes[idx] : null;
     return {
-      geo,
+      geo: { ...geo, sz: { ...geo.sz } },
+      side: geo.side,
+      held: view.held,
       setId: S.setId,
       octave: S.octave,
       keyName: S.keyName,
@@ -864,6 +938,7 @@ const lead = {
       changeKind: view.changeKind,
       sounding: voice ? voice.sounding : null,
       pad: voice ? voice.padFreqs : [],
+      regions: view.regions.map((r) => ({ ...r, rect: { ...r.rect } })),
     };
   },
   /** Ladder y (canvas px) -> display-normalized y, for tests placing the hand on a note. */

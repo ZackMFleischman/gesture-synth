@@ -118,6 +118,7 @@ async function main() {
   let lastVideoTime = -1;
   let left = null;
   let right = null;
+  let lastResults = { landmarks: [], handedness: [] };
   let frozen = false;
   window.__gsTest.freeze = (on) => { frozen = !!on; }; // tests: hold the current picture for a screenshot
   function loop() {
@@ -125,12 +126,13 @@ async function main() {
     const now = performance.now();
     if (videoEl.currentTime !== lastVideoTime || !videoEl.videoWidth) {
       lastVideoTime = videoEl.currentTime;
-      const results = landmarker.detectForVideo(videoEl, now);
-      if (videoEl.videoWidth) drawFrame(g, videoEl, results, canvasEl.width, canvasEl.height);
-      else g.clearRect(0, 0, canvasEl.width, canvasEl.height);
+      lastResults = landmarker.detectForVideo(videoEl, now);
       syncView();
-      ({ left, right } = handInput.process(results, now));
+      ({ left, right } = handInput.process(lastResults, now));
     }
+    // Redrawn every animation frame (as main.js), so translucent overlays never build up.
+    if (videoEl.videoWidth) drawFrame(g, videoEl, lastResults, canvasEl.width, canvasEl.height);
+    else g.clearRect(0, 0, canvasEl.width, canvasEl.height);
     router.update(left, right, now);
     router.draw(g);
     requestAnimationFrame(loop);
