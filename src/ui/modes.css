@@ -75,7 +75,8 @@ body.gs-modes.gs-no-right-track #volumeMeter { display: none; }
 }
 #modeBadge { left: 110px; }
 .gs-badge .gs-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gs-mode); }
-#noteSetBadge { gap: 3px; padding: 0 9px; cursor: default; }
+#noteSetBadge { gap: 3px; padding: 0 9px; cursor: default; left: var(--gs-noteset-left, 200px); }
+#noteSetBadge.gs-flash { box-shadow: 0 0 0 2px #fff; }
 #noteSetBadge.hidden { display: none; }
 #noteSetBadge i {
   display: block; width: 9px; height: 8px; border-radius: 2px;
@@ -185,6 +186,22 @@ body.gs-modes #outputPopover { right: var(--gs-gutter); }
 }
 #controlsPanel .arp-bpm { font: 600 14px monospace; min-width: 3ch; }
 #controlsPanel .arp-controls input[type="range"] { width: 140px; min-width: 0; accent-color: var(--gs-mode); }
+/* Lead rows (src/modes/lead.js controls()): note set, octave, how to play with mouse / keyboard. */
+#controlsPanel .lead-controls { display: flex; flex-direction: column; gap: 8px; font: 13px monospace; color: var(--gs-ink); }
+#controlsPanel .lead-row { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+#controlsPanel .lead-label { width: 84px; min-width: 84px; flex: none; margin-right: 4px; color: #e8a13d; white-space: nowrap; }
+#controlsPanel .lead-seg { display: inline-flex; border: 1px solid #3a3428; border-radius: 4px; overflow: hidden; }
+#controlsPanel .lead-seg button { padding: 4px 8px; font: 12px monospace; color: var(--gs-quiet); background: #1a1a1a; border: 0; cursor: pointer; }
+#controlsPanel .lead-seg button + button { border-left: 1px solid #3a3428; }
+#controlsPanel .lead-seg button.on { background: color-mix(in srgb, var(--gs-mode) 22%, #1a1a1a); color: var(--gs-mode); font-weight: 600; }
+#controlsPanel .lead-setname { color: var(--gs-quiet); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#controlsPanel .lead-btn {
+  border: 1px solid #3a3428; border-radius: 4px; background: #1a1a1a; color: #e8a13d; font: 12px monospace; padding: 3px 8px; cursor: pointer;
+}
+#controlsPanel .lead-btn:disabled { opacity: 0.35; cursor: default; }
+#controlsPanel .lead-oct { font: 600 14px monospace; min-width: 4ch; text-align: center; }
+#controlsPanel .lead-hint { align-items: flex-start; font-size: 11px; color: var(--gs-quiet); }
+#controlsPanel .lead-hint > span:last-child { white-space: normal; line-height: 1.35; }
 
 
 /* ---- Transport (clocked modes): centered above the chord display, clear of the energy wave ---- */
@@ -235,6 +252,8 @@ body.gs-modes .gs-collapsed { display: none !important; }
   #controlsPanel { gap: 6px 8px; padding: 10px 12px; font-size: 12px; grid-template-columns: 74px minmax(0, 1fr); }
   #controlsPanel .arp-controls { gap: 6px; }
   #controlsPanel .arp-controls > .arp-row > .arp-label { min-width: 74px; width: 74px; }
+  #controlsPanel .lead-label { min-width: 74px; width: 74px; }
+  #controlsPanel .lead-seg button { padding: 3px 6px; font-size: 11px; }
   #controlsPanel .arp-seg button, .gs-seg button { padding: 3px 6px; font-size: 11px; }
   #controlsPanel .arp-controls input[type="range"], .gs-range { width: 120px; }
   /* The panel has the Output row; the chip (top right) would sit on top of it. */

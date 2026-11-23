@@ -158,9 +158,12 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc, output
     { sel: '[data-control="double"]', owned: () => !!S.hands.right.pos && !S.rightHeld },
     { sel: '[data-control="bpm"]', owned: () => !!S.hands.right.pos && !!S.hands.right.pinch },
     { sel: '[data-control="master"]', owned: () => !!S.hands.left.pos && !S.overrides.has("master") },
+    // Lead: finger count = note set, pinch on an arrow = octave.
+    { sel: '[data-control="noteset"]', owned: () => !!S.hands.right.pos && !S.rightHeld },
+    { sel: '[data-control="octave"]', owned: () => !!S.hands.right.pos && !S.rightHeld },
   ];
   function rowOf(el) {
-    return el.closest(".arp-controls > .arp-row, .gs-v") || el.parentElement;
+    return el.closest(".arp-controls > .arp-row, .lead-controls > .lead-row, .gs-v") || el.parentElement;
   }
   function ensureMarks() {
     for (const o of OWNED) {

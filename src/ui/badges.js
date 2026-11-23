@@ -4,7 +4,9 @@
 
 import { MODE_COLORS } from "./theme.js";
 
-const NOTE_SETS = 4;
+/** Lead note sets (lead/noteset 1..4; names as in src/modes/lead-notes.js NOTE_SETS). */
+const SET_NAMES = ["Chord notes", "Five notes", "Full scale", "All notes"];
+const FLASH_MS = 150;
 
 export function createBadges({ S, bus, doc }) {
   const key = doc.getElementById("keySelect");
@@ -23,6 +25,8 @@ export function createBadges({ S, bus, doc }) {
 
   let shown = null;
   let shownSet = null;
+  let shownLeft = "";
+  let flashTimer = 0;
   const clickHandlers = new Set();
   badge.addEventListener("click", () => clickHandlers.forEach((fn) => fn()));
 
@@ -41,13 +45,33 @@ export function createBadges({ S, bus, doc }) {
     const set = S.modeId === "lead" ? bus.get("lead/noteset") : null;
     const on = typeof set === "number";
     if (set !== shownSet) {
+      const changed = on && typeof shownSet === "number";
       shownSet = set;
       noteSet.classList.toggle("hidden", !on);
-      if (on) noteSet.innerHTML = Array.from({ length: NOTE_SETS }, (_, i) => `<i class="${i === set ? "on" : ""}"></i>`).join("");
+      if (on) {
+        noteSet.innerHTML = SET_NAMES.map((_, i) => `<i class="${i + 1 === set ? "on" : ""}"></i>`).join("");
+        const name = SET_NAMES[set - 1] || "";
+        noteSet.title = `Note set: ${name}`;
+        noteSet.setAttribute("aria-label", `Note set ${set} of 4: ${name}`);
+        noteSet.dataset.set = String(set);
+        // Short confirm flash on a change (spec: "a short flash confirms the change").
+        if (changed) {
+          noteSet.classList.remove("gs-flash");
+          void noteSet.offsetWidth;
+          noteSet.classList.add("gs-flash");
+          clearTimeout(flashTimer);
+          flashTimer = setTimeout(() => noteSet.classList.remove("gs-flash"), FLASH_MS);
+        }
+      }
     }
     if (on) {
+      // Right after the mode badge. A CSS variable on the body (not inline position on the badge), so other
+      // layouts (e.g. the compact phone layout) can place it with plain CSS.
       const left = `${badge.offsetLeft + badge.offsetWidth + 8}px`;
-      if (noteSet.style.left !== left) noteSet.style.left = left;
+      if (left !== shownLeft) {
+        shownLeft = left;
+        doc.body.style.setProperty("--gs-noteset-left", left);
+      }
     }
   }
   update();
@@ -56,6 +80,8 @@ export function createBadges({ S, bus, doc }) {
     update,
     onClick: (fn) => (clickHandlers.add(fn), () => clickHandlers.delete(fn)),
     destroy() {
+      clearTimeout(flashTimer);
+      doc.body.style.removeProperty("--gs-noteset-left");
       badge.remove();
       noteSet.remove();
     },

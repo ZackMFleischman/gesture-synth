@@ -16,6 +16,7 @@ import { mountMobileUI } from "./src/ui/mobile/mobile-ui.js";
 import { createRadialMenu, playTick } from "./src/menu/radial-menu.js";
 import chordsMode from "./src/modes/chords.js";
 import arpMode from "./src/modes/arp.js";
+import leadMode from "./src/modes/lead.js";
 import { mountStatusChip } from "./src/output/status-chip.js"; // M3 output hook (see below)
 
 initAnalytics();
@@ -66,9 +67,10 @@ const outputChip = mountStatusChip({ bus, ctx, parent: stageEl });
 // ---- end OUTPUT HOOK ----
 
 // ---- Modes ----
-// Menu directions: Chords up, Arp right (Lead left lands in milestone 2; down stays free).
+// Menu directions: Chords up, Arp right, Lead left; down stays free.
 registerMode(chordsMode);
 registerMode(arpMode);
+registerMode(leadMode);
 router.setMode("chords");
 const modeUI = mountModeUI({ bus, ctx, registry, router, canvas: canvasEl, output: outputChip });
 // Phones + touch tablets: one collapsible bar, sheets, minimal HUD (docs/mobile-ui.md). Mount LAST: it
