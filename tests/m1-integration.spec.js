@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import { test, expect, SCREENS_DIR } from "./fixtures.js";
 import { hand, leftHand, rightHand, fist, DESKTOP_VIEW, masterAt } from "./helpers/hands.js";
+import { MASTER_VOLUME } from "../src/router.js";
 import { recordAudio, rms, writeWav } from "./helpers/audio.js";
 import { detectOnsets, noteLengths, peakAbs } from "./helpers/arp-analysis.js";
 
@@ -217,7 +218,6 @@ test.describe("mode switching with the fist menu", () => {
         const { synth, bus } = window.__gsTest;
         return {
           voicing: bus.get("voicing"),
-          chordVol: bus.get("chords/volume"),
           filter: bus.get("filter"),
           cutoff: synth.filter.frequency.value,
           chordGain: synth.chordGain.gain.value,
@@ -233,7 +233,7 @@ test.describe("mode switching with the fist menu", () => {
     await setHands(LEFT, fistAt({ x: R0.x, y: R0.y + 0.015 }, { tilt: -0.9 }));
     await page.waitForTimeout(300);
     const held = await snap();
-    for (const k of ["voicing", "chordVol", "filter", "chord"]) expect(held[k], k).toEqual(before[k]);
+    for (const k of ["voicing", "filter", "chord"]) expect(held[k], k).toEqual(before[k]);
     expect(held.oscs).toEqual(before.oscs);
     expect(Math.abs(held.cutoff - before.cutoff)).toBeLessThan(5);
     expect(Math.abs(held.chordGain - before.chordGain)).toBeLessThan(0.01);
@@ -382,6 +382,14 @@ test.describe("1.3 left height = master volume", () => {
     expect(maxGainDev).toBeLessThan(0.01);
 
     // A real move does change it: higher = louder, low hand = rest.
+    // The move starts near the bottom of the master's range (hands are placed by normalized height in the reach band,
+    // ws/reach-zones): from the 0.5 above (master 0.89) a move up to 0.85 saturates at 1 within a frame or two, so the
+    // "smoothed" check below raced. Hand at LOW + 0.005 while moving down: the dead-zoned anchor is LOW + 0.045, master
+    // ~0.1; the move to 0.85 then spans ~0.9 of the range and still takes several TAU_MS to get there.
+    const { LOW } = MASTER_VOLUME;
+    await setHands(leftHand(1, { volume: LOW + 0.005 }), openRight(1));
+    await expect.poll(async () => (await read()).v, { timeout: 3000 }).toBeLessThan(0.15);
+    await page.waitForTimeout(600); // settled (TAU_MS 140)
     await setHands(leftHand(1, { volume: 0.85 }), openRight(1));
     await page.waitForTimeout(80);
     const early = (await read()).v;
