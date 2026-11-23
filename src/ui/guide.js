@@ -11,12 +11,14 @@ import { COLORS, FONT, LAYOUT, MOTION, drawLabel, edgeTrackX } from "./theme.js"
 export const DEFAULT_GUIDE = {
   chords: [["✊", "Menu"], ["↕", "Volume"], ["👍", "Octave down"]],
   arp: [["✊", "Menu"], ["↕", "Gate"], ["👍", "Double time"], ["🤏", "Tempo"]],
-  lead: [["✊", "Menu"], ["↕", "Note"], ["🤏", "Play"], ["☝️", "Note set"]],
+  lead: [["✊", "Menu"], ["↕", "Note"], ["🤏", "Play"], ["☝️", "Note set"], ["🔼", "Pinch arrow: octave"]],
 };
 
 /** First-use labels per mode (≤ 2 words). Placement keys: track | arc | thumb | under. */
 export const FIRST_USE = {
   arp: [["track", "Gate"], ["arc", "Filter"], ["thumb", "Thumb: x2"], ["under", "Pinch: tempo"]],
+  // Lead: the ladder is the right-height control (no track), so "Height: note" sits above the hand.
+  lead: [["arc", "Height: note"], ["thumb", "Fingers: notes"], ["under", "Pinch: play"]],
 };
 
 export function createGuide({ S, doc }) {

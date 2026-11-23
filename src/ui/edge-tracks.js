@@ -123,11 +123,10 @@ export function createEdgeTracks({ S, bus }) {
   function draw(g, G) {
     S.tracks = {};
     const exprSide = S.chordSide === "left" ? "right" : "left";
-    // A mode without a right track draws its own control at the RIGHT edge today (Lead's ladder): keep
-    // the master track off that edge until the mode follows `ui/sides`. Its guide is drawn only on the
-    // chord hand's own side (never across the player).
-    const chordSide = !S.rightTrack ? "left" : S.chordSide;
-    const ownSide = chordSide === S.chordSide;
+    // A mode without a right track (Lead) draws its own control on the expression edge (`ui/sides`), so
+    // the master track always stays on the chord hand's edge.
+    const chordSide = S.chordSide;
+    const ownSide = true;
 
     // ---- Master volume (chord hand) ----
     const L = S.hands.left;
