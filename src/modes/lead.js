@@ -1,6 +1,6 @@
 // Lead mode: the left hand holds a chord as a soft pad; the right hand plays one melody line on top.
-//   right height  -> note (snapped, hysteresis)       pinch -> play (glide while moving, retrigger on re-pinch)
-//   right fingers -> note set 1-4 (held 0.3 s)        tilt  -> shared filter
+//   right height  -> note (snapped, hysteresis)       pinch -> play (discrete steps while moving, retrigger on re-pinch)
+//   right shape   -> note set (1/2/3 fingers, 🤘 = 4; held 0.3 s; open hand = nothing)   tilt -> shared filter
 //   pinch held 0.3 s on an octave arrow (pinch must start on it) -> octave +/-1
 //   thumb: no function (the pinch uses it)
 // Screen controls (2.1): mouse on the ladder, keyboard, note-set + octave buttons (rows in the Controls panel).
@@ -21,12 +21,13 @@ import {
   midiToFreq,
   noteName,
   NOTE_SETS,
+  SET_SHAPES,
   OCTAVE_MIN,
   OCTAVE_MAX,
 } from "./lead-notes.js";
 import { createLeadVoice } from "./lead-voice.js";
 import { drawEnergy } from "./chords.js";
-import { MODE_COLORS, COLORS, FONT as THEME_FONT, MOTION, withAlpha, easeOut } from "../ui/theme.js";
+import { MODE_COLORS, COLORS, FONT as THEME_FONT, MOTION, withAlpha, easeOut, confirmPhase, drawLabel, rectsOverlap } from "../ui/theme.js";
 import { createSafeArea } from "../ui/mobile/safe-area.js";
 
 // ---- Look: shared tokens from src/ui/theme.js; Lead-specific geometry below ----
@@ -69,8 +70,7 @@ const LOOK = {
   bottomInset: 140, // bottom note line = H - this (palm must still reach the down arrow above the frame edge)
   lineMoveMs: MOTION.base, // chord-note lines move to the new chord (150 ms)
   slideMs: MOTION.slow, // ladder slide on an octave change (200 ms)
-  flashMs: MOTION.base, // confirm flash
-  badgeLingerMs: 500, // at-hand badge after a confirmed set change
+  flashMs: MOTION.base, // octave-arrow confirm flash (the confirm toasts use CONFIRM from theme.js)
   dimDuringHold: 0.4,
 };
 
@@ -79,8 +79,22 @@ const STEP_KEYS = ["KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK
 
 /** Radius of an arrow's drawn footprint (lit size 1.25x, hold ring + its halo). */
 const arrowReach = (sz) => sz.arrowSize * 1.25 * 1.05 + 5;
-/** Width of the ladder's footprint from the screen edge (lines, arrows, octave marks). */
-const footprint = (sz) => sz.edgeInset + sz.lineChord / 2 + sz.arrowSize * 1.35 + 10 + 8;
+/**
+ * Note labels on every ladder line (camera feedback: "show where to jump"): a column just inside the chord-line
+ * ends. size = small quiet label; gap = column offset from the chord-line end; maxW = widest label (3 chars
+ * "C#5" wide; narrow ladders drop the octave digit, see ladderLabelText); currentMin = smallest size of the
+ * current note's plate (it shrinks from sz.nameSize so it never covers its neighbours' labels).
+ */
+/** Octave marks sit this much above the up arrow's centre (clear of the top line's label). */
+const MARKS_RAISE = 6;
+const LABEL_WIDE = { size: 11, gap: 6, maxW: 24, currentMin: 16, padY: 3 };
+const LABEL_NARROW = { size: 10, gap: 4, maxW: 14, currentMin: 15, padY: 3 };
+const labelLook = (sz) => (sz === SIZE_NARROW ? LABEL_NARROW : LABEL_WIDE);
+/** Width of the ladder's footprint from the screen edge (lines, arrows, octave marks, note labels). */
+const footprint = (sz) => Math.max(
+  sz.edgeInset + sz.lineChord / 2 + sz.arrowSize * 1.35 + 10 + 8,
+  sz.edgeInset + sz.lineChord + labelLook(sz).gap + labelLook(sz).maxW + 3,
+);
 
 /**
  * Ladder geometry in canvas px. side = screen edge of the expression hand ("left" | "right"); inset = safe-area
@@ -182,6 +196,11 @@ const view = {
   regions: [], // [{name, kind: "edge"|"hand", rect}] drawn this frame (layout tests)
   padEl: null, // mouse strip on the ladder (screen control)
   padKey: "",
+  labels: [], // ladder note labels drawn this frame [{midi, text, rect, size, color, chord}]
+  current: null, // the current note's plate {midi, text, size, color, fill, rect}
+  setBadge: null, // note-set badge drawn this frame {rect, alpha, scale, flash, confirmed}
+  octaveToast: null, // octave confirm toast drawn this frame {rect, alpha, scale, flash}
+  drawnAt: -Infinity, // ctx.now of the last draw()
 };
 
 function ensureParams(ctx) {
@@ -216,7 +235,7 @@ function handleEvents(evs, ctx) {
   for (const ev of evs) {
     switch (ev.type) {
       case "noteOn": voice.noteOn(midiToFreq(ev.midi), { midi: ev.midi }); break;
-      case "glide": voice.glideTo(midiToFreq(ev.midi), { midi: ev.midi }); break;
+      case "step": voice.stepTo(midiToFreq(ev.midi), { midi: ev.midi }); break;
       case "noteOff": voice.noteOff(); break;
       case "noteset": ctx.bus.set("lead/noteset", ev.value); break;
       case "octave": ctx.bus.set("lead/octave", ev.value); break;
@@ -423,6 +442,204 @@ function placePad(geo) {
   el.style.right = geo.side === "left" ? "auto" : "0px";
 }
 
+// ---- Ladder note labels (camera feedback: every line shows its note name) ----
+
+/**
+ * Small label text for a ladder line. Wide ladders: the full name ("C#5"). Narrow ladders (phones, below
+ * NARROW_PX) drop the octave digit ("C#"): the ladder spans two octaves, the current note's plate keeps the
+ * full name, and the column stays ~14 px wide so it does not push into the player on a 390 px screen.
+ */
+export function ladderLabelText(name, narrow) {
+  return narrow ? name.replace(/-?\d+$/, "") : name;
+}
+
+/** x of the label column (outer edge of the labels, just inside the chord-line ends). */
+const labelColumnX = (geo) => ox(geo, geo.sz.lineChord + labelLook(geo.sz).gap);
+
+/** Is the ladder too tight to label every line? (One semitone is closer than a small label is tall.) */
+function labelsTight(geo) {
+  return (geo.bottom - geo.top) / 24 < labelLook(geo.sz).size * 1.15 + 1;
+}
+
+/**
+ * The current note's plate: its size shrinks from sz.nameSize so it never covers its neighbours' labels
+ * (25 lines in "All notes" sit one semitone = ~20 px apart at 800 px height), never below LABEL.currentMin.
+ * Returns {size, padX, padY, x (text anchor), rect}. `labeled(l)` = does line l get a small label.
+ */
+function currentPlateLayout(g, geo, lines, cur, labeled) {
+  const L = labelLook(geo.sz);
+  const smallH = L.size * 1.15;
+  let gap = Infinity;
+  for (const l of lines) {
+    if (l.old || l.midi === cur.midi || !labeled(l)) continue;
+    gap = Math.min(gap, Math.abs(uToY(geo, l.u) - cur.y));
+  }
+  const fit = Number.isFinite(gap) ? (2 * (gap - 1) - smallH - 2 * L.padY) / 1.15 : Infinity;
+  const size = Math.floor(Math.max(L.currentMin, Math.min(geo.sz.nameSize, fit)));
+  const padX = geo.narrow ? 6 : 7;
+  g.font = `700 ${size}px ${FONT}`;
+  const w = g.measureText(cur.name).width;
+  const h = size * 1.15;
+  const x0 = labelColumnX(geo); // the plate's outer edge = the column's outer edge
+  const left = geo.dir > 0 ? x0 : x0 - w - padX * 2;
+  return {
+    size, padX, padY: L.padY,
+    x: geo.dir > 0 ? x0 + padX : x0 - padX, // text anchor for plateLabel (align = inner side)
+    rect: { x: left, y: cur.y - h / 2 - L.padY, w: w + padX * 2, h: h + L.padY * 2 },
+  };
+}
+
+/**
+ * Small, quiet note names on the ladder lines (theme drawLabel: halo, legible over video); chord notes a bit
+ * brighter. A label that would collide with the current note's plate or another label is skipped (only in
+ * layouts too tight for all of them). Tight (labelsTight: landscape phones) = only chord notes are labelled:
+ * the safe notes are the ones to aim for; the current note always shows.
+ * Returns [{midi, text, rect, size, color, chord}] for _debug / layout tests.
+ */
+function drawLadderLabels(g, geo, lines, alphaMul, { skipMidi = null, avoid = [], labeled }) {
+  const L = labelLook(geo.sz);
+  const x = labelColumnX(geo);
+  const align = geo.dir > 0 ? "left" : "right";
+  const placed = [];
+  const out = [];
+  for (const l of lines) {
+    if (l.midi === skipMidi && !l.old) continue;
+    if (!labeled(l)) continue;
+    const a = alphaMul * l.alpha;
+    if (a <= 0.02) continue;
+    const name = S.ladder.notes.find((n) => n.midi === l.midi)?.name ?? noteName(l.midi, S.keyName);
+    const text = ladderLabelText(name, geo.narrow);
+    const y = uToY(geo, l.u);
+    g.font = `${l.isChord ? 600 : 400} ${L.size}px ${FONT}`;
+    const w = g.measureText(text).width;
+    const h = L.size * 1.15;
+    const r = { x: align === "left" ? x : x - w, y: y - h / 2, w, h };
+    if (!l.old && (avoid.some((b) => rectsOverlap(r, b, 0.5)) || placed.some((b) => rectsOverlap(r, b, 0.5)))) continue;
+    const color = l.isChord ? "rgba(243, 239, 231, 0.92)" : "rgba(243, 239, 231, 0.6)";
+    drawLabel(g, text, x, y, { size: L.size, weight: l.isChord ? 600 : 400, color, align, alpha: a });
+    if (!l.old) {
+      placed.push(r);
+      out.push({ midi: l.midi, text, rect: r, size: L.size, color, chord: l.isChord });
+    }
+  }
+  return out;
+}
+
+// ---- Setting confirmed: pop, ~1 s fully visible, fade (CONFIRM in src/ui/theme.js) ----
+
+/**
+ * The note-set badge: approach fill while a shape is held, then the confirmed state (pop + flash, fully
+ * visible ~1 s, fade). At the hand (beside it, towards the screen centre, so the fingers stay visible); with no
+ * hand (keyboard / Controls) beside the ladder. Returns {rect, alpha, scale, flash, confirmed} or null.
+ */
+function drawSetBadge(g, geo, now, { holding, anchorHand }) {
+  const ph = confirmPhase(now - S.setChangedAt);
+  if (!holding && !ph.visible) return null;
+  const W = geo.W, H = geo.H, dir = geo.dir;
+  const confirmed = !holding;
+  const alpha = holding ? 1 : ph.alpha;
+  const scale = holding ? 1 : ph.scale;
+  const flash = holding ? 0 : ph.flash;
+  const target = holding ? S.setHoldTarget : null;
+  const id = holding ? S.setHoldTarget : S.setId;
+  const label = NOTE_SETS[id].name;
+  const shape = SET_SHAPES[id];
+  // Keycap emoji (1️⃣) draw as a bare box in canvas fonts without color emoji: the label says it already.
+  const shapeText = shape.emoji.includes("⃣") ? shape.label : `${shape.emoji} ${shape.label}`;
+  const sc = 2.2;
+  const segW = (4 * 6 + 3 * 3) * sc;
+  g.save();
+  g.font = `800 15px ${FONT}`;
+  const tw = g.measureText(label).width;
+  g.font = `600 12px ${FONT}`;
+  const sw = g.measureText(shapeText).width;
+  const bw = Math.max(segW, tw, sw) + 28;
+  const bh = 108;
+  let ax, ay;
+  if (anchorHand) {
+    const hs = Math.max(50, view.handSize || 90);
+    ax = view.hand.x + dir * (hs * 0.6 + bw / 2);
+    ay = view.hand.y - hs * 0.2;
+  } else {
+    ax = ox(geo, footprint(geo.sz) + 16) + (dir * bw) / 2;
+    ay = geo.top + (geo.bottom - geo.top) * 0.35;
+  }
+  ax = Math.min(W - bw / 2 - 8, Math.max(bw / 2 + 8, ax));
+  ay = Math.min(H - bh / 2 - 8, Math.max(bh / 2 + 8, ay));
+  g.globalAlpha = alpha;
+  g.translate(ax, ay);
+  g.scale(scale, scale);
+  g.translate(-ax, -ay);
+  roundRect(g, ax - bw / 2, ay - bh / 2, bw, bh, 12);
+  g.fillStyle = C.plate;
+  g.fill();
+  g.lineWidth = confirmed ? 3 : 1.5;
+  g.strokeStyle = flash > 0 ? "#fff" : confirmed ? LEAD_COLOR : withAlpha(LEAD_COLOR, 0.55);
+  g.stroke();
+  if (flash > 0) {
+    roundRect(g, ax - bw / 2, ay - bh / 2, bw, bh, 12);
+    g.fillStyle = `rgba(255,255,255,${0.3 * flash})`;
+    g.fill();
+  }
+  drawSetSegments(g, ax - segW / 2, ay - 2, { active: S.setId, scale: sc, target, progress: S.setHoldProgress, flash });
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.fillStyle = confirmed ? LEAD_COLOR : C.ink;
+  g.font = `${confirmed ? 800 : 600} 15px ${FONT}`;
+  g.fillText(label, ax, ay + 14);
+  // The hand shape for this set (what to show the camera), quiet.
+  g.fillStyle = C.quiet;
+  g.font = `600 12px ${FONT}`;
+  g.fillText(shapeText, ax, ay + 32);
+  // Hold progress along the bottom edge (grows with the hold time; full once confirmed).
+  const px0 = ax - bw / 2 + 12;
+  const pw = bw - 24;
+  const py = ay + bh / 2 - 8;
+  g.lineCap = "round";
+  g.lineWidth = 4;
+  g.beginPath();
+  g.moveTo(px0, py);
+  g.lineTo(px0 + pw, py);
+  g.strokeStyle = "rgba(243, 239, 231, 0.18)";
+  g.stroke();
+  g.beginPath();
+  g.moveTo(px0, py);
+  g.lineTo(px0 + pw * (holding ? S.setHoldProgress : 1), py);
+  g.strokeStyle = LEAD_COLOR;
+  g.stroke();
+  g.restore();
+  const w = bw * scale, h = bh * scale;
+  return { rect: { x: ax - w / 2, y: ay - h / 2, w, h }, alpha, scale, flash, confirmed };
+}
+
+/**
+ * Octave confirmed: "Octave up: A5" plate beside the arrow that was used (inner side), pop + flash, fully
+ * visible ~1 s, fade. Returns {rect, alpha, scale, flash} or null.
+ */
+function drawOctaveToast(g, geo, now) {
+  const ph = confirmPhase(now - S.octaveChangedAt);
+  if (!ph.visible) return null;
+  const up = S.octaveDir >= 0;
+  const low = S.ladder.notes.length ? noteName(S.ladder.low, S.keyName) : String(S.octave);
+  const text = `Octave ${up ? "up" : "down"}: ${low}`;
+  const x = geo.cx + geo.dir * (geo.sz.arrowSize * 1.35 + 30);
+  const y = up ? geo.upY : geo.downY;
+  g.save();
+  g.globalAlpha = ph.alpha;
+  g.translate(x, y);
+  g.scale(ph.scale, ph.scale);
+  g.translate(-x, -y);
+  const r = plateLabel(g, text, x, y, {
+    size: geo.narrow ? 12 : 14, weight: 800, align: geo.dir > 0 ? "left" : "right",
+    color: ph.flash > 0.5 ? "#fff" : LEAD_COLOR, stroke: ph.flash > 0 ? "#fff" : withAlpha(LEAD_COLOR, 0.9),
+  });
+  g.restore();
+  const sx = (v) => x + (v - x) * ph.scale;
+  const sy = (v) => y + (v - y) * ph.scale;
+  const x0 = sx(r.x), y0 = sy(r.y);
+  return { rect: { x: x0, y: y0, w: sx(r.x + r.w) - x0, h: sy(r.y + r.h) - y0 }, alpha: ph.alpha, scale: ph.scale, flash: ph.flash };
+}
+
 // ---- The mode ----
 
 const lead = {
@@ -536,6 +753,7 @@ const lead = {
     const dir = geo.dir;
     const alignIn = side === "left" ? "left" : "right"; // labels on the inner side of the ladder
     view.regions = [];
+    view.drawnAt = now;
     const reg = (name, kind, rect) => (rect && view.regions.push({ name, kind, rect }), rect);
     placePad(geo);
     captureLadderChange(now);
@@ -616,7 +834,8 @@ const lead = {
     const n = OCTAVE_MAX - OCTAVE_MIN + 1;
     const step = geo.narrow ? 9 : 11;
     const mx = geo.cx + dir * (sz.arrowSize * 1.35 + 10);
-    const yTop = geo.upY - ((n - 1) * step) / 2;
+    // Centred a little above the up arrow so the box stays clear of the top line's note label.
+    const yTop = geo.upY - MARKS_RAISE - ((n - 1) * step) / 2;
     roundRect(g, mx - 8, yTop - 8, 16, (n - 1) * step + 16, 8);
     g.fillStyle = "rgba(20,20,20,0.55)";
     g.fill();
@@ -630,15 +849,20 @@ const lead = {
     }
     g.restore();
     {
-      // The ladder's persistent footprint (lines, arrows incl. their lit size + ring, octave marks).
+      // The ladder's persistent footprint (lines, arrows incl. their lit size + ring, octave marks, label column).
       const ar = arrowReach(sz);
-      const xs = [geo.edge, geo.inner, geo.cx - ar, geo.cx + ar, mx - 8, mx + 8];
+      const L = labelLook(sz);
+      const xs = [geo.edge, geo.inner, geo.cx - ar, geo.cx + ar, mx - 8, mx + 8, ox(geo, sz.lineChord + L.gap + L.maxW)];
       const x0 = Math.min(...xs);
       const x1 = Math.max(...xs);
-      reg("lead-ladder", "edge", { x: x0, y: geo.upY - ar, w: x1 - x0, h: geo.downY + ar - (geo.upY - ar) });
+      const y0 = Math.min(geo.upY - ar, yTop - 8);
+      reg("lead-ladder", "edge", { x: x0, y: y0, w: x1 - x0, h: geo.downY + ar - y0 });
     }
+    // ---- Setting confirmed (octave): toast beside the arrow; it replaces the hover label while it shows ----
+    const octToast = !menuHeld ? drawOctaveToast(g, geo, now) : null;
+    if (octToast) reg("lead-octave-toast", "hand", octToast.rect);
     // Arrow label: the value in change (only while the cursor is on an arrow).
-    if (hoverUp || hoverDown) {
+    if ((hoverUp || hoverDown) && !octToast) {
       const up = hoverUp;
       const grey = up ? upGrey : downGrey;
       const label = grey ? (up ? "Top octave" : "Bottom octave") : up ? "Octave up" : "Octave down";
@@ -660,18 +884,40 @@ const lead = {
       cl = { midi: cursorMidi, u: nn ? nn.u : (cursorMidi - S.ladder.low) / 24 };
     }
     const onArrow = !lost && !menuHeld && S.hover && S.pinchMode !== "note";
+    const playing = S.pinchMode === "note" && !lost && !menuHeld;
+
+    // ---- Note labels on every line; the current note = the larger plate in the mode color (same column) ----
+    const tight = labelsTight(geo);
+    const labeled = (l) => !tight || l.isChord;
+    const showName = cl && !onArrow && !lost && !menuHeld;
+    const curName = showName ? S.ladder.notes[idx]?.name ?? noteName(cl.midi, S.keyName) : "";
+    const plate = showName ? currentPlateLayout(g, geo, lines, { midi: cl.midi, y: uToY(geo, cl.u), name: curName }, labeled) : null;
+    // Octave marks (top) must stay clear of the top line's label.
+    const marksRect = { x: mx - 8, y: yTop - 8, w: 16, h: (n - 1) * step + 16 };
+    view.labels = drawLadderLabels(g, geo, lines, ladderAlpha, {
+      skipMidi: plate ? cl.midi : null,
+      avoid: plate ? [plate.rect, marksRect] : [marksRect],
+      labeled,
+    });
+    if (view.labels.length) {
+      const xs = view.labels.flatMap((l) => [l.rect.x, l.rect.x + l.rect.w]);
+      const x0 = Math.min(...xs);
+      reg("lead-ladder-labels", "edge", { x: x0, y: Math.min(...view.labels.map((l) => l.rect.y)), w: Math.max(...xs) - x0, h: Math.max(...view.labels.map((l) => l.rect.y + l.rect.h)) - Math.min(...view.labels.map((l) => l.rect.y)) });
+    }
+
+    view.current = null;
     if (cl || onArrow) {
       const cy = onArrow ? (S.hover === "up" ? geo.upY : geo.downY) : uToY(geo, cl.u);
       const cx = geo.cx;
-      const playing = S.pinchMode === "note" && !lost && !menuHeld;
-      const nameX = ox(geo, sz.lineChord + 12);
-      // Dotted guide from the hand to the cursor (stops at the name plate).
-      const handInside = view.hand && (view.hand.x - nameX) * dir > 90;
+      const nameX = plate ? plate.x : ox(geo, sz.lineChord + labelLook(sz).gap + 7);
+      // Dotted guide from the hand to the cursor (stops at the name plate's inner edge).
+      const plateInner = plate ? (dir > 0 ? plate.rect.x + plate.rect.w : plate.rect.x) + dir * 8 : nameX + dir * 80;
+      const handInside = view.hand && (view.hand.x - plateInner) * dir > 10;
       if (view.hand && handInside && !lost && !menuHeld && !onArrow) {
         g.save();
         g.beginPath();
         g.moveTo(view.hand.x, view.hand.y);
-        g.lineTo(nameX + dir * 80, cy);
+        g.lineTo(plateInner, cy);
         g.lineWidth = 4;
         g.strokeStyle = "rgba(0,0,0,0.3)";
         g.lineCap = "round";
@@ -716,74 +962,36 @@ const lead = {
           g.fill();
           strokeHalo(g, LEAD_COLOR, 3);
         }
-        if (!lost && !menuHeld) {
-          const name = S.ladder.notes[idx]?.name ?? "";
-          reg("lead-note-name", "hand", plateLabel(g, name, nameX, cy, {
-            size: sz.nameSize,
+        if (plate) {
+          // Preview: mode-colored name on a dark plate with a mode-colored rim; playing: filled in the mode color.
+          const color = playing ? "#111" : LEAD_COLOR;
+          reg("lead-note-name", "hand", plateLabel(g, curName, nameX, cy, {
+            size: plate.size,
             weight: 700,
             align: alignIn,
-            color: playing ? "#111" : C.ink,
+            color,
             fill: playing ? LEAD_COLOR : C.plate,
-            padX: geo.narrow ? 7 : 10,
-            padY: 4,
+            stroke: playing ? null : withAlpha(LEAD_COLOR, 0.85),
+            padX: plate.padX,
+            padY: plate.padY,
           }));
+          view.current = { midi: cl.midi, text: curName, size: plate.size, color, fill: playing ? LEAD_COLOR : C.plate, rect: plate.rect };
         }
         g.restore();
       }
       if (lost) reg("lead-lost", "hand", plateLabel(g, "Hand lost", nameX, cy, { size: 13, weight: 700, color: C.warn, align: alignIn, stroke: withAlpha(C.warn, 0.7) }));
     }
 
-    // ---- At-hand note-set badge (hand only): approach fill, selected rim + flash, then fade ----
-    const setFlash = Math.max(0, 1 - (now - S.setChangedAt) / LOOK.flashMs);
-    const since = now - S.setChangedAt;
-    if (view.hand && !lost && !menuHeld && (holding || since < LOOK.badgeLingerMs)) {
-      const alpha = holding ? 1 : 1 - easeOut(Math.max(0, since - LOOK.flashMs) / (LOOK.badgeLingerMs - LOOK.flashMs));
-      const target = holding ? S.setHoldTarget : null;
-      const label = NOTE_SETS[holding ? S.setHoldTarget : S.setId].name;
-      const sc = 2.2;
-      const segW = (4 * 6 + 3 * 3) * sc;
-      g.save();
-      g.globalAlpha = alpha;
-      g.font = `700 15px ${FONT}`;
-      const tw = g.measureText(label).width;
-      const bw = Math.max(segW, tw) + 28;
-      const bh = 92;
-      // Beside the hand on the inner side (towards the screen centre), so the fingers doing the count stay visible.
-      const hs = Math.max(50, view.handSize || 90);
-      const ax = Math.min(W - bw / 2 - 8, Math.max(bw / 2 + 8, view.hand.x + dir * (hs * 0.6 + bw / 2)));
-      const ay = Math.min(H - bh / 2 - 8, Math.max(bh / 2 + 8, view.hand.y - hs * 0.2));
-      const confirmed = !holding;
-      roundRect(g, ax - bw / 2, ay - bh / 2, bw, bh, 12);
-      g.fillStyle = C.plate;
-      g.fill();
-      g.lineWidth = confirmed ? 3 : 1.5;
-      g.strokeStyle = setFlash > 0 ? "#fff" : confirmed ? LEAD_COLOR : withAlpha(LEAD_COLOR, 0.55);
-      g.stroke();
-      reg("lead-set-badge", "hand", { x: ax - bw / 2, y: ay - bh / 2, w: bw, h: bh });
-      drawSetSegments(g, ax - segW / 2, ay + 8, { active: S.setId, scale: sc, target, progress: S.setHoldProgress, flash: setFlash });
-      g.fillStyle = confirmed ? LEAD_COLOR : C.ink;
-      g.font = `${confirmed ? 800 : 600} 15px ${FONT}`;
-      g.textAlign = "center";
-      g.textBaseline = "middle";
-      g.fillText(label, ax, ay + 24);
-      // Hold progress along the bottom edge (grows with the hold time).
-      const px0 = ax - bw / 2 + 12;
-      const pw = bw - 24;
-      const py = ay + bh / 2 - 8;
-      g.lineCap = "round";
-      g.lineWidth = 4;
-      g.beginPath();
-      g.moveTo(px0, py);
-      g.lineTo(px0 + pw, py);
-      g.strokeStyle = "rgba(243, 239, 231, 0.18)";
-      g.stroke();
-      g.beginPath();
-      g.moveTo(px0, py);
-      g.lineTo(px0 + pw * (holding ? S.setHoldProgress : 1), py);
-      g.strokeStyle = LEAD_COLOR;
-      g.stroke();
-      g.restore();
+    // ---- Note-set badge: approach fill, then the confirmed state (pop, ~1 s, fade) ----
+    view.setBadge = null;
+    if (!lost && !menuHeld) {
+      const badge = drawSetBadge(g, geo, now, { holding: holding && !!view.hand, anchorHand: !!view.hand });
+      if (badge) {
+        reg("lead-set-badge", "hand", badge.rect);
+        view.setBadge = badge;
+      }
     }
+    view.octaveToast = octToast;
     g.restore();
   },
 
@@ -799,8 +1007,11 @@ const lead = {
     root.innerHTML = `
       <div class="lead-row"><span class="lead-label">Notes</span>
         <div class="lead-seg" role="group" aria-label="Note set" data-control="noteset">
-          ${[1, 2, 3, 4].map((n) => `<button type="button" data-set="${n}" title="${NOTE_SETS[n].name} (key ${n})">${n}</button>`).join("")}
+          ${[1, 2, 3, 4].map((n) => `<button type="button" data-set="${n}" title="${NOTE_SETS[n].name}: hand ${SET_SHAPES[n].emoji} ${SET_SHAPES[n].label} (key ${n})">${n}</button>`).join("")}
         </div><span class="lead-setname" data-hook="setname"></span>
+      </div>
+      <div class="lead-row lead-hint" data-control="noteset-legend"><span class="lead-label">Hand</span>
+        <span>${[1, 2, 3, 4].map((n) => `<span class="lead-shape" data-shape="${n}" title="${SET_SHAPES[n].label}">${SET_SHAPES[n].emoji} ${n}</span>`).join(" · ")} · hold 0.3 s (open hand = no change)</span>
       </div>
       <div class="lead-row"><span class="lead-label">Octave</span>
         <button type="button" class="lead-btn" data-oct="-1" data-control="octave-down" aria-label="Octave down" title="Octave down (-)">−</button><span class="lead-oct" data-control="octave"></span><button type="button" class="lead-btn" data-oct="1" data-control="octave-up" aria-label="Octave up" title="Octave up (=)">+</button>
@@ -931,7 +1142,7 @@ const lead = {
     ["✊", "Menu"],
     ["↕", "Note"],
     ["🤏", "Play"],
-    ["☝️", "Note set"],
+    ["1️⃣2️⃣3️⃣🤘", "Note set"], // 1/2/3 fingers from the index, rock sign = 4 (SET_SHAPES); open hand = nothing
     ["🔼", "Pinch arrow: octave"],
   ],
 
@@ -965,6 +1176,14 @@ const lead = {
       sounding: voice ? voice.sounding : null,
       pad: voice ? voice.padFreqs : [],
       regions: view.regions.map((r) => ({ ...r, rect: { ...r.rect } })),
+      // What the last draw() showed (camera-feedback tests): labels, current plate, confirm visuals.
+      drawnAt: view.drawnAt,
+      setChangedAt: S.setChangedAt,
+      octaveChangedAt: S.octaveChangedAt,
+      labels: view.labels.map((l) => ({ ...l, rect: { ...l.rect } })),
+      current: view.current ? { ...view.current, rect: { ...view.current.rect } } : null,
+      setBadge: view.setBadge ? { ...view.setBadge, rect: { ...view.setBadge.rect } } : null,
+      octaveToast: view.octaveToast ? { ...view.octaveToast, rect: { ...view.octaveToast.rect } } : null,
     };
   },
   /** Ladder y (canvas px) -> display-normalized y, for tests placing the hand on a note. */

@@ -202,10 +202,24 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
   - Lead's screen controls are Controls-panel rows (`.lead-controls`: note set `[data-control=noteset]`, octave
     `[data-control=octave-up|down|octave]`); its mouse strip `#leadPad` is mounted on `#stage` over the ladder band.
   - `#noteSetBadge` is placed with the CSS variable `--gs-noteset-left` on `body` (no inline position on the badge);
-    flashes (`.gs-flash`) on a change. Lead first-use labels: "Height: note", "Fingers: notes", "Pinch: play".
+    flashes (`.gs-flash`) on a change. Lead first-use labels: "Height: note", "1–3 or 🤘: notes", "Pinch: play".
 - M3 hookups: `clock.onTransport(cb)` (start/stop/bpm/rate/double). Wire: `menu` goes out as a `/gs/menu` event
   (open → update{arc, progress} → countdown → close{confirmed|cancelled}); every note event carries `id`; `/gs/note/cancel`;
   `/gs/pinch` 1/0 from the shared `pinch` bus event (derived from `right/pinch` if absent, marked `derivedFrom`);
   beat grid carries `rate`/`double` and is re-sent on every scheduled beat. Chip: hidden while output is off, pressing it
   opens Controls (`setPressHandler`, `newRoom`, `onStatus`), `data-gs-kind="status"`.
 - Hand input publishes `left|right/top`: the highest fingertip in display space (the filter arc anchors above it).
+- Camera feedback on Lead (ws/camera-feedback, first real-camera session):
+  - Note sets come from distinct shapes (`SET_SHAPES` / `validCount` in src/modes/lead-notes.js): 1 = index, 2 = index+middle,
+    3 = index+middle+ring, 4 = rock sign (index+pinky, middle+ring curled); thumb either way. An open hand (4 fingers ± thumb)
+    never selects a set (it is the shape a pinch release opens into). Still 0.3 s stable + the pinch-approach/post-pinch rules.
+  - Lead pitch is discrete: moving while pinched steps to the next note (`stepTo`, 3 ms exponential ramp `PITCH_STEP_S`; the
+    controller event is `step`, was `glide`; legato `note/on` carries `legato: true`, was `glide: true`). Supersedes the
+    "short glide" of spec 2.3 (user decision).
+  - Setting confirmed (note set, octave; any Lead setting): `CONFIRM` + `confirmPhase()` in src/ui/theme.js: pop (scale 1.15 -> 1
+    + flash, 150 ms), fully visible until 1 s after the confirm, 300 ms fade. Octave changes show an "Octave up: A5" toast at the arrow.
+  - Every ladder line shows its note name (small, halo; chord notes brighter); the current note is the larger plate in the mode
+    color in the same column (size shrinks from 28/22 px to fit between its neighbours). Narrow ladders drop the octave digit;
+    landscape-phone ladders too tight for one label per semitone label chord notes only.
+  - One filter visual: the arc at the right hand carries the value ("Filter +40%", region `filter-arc`.label). `#distortionDisplay`
+    stays in the DOM (still updated) but is `display: none` under `body.gs-modes`. First-use "arc" labels stack above the value.

@@ -61,6 +61,36 @@ export const MOTION = Object.freeze({
   firstUse: 3000, // first-use labels
 });
 
+/**
+ * Setting confirmed (note set, octave, any Lead setting): spec "progress first, then a clear confirmed state".
+ * A short pop (scale popScale -> 1 + a white flash over popMs), the confirmed state stays fully visible until
+ * holdMs after the confirm, then fades out over fadeMs. Real-camera feedback: the old 150 ms flash + 0.5 s
+ * linger disappeared before the player could read it.
+ */
+export const CONFIRM = Object.freeze({
+  popMs: 150,
+  popScale: 1.15,
+  holdMs: 1000, // fully visible this long after the confirm (pop included)
+  fadeMs: 300,
+});
+
+/**
+ * Where a confirmed-setting visual is `since` ms after the confirm.
+ * @param {number} since ms since the confirm (negative / non-finite = never confirmed)
+ * @returns {{visible:boolean, alpha:number, scale:number, flash:number}}
+ */
+export function confirmPhase(since, c = CONFIRM) {
+  if (!(since >= 0) || since >= c.holdMs + c.fadeMs) return { visible: false, alpha: 0, scale: 1, flash: 0 };
+  const pop = Math.max(0, 1 - since / c.popMs); // 1 at the confirm -> 0 at popMs
+  const fade = since <= c.holdMs ? 0 : (since - c.holdMs) / c.fadeMs;
+  return {
+    visible: true,
+    alpha: 1 - easeOut(fade),
+    scale: 1 + (c.popScale - 1) * pop * pop,
+    flash: pop,
+  };
+}
+
 /** Same family as the existing UI (index.html uses `monospace`). */
 export const FONT = Object.freeze({
   family: "monospace",
