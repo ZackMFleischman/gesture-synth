@@ -131,6 +131,12 @@ export function hand({
 
   if (!pos) {
     // Palm to `volume` (height) over the reach zone, and to `x` across the horizontal band, in the placement view.
+    // Without `x`, the palm keeps the untilted hand's x (the wrist shift that fakes a tilt moves the palm center, and
+    // HandFrame.x would follow it: a tilted test hand must not also turn Drive / Space up).
+    if (x == null) {
+      const shift = (wristX - cx) / PALM.length;
+      for (const p of lm) p.x -= shift;
+    }
     const geo = handGeometry(lm, pv, { side, range });
     const dy = (yForHeight(geo.zone, volume) - geo.pos.y) * pv.sHeight / pv.srcH;
     const dx = x == null ? 0 : -(xForValue(geo.zone, x) - geo.pos.x) * pv.sWidth / pv.srcW; // display x is mirrored

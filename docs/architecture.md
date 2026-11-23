@@ -209,3 +209,27 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
   beat grid carries `rate`/`double` and is re-sent on every scheduled beat. Chip: hidden while output is off, pressing it
   opens Controls (`setPressHandler`, `newRoom`, `onStatus`), `data-gs-kind="status"`.
 - Hand input publishes `left|right/top`: the highest fingertip in display space (the filter arc anchors above it).
+- Reach zones + sideways axes (ws/reach-zones, user feedback "my hand starts to get cut off"):
+  - HandFrame `height` = the palm's position over the hand's vertical reach zone (display space; 0 bottom .. 1 top), no
+    longer the wrist over 90 % of the camera image (that is now `rawHeight`). Zone (`src/input/reach-zones.js`, pure):
+    palm y limits where the whole hand stays in frame = max(preset top, up + 3 %) .. min(preset bottom, 1 − down − 3 %),
+    up/down = the hand's extent above/below the palm (max of the 21 landmarks and 1.3 / 0.9 hand sizes); band never shorter
+    than 0.12 (centered when a hand is too big). Presets (`reach/range`, Controls "Range"): comfort 20–80 % (default), wide
+    10–90 %, compact 30–70 %. Extents smoothed per hand (one-pole 400 ms, changes < 12 % ignored, so a tilt / pinch / fist
+    never moves the value of a still hand); reset when the hand is lost.
+  - HandFrame adds `x` (0 inner .. 0.5 neutral .. 1 outer of a horizontal band on the side the hand is DISPLAYED on, from
+    `ui/sides`, else guessed from the palms; dead zone 16 % of the band around its middle), `zone`
+    ({top, bottom, inner, outer, side, range}), `extents`, `rawHeight`. Bus (hand input): `left|right/x` (null when lost),
+    `left|right/zone` (state, quantized to 1/1000); `reach/range` (state, ui).
+  - Edge tracks span their hand's zone (marker = palm y, clamped to the band; hollow markers on the band). Lead's ladder
+    spans the right hand's zone: arrows at the band ends, lines between (`ladderGeometry(..., band)`), DOM clearance still wins.
+  - `src/core/axes.js` = THE mapping table (one line per axis): right x -> `drive`, left x -> `space`, curve `outward`
+    (0 up to the neutral middle, 1 at the outer end); `<id>/on` switches (state, default true). The router calls
+    `axes.update(left, right, {now, rightHeld})` every frame (right axes hold while the menu holds the right hand; lost
+    hands hold). ctx.axes, router.axes.
+  - Audio graph: `out` is a GainNode bus -> driveIn -> waveshaper (fixed tanh curve, null until Drive is first used) ->
+    driveOut -> filter -> dry -> master; reverb send after the filter (`spaceSend` 0..0.8 -> ConvolverNode with a generated
+    2.8 s IR, RT60 2.4 s, created on first use) -> master; dry trimmed by up to 22 % as Space rises. Drive = makeup ·
+    tanh(g·x), g 0.05..9 (squared), makeup keeps a 0.3 reference peak (× 0.62 at full drive for the RMS rise):
+    loudness within ±2 dB, limiter input falls as Drive rises. `audio.setDrive/setSpace`, `audio.drive/space`.
+  - Wire: `/gs/drive`, `/gs/space`, `/gs/left/x`, `/gs/right/x` (ADDRESS_TABLE).
