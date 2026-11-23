@@ -11,6 +11,13 @@ import { DEFAULT_RANGE, handExtents, zoneFor, yForHeight, xForValue } from "../.
 /** Master volume the router maps a left hand at `volume` (= height) to; the default leftHand() is at 0.5. */
 export const masterAt = (volume = 0.5) =>
   Math.max(0, Math.min(1, (volume - MASTER_VOLUME.LOW) / (MASTER_VOLUME.HIGH - MASTER_VOLUME.LOW)));
+/**
+ * Left-hand height (leftHand `volume`) that gives master volume `m` (inverse of masterAt). The router's dead zone makes
+ * the anchor trail a MOVING hand by DEAD_ZONE: pass dir +1 when the hand comes from below, -1 from above, 0 for the
+ * first left frame (anchor = height).
+ */
+export const heightForMaster = (m, dir = 0) =>
+  MASTER_VOLUME.LOW + m * (MASTER_VOLUME.HIGH - MASTER_VOLUME.LOW) + dir * MASTER_VOLUME.DEAD_ZONE;
 
 const FINGER_ORDER = ["index", "middle", "ring", "pinky"];
 const MCP_X_OFFSET = { index: -0.06, middle: -0.02, ring: 0.02, pinky: 0.06 };

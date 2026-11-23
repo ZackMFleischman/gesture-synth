@@ -298,6 +298,18 @@ export function buildHandFrame(landmarks, handedness, {
     const d = pts[i];
     if (!top || d.y < top.y) top = d;
   }
+  // Pinch point (display space): midpoint of the thumb tip (4) and index tip (8) while pinching, else null.
+  // Arp anchors its tempo scale + big BPM to it.
+  const pinchPoint = pinch ? { x: (pts[4].x + pts[8].x) / 2, y: (pts[4].y + pts[8].y) / 2 } : null;
+  // Bounding box of all landmarks (display space): at-hand feedback keeps clear of the hand with it.
+  let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+  for (const d of pts) {
+    if (d.x < bx0) bx0 = d.x;
+    if (d.x > bx1) bx1 = d.x;
+    if (d.y < by0) by0 = d.y;
+    if (d.y > by1) by1 = d.y;
+  }
+  const box = { x0: bx0, y0: by0, x1: bx1, y1: by1 };
   // Reach zone (src/input/reach-zones.js): height / x over the band where the whole hand stays in frame.
   // A lone frame uses its own extents and guesses the side from the palm; createHandInput passes smoothed
   // extents and the side the UI displays the hand on.
@@ -323,6 +335,8 @@ export function buildHandFrame(landmarks, handedness, {
     tilt: getHandHorizontalTilt(landmarks, handedness),
     pos,
     top,
+    pinchPoint,
+    box,
     handSize,
     t,
   };
@@ -330,8 +344,8 @@ export function buildHandFrame(landmarks, handedness, {
 
 // Bus names published by hand input (precomputed: no string building per frame).
 const SIDE_SIGNALS = {
-  Left: { height: "left/height", tilt: "left/tilt", pos: "left/pos", top: "left/top", fist: "left/fist", pinch: "left/pinch", size: "left/size", x: "left/x", zone: "left/zone" },
-  Right: { height: "right/height", tilt: "right/tilt", pos: "right/pos", top: "right/top", fist: "right/fist", pinch: "right/pinch", size: "right/size", x: "right/x", zone: "right/zone" },
+  Left: { height: "left/height", tilt: "left/tilt", pos: "left/pos", top: "left/top", pinchpt: "left/pinchpt", fist: "left/fist", pinch: "left/pinch", size: "left/size", x: "left/x", zone: "left/zone" },
+  Right: { height: "right/height", tilt: "right/tilt", pos: "right/pos", top: "right/top", pinchpt: "right/pinchpt", fist: "right/fist", pinch: "right/pinch", size: "right/size", x: "right/x", zone: "right/zone" },
 };
 
 const HISTORY_MS = 1000; // voicing history kept per hand (must exceed PINCH_LOOKBACK_MS)
@@ -433,6 +447,7 @@ export function createHandInput({ bus = sharedBus } = {}) {
     bus.set(s.tilt, f ? f.tilt : null);
     bus.set(s.pos, f ? f.pos : null);
     bus.set(s.top, f ? f.top : null);
+    bus.set(s.pinchpt, f ? f.pinchPoint : null); // display space, null when not pinching
     bus.set(s.fist, f ? f.fist : false);
     bus.set(s.pinch, f ? f.pinch : false);
     bus.set(s.size, f ? f.handSize : null);

@@ -13,9 +13,9 @@ const SIGNAL = `ws://localhost:${process.env.PW_SIGNAL_PORT}`;
 const CODE_RE = /^[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{2}$/;
 // On-screen indicators (src/ui/indicators.js) are the one consumer that always exists.
 // On-screen consumers: indicators.js (chord, chords/octave, filter, voicing, volume = master) and the modes UI
-// (src/ui/mode-ui.js: `mode`, `beat`, plus the right-track param = chords/volume in Chords). Everything else is
+// (src/ui/mode-ui.js: `mode`, `beat`, plus the meter param = the master `volume` in Chords). Everything else is
 // read with bus.get().
-const INDICATOR_SIGNALS = ["beat", "chord", "chords/octave", "chords/volume", "filter", "layer", "mode", "voicing", "volume"];
+const INDICATOR_SIGNALS = ["beat", "chord", "chords/octave", "filter", "layer", "mode", "voicing", "volume"];
 
 // Headless Chrome hides local IPs behind mDNS names; resolve them as plain host candidates.
 test.use({
@@ -221,9 +221,10 @@ test("visualizer gets manifest, full state, fast frames, timed events, periodic 
   }));
   expect(cont.ch).toBe("fast");
   expect(Array.isArray(cont.pos) && cont.pos.length === 2).toBe(true);
-  // M1 1.3: /gs/volume = master volume (left height 0.5 -> masterAt(0.5)); right height = /gs/chords/volume.
+  // M1 1.3: /gs/volume = master volume (left height 0.5 -> masterAt(0.5)); right height = /gs/right/height (it has
+  // no function in Chords any more, so there is no /gs/chords/volume).
   expect(cont.volume).toBeCloseTo(masterAt(0.5), 1);
-  expect(await v.page.evaluate(() => window.__viz.cont["/gs/chords/volume"])).toBeCloseTo(0.4, 1);
+  expect(await v.page.evaluate(() => window.__viz.cont["/gs/right/height"])).toBeCloseTo(0.4, 1);
   expect(cont.filter).toBeCloseTo(-0.5, 1);
   expect(cont.maxKeys).toBeGreaterThanOrEqual(3); // several values batched in one message
 
@@ -232,7 +233,7 @@ test("visualizer gets manifest, full state, fast frames, timed events, periodic 
     const out = [];
     for (const vol of [0.2, 0.9, 0.3, 0.8, 0.5]) {
       const t0 = await s.page.evaluate((r) => { window.__gsTest.results = r; return Date.now(); }, results(leftHand(4), rightHand(3, { volume: vol })));
-      await v.page.waitForFunction((vol) => Math.abs((window.__viz.cont["/gs/chords/volume"] ?? -1) - vol) < 0.02, vol);
+      await v.page.waitForFunction((vol) => Math.abs((window.__viz.cont["/gs/right/height"] ?? -1) - vol) < 0.02, vol);
       out.push(Date.now() - t0);
     }
     return out;

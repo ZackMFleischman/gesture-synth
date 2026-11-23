@@ -51,12 +51,13 @@ async function measure(page, ms = 1000) {
 const threshold = (page) => page.evaluate(async () => (await import("/src/services/audio.js")).LIMITER.threshold);
 
 test.describe("gain staging: steady playing stays out of the limiter", () => {
-  test("every chord at max settings (sawtooth, filter fully open, master 1, right 1) peaks under the limiter threshold", async ({ synthPage: page }) => {
+  test("every chord at max settings (sawtooth, filter fully open, master 1, chord voice CHORDS_LEVEL) peaks under the limiter threshold", async ({ synthPage: page }) => {
     // Offline renders of the real SynthEngine (CHORD_LEVEL, filter curve, chordGain, masterGain), tapped at the
     // limiter input: every key x degree x major/minor x voicing x thumb = 1344 chords. ~3 s alone, more under load.
     test.setTimeout(90_000);
     const r = await page.evaluate(async (tonics) => {
       const { SynthEngine, LIMITER } = await import("/src/services/audio.js");
+      const { CHORDS_LEVEL } = await import("/src/modes/chords.js"); // Chords' fixed chord-voice gain
       const { createBus } = await import("/src/core/bus.js");
       const { createHarmony } = await import("/src/services/harmony.js");
       const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII"];
@@ -68,7 +69,7 @@ test.describe("gain staging: steady playing stays out of the limiter", () => {
         const s = new SynthEngine({ bus: createBus(), waveform });
         try { s.ensureContext(); } finally { window.AudioContext = Orig; }
         s.setMasterVolume(1);
-        s.chordGain.gain.value = 1;
+        s.chordGain.gain.value = CHORDS_LEVEL;
         s.updateFilterSweep(1);
         s.masterGain.disconnect();
         s.masterGain.connect(off.destination); // the limiter's input
@@ -98,26 +99,35 @@ test.describe("gain staging: steady playing stays out of the limiter", () => {
     expect(dB(r.worst.peak)).toBeLessThan(r.threshold - 1);
   });
 
-  test("loudness is linear in the right-hand volume (Chords, at full master)", async ({ synthPage: page, setHands }) => {
-    // Top of the range on purpose: this is where the old staging compressed (right 0.9 vs 0.3 measured 2.4).
+  test("Chords: the right-hand height changes nothing (volume = left hand only)", async ({ synthPage: page, setHands }) => {
+    // (Replaces "loudness is linear in the right-hand volume": the right height has no function in Chords any more;
+    // the chord voice plays at the fixed CHORDS_LEVEL and the left height (master) is the volume.)
+    // Full master + sawtooth + filter open = the loud end, where a leftover right-height gain would show most.
     await page.locator("#toneSelect").selectOption("sawtooth");
     const level = async (volume) => {
       await setHands(leftHand(1, { volume: 0.95 }), rightHand(1, { volume, tilt: 1 }));
       await page.waitForTimeout(400); // chord hold + 50 ms volume ramp + filter glide
       const m = await measure(page, 500);
-      return { rms: m.rms, vol: await page.evaluate(() => window.__gsTest.bus.get("chords/volume")), peak: m.peak };
+      const s = await page.evaluate(() => {
+        const t = window.__gsTest;
+        return { master: t.bus.get("volume"), chordVol: t.bus.get("chords/volume"), chordGain: t.synth.chordGain.gain.value };
+      });
+      return { rms: m.rms, peak: m.peak, ...s };
     };
-    for (const [lo, hi] of [[0.2, 0.6], [0.3, 0.9], [0.5, 1.0]]) {
-      const a = await level(lo);
-      const b = await level(hi);
-      expect(a.vol).toBeCloseTo(lo, 2);
-      expect(b.vol).toBeCloseTo(hi, 2);
-      const ratio = b.rms / a.rms;
-      console.log(`[gain] right ${lo} -> ${hi}: rms ${a.rms.toFixed(4)} -> ${b.rms.toFixed(4)}, ratio ${ratio.toFixed(3)} (linear ${(hi / lo).toFixed(3)})`);
-      expect(ratio).toBeGreaterThan((hi / lo) * 0.9);
-      expect(ratio).toBeLessThan((hi / lo) * 1.1);
-      expect(b.peak).toBeLessThanOrEqual(1);
+    const { CHORDS_LEVEL } = await page.evaluate(() => import("/src/modes/chords.js").then((m) => ({ CHORDS_LEVEL: m.CHORDS_LEVEL })));
+    const pts = [];
+    for (const v of [0.6, 0.15, 0.95, 0.35]) pts.push({ v, ...(await level(v)) });
+    const ref = pts[0];
+    for (const p of pts) {
+      const d = dB(p.rms / ref.rms);
+      console.log(`[gain] right ${p.v}: rms ${p.rms.toFixed(4)} (${d >= 0 ? "+" : ""}${d.toFixed(2)} dB), master ${p.master.toFixed(3)}, chordGain ${p.chordGain.toFixed(3)}`);
+      expect(p.chordVol).toBeUndefined(); // no right-height signal in Chords
+      expect(p.master).toBe(ref.master); // the bus volume does not follow the right hand
+      expect(p.chordGain).toBeCloseTo(CHORDS_LEVEL, 3);
+      expect(Math.abs(d)).toBeLessThan(0.5);
+      expect(p.peak).toBeLessThanOrEqual(1);
     }
+    expect(ref.rms).toBeGreaterThan(0.02);
   });
 
   test("loudness is linear in the master volume (left height)", async ({ synthPage: page, setHands }) => {

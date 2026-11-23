@@ -92,7 +92,7 @@ const GUIDE = [
 
 // Right-hand guide rows appended per mode (docs/ui-integration.md §5).
 const GUIDE_MODE_ROWS = {
-  chords: [["✊", "Menu"], ["↕", "Volume"], ["👍", "Octave down"]],
+  chords: [["✊", "Menu"], ["👍", "Octave down"]],
   arp: [["✊", "Menu"], ["↕", "Gate"], ["👍", "Double time"], ["🤏", "Tempo"]],
   lead: [["✊", "Menu"], ["↕", "Note"], ["🤏", "Play"], ["☝️", "Note set"]],
 };

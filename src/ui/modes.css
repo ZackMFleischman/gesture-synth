@@ -55,11 +55,12 @@ body.gs-modes #distortionDisplay {
   transition: opacity var(--gs-fast);
 }
 body.gs-modes #volumeMeter { transition: opacity var(--gs-fast); }
-/* Held (menu open / pinch) or right hand lost: right-hand readouts dim, value frozen. */
-body.gs-modes.gs-right-held #volumeMeter,
+/* Held (menu open / pinch) or right hand lost: right-hand readouts dim, value frozen. (In Chords the meter shows the
+   master volume, a left-hand control: it stays bright.) */
+body.gs-modes.gs-right-held:not(.gs-meter-master) #volumeMeter,
 body.gs-modes.gs-right-held #distortionDisplay { opacity: 0.4; }
-/* No right track in this mode (Lead: right height is the note, the ladder shows it). */
-body.gs-modes.gs-no-right-track #volumeMeter { display: none; }
+/* No meter in this mode (Lead: right height is the note, the ladder shows it). */
+body.gs-modes.gs-no-meter #volumeMeter { display: none; }
 
 /* ---- Top row: mode badge (+ Lead note-set badge) right of the key select ---- */
 .gs-badge {
@@ -230,7 +231,7 @@ body.gs-modes #outputPopover { top: 46px; right: var(--gs-gutter); }
 #modeBadge .gs-part-base { opacity: 0.72; font-weight: 500; }
 #modeBadge .gs-plus { color: var(--gs-quiet); font-weight: 400; }
 /* The 8-bar meter shows the base's HELD right-hand value (dimmed, base color). */
-body.gs-modes.gs-layer #volumeMeter { opacity: 0.4; }
+body.gs-modes.gs-layer:not(.gs-meter-master) #volumeMeter { opacity: 0.4; }
 body.gs-modes.gs-layer .vol-bar.lit { background: var(--gs-base-mode, var(--gs-mode)); }
 /* The base's transport keeps its own color under the layer. */
 body.gs-modes.gs-layer #transport .gs-beats i.on { background: var(--gs-base-mode); border-color: var(--gs-base-mode); }

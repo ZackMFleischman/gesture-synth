@@ -18,7 +18,7 @@ side elements must integrate with what exists.*
 | D2 | **Amber stays the app color and becomes the Chords mode color.** Warnings use **coral red `#ff5a5f`**, not amber. | Spec says "amber only for warnings", but amber is the existing brand on every control. Repainting the app would clobber it. Chords *is* the existing behavior, so Chords mode looks exactly like today. Warnings get a hue no mode uses, plus a dashed pattern so they don't rely on color alone. |
 | D3 | **Color rule:** global/left-hand/chrome = amber (selects, guide, help, chord display, wave) or neutral ink (master volume track). Everything the **right hand** controls = **mode color** (right track, meter, filter readout, filter-arc dot, menu fills, x2, cursor). | Gives "one accent per mode" without recoloring the existing chrome. In Chords both are amber = today's look. |
 | D4 | **Mode colors:** Chords `#e8a13d` (amber), Arp `#4fb3ff` (sky blue), Lead `#c08cff` (violet). Good/connected `#5ad17a`. | Three hues ~120° apart, all readable on the dark plates; none collides with warning coral or with green "good". |
-| D5 | **The 8-bar meter (top right) becomes the right-hand expression meter**: it shows the value of whatever right height controls in the active mode (Chords = volume, unchanged; Arp = gate), bars in the mode color. Hidden in Lead (right height is the note; the ladder shows it). | Keeps the existing widget with its existing meaning in Chords (the `ui.spec` meter test stays green), and gives it a meaning in other modes. |
+| D5 | **The 8-bar meter (top right) becomes the right-hand expression meter**: it shows the value of whatever right height controls in the active mode (Arp = gate), bars in the mode color. Hidden in Lead (right height is the note; the ladder shows it). *Amended (ws/volume-bpm):* Chords' volume is the left hand only, so in Chords the meter shows the master volume (`mode.meter`) and does not dim with the right hand. | Keeps the existing widget with its existing meaning in Chords (the `ui.spec` meter test stays green), and gives it a meaning in other modes. |
 | D6 | **"Filter: x%" readout stays** as the numeric twin of the filter arc (status at the edge; the arc is the feedback at the hand). Text takes the mode color + a 1px text shadow for bright video. | Augment, not replace. |
 | D7 | **Mode badge** goes on the first row, right of the key select (x=110). In Lead the 4-segment note-set badge follows it. | Top-left is the existing settings column; the badge joins it instead of fighting it. Click/tap on the badge opens the controls panel. |
 | D8 | **Screen controls** = a `Controls` toggle on the third row (next to `Open Guide`) that opens a panel **in the same slot and style as the gesture guide**. Guide and panel are mutually exclusive. The spec's bottom-right "Settings" pill is dropped. | Extends the existing dropdown column (key, tone are already settings). Keeps the bottom free for the chord + transport. |
@@ -87,7 +87,7 @@ hand), first-use labels (3 s), and user-opened panels (gesture guide, controls p
 | `#helpButton` + `#helpModal` | bottom-left, x=16 | Same, x=20. Modal gets new sections (§6). | CSS `left`; modal HTML additions |
 | `#chordDisplay` + `#qualityDisplay` | bottom-center | **Unchanged, all modes** (D1). It is the left hand's output, so it keeps amber. In Lead it is the pad chord. | none |
 | Energy wave (`drawEnergy`) | canvas, bottom | **Unchanged, all modes.** Bottom layer of the overlay, below all new canvas elements. | none |
-| `#volumeMeter` (8 bars) | right-hand volume | Right-height expression meter in the mode color (D5): Chords = volume (as today), Arp = gate. Dims (opacity .4) while the right hand is held or lost. **Hidden in Lead.** | `.lit` color via `--gs-mode`; feed it the mode's right-height param |
+| `#volumeMeter` (8 bars) | right-hand volume | Right-height expression meter in the mode color (D5): Chords = master volume (left height; does not dim), Arp = gate (dims, opacity .4, while the right hand is held or lost). **Hidden in Lead.** | `.lit` color via `--gs-mode`; feed it the mode's right-height param |
 | `#distortionDisplay` "Filter: x%" | below meter | Same text and position (x=20 from right), mode color, dims when held. All modes. | CSS only |
 | Landmark dots | white 50% | Unchanged. Drawn with the video, under all new overlays. | none |
 | `#startOverlay` | z 10 | Unchanged. New canvas UI is not drawn until it is dismissed (canvas is `.dimmed` anyway). | none |
@@ -100,7 +100,7 @@ All sizes scale with `handSize` where noted; `hs` below = the hand's on-screen s
 - **Master-volume track** (canvas): full height (y 12 → h-12), center 9px from the chord hand's edge, 6px wide,
   neutral ink, fill below the marker at 35 %. Marker: 14px tick level with the chord hand's palm; dotted guide from
   the tick to the hand. All modes, also while the menu is open (left stays live).
-- **Right track** (canvas): same geometry on the other edge, in the mode color. Chords = volume, Arp = gate. Lead:
+- **Right track** (canvas): same geometry on the other edge, in the mode color. Arp = gate; none in Chords (right height has no function there). Lead:
   replaced by the note ladder. Held (menu/countdown/pinch): track dims to 40 %, hollow marker at the held value, no
   guide. Return: hollow + solid markers together until they meet.
 - **Lead note ladder** (canvas): replaces the right track. Lines from 8px off the edge inward (scale notes 40px thin
@@ -131,8 +131,9 @@ All sizes scale with `handSize` where noted; `hs` below = the hand's on-screen s
 - **Countdown**: ring around the open hand, 3px, mode color, sweeps closed while shrinking from 0.95 hs to 0.65 hs
   over 400 ms; mode name under it.
 - **x2 pill** (Arp): 0.9 hs under the right palm; outline until the next beat, then filled.
-- **Pinch (Arp)**: tempo scale (1 tick = 1 BPM, ±10 visible, start tick + current tick) next to the hand on the
-  outer side if there is ≥ 150px of room, else the inner side; beyond it the big BPM on a plate + `BPM +6`.
+- **Pinch (Arp)**: tempo scale (1 tick = 1 BPM, ±10 visible, start tick + current tick) level with the pinch point
+  (thumb tip + index tip midpoint, `right/pinchpt`), to the LEFT of it on screen and clear of the hand box; beyond it
+  (further left) the big BPM on a plate + `BPM +6`. On the right only when the left has less room (user request).
   Visible during the pinch and 1 s after.
 - **Lead cursor**: ring (r 9) on the nearest ladder line; hollow = preview, filled + glow = playing. The note name
   (28px bold, on a plate) sits just inside the ladder next to the ring; dotted guide from the hand to the name.
@@ -163,9 +164,9 @@ Canvas guides that run under DOM controls (e.g. the master guide under an open g
 | Element | Chords | Arp | Lead | Menu open / countdown | Pinch (Arp) | Right hand lost |
 |---|---|---|---|---|---|---|
 | Master track | ✓ | ✓ | ✓ | ✓ live | ✓ | ✓ |
-| Right track | ✓ volume | ✓ gate | — (ladder) | dim + hollow | dim + hollow | dim, dashed coral marker |
+| Right track | — (none) | ✓ gate | — (ladder) | dim + hollow | dim + hollow | dim, dashed coral marker |
 | Note ladder + cursor | — | — | ✓ | ladder dims | — | cursor hidden |
-| Meter (8 bars) | ✓ volume, amber | ✓ gate, blue | hidden | dim | dim | dim |
+| Meter (8 bars) | ✓ master volume, amber | ✓ gate, blue | hidden | dim | dim | dim |
 | Filter readout | ✓ | ✓ | ✓ | dim | dim | dim |
 | Filter arc | ✓ | ✓ | ✓ | hidden | dim, hollow dot | hidden |
 | Mode badge | ✓ | ✓ | ✓ + note-set | switches at countdown start | ✓ | ✓ |
@@ -184,7 +185,7 @@ append a separator, a header with the mode dot + mode name, and right-hand rows 
 
 | Chords | Arp | Lead |
 |---|---|---|
-| ✊ Menu · ↕ Volume · 👍 Octave down | ✊ Menu · ↕ Gate · 👍 Double time · 🤏 Tempo | ✊ Menu · ↕ Note · 🤏 Play · 1️⃣2️⃣3️⃣🤘 Note set |
+| ✊ Menu · 👍 Octave down (volume = left height) | ✊ Menu · ↕ Gate · 👍 Double time · 🤏 Tempo | ✊ Menu · ↕ Note · 🤏 Play · 1️⃣2️⃣3️⃣🤘 Note set |
 
 Rows come from the mode plugin (proposed `guide: [[emoji, label], ...]`, see §10). The existing
 `tests/ui.spec.js` guide test selects `.gesture-guide-note`, which the appended rows don't use, so it stays green.

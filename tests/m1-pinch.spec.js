@@ -10,6 +10,7 @@ import { recordAudio, writeWav, captureHealth, retryOnCaptureGlitch } from "./he
 import { detectOnsets, pitchAt, hzToMidi, matchToScheduleAnyOffset } from "./helpers/arp-analysis.js";
 import { createScreencast } from "./helpers/screencast.js";
 import { PINCH_TEMPO } from "../src/modes/arp.js";
+import { toDisplay } from "../src/input/hand-input.js";
 
 const WAV_DIR = "test-results/audio";
 const TOL = 0.003; // ±3 ms (same as tests/arp.spec.js)
@@ -76,6 +77,21 @@ async function enterArp(page, setHands, { bpm = 110, q = 1, p = R0 } = {}) {
     t.registry.getMode("arp").set({ bpm });
   }, bpm);
   await page.waitForTimeout(500);
+}
+
+const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+/** Canvas-px box of a synthetic hand (all 21 landmarks), computed here from the landmarks (not the app's HandFrame.box). */
+function handBoxPx(h, W = 1280, H = 800) {
+  const pts = h.landmarks.map((l) => toDisplay(l, DESKTOP_VIEW));
+  const xs = pts.map((p) => p.x * W);
+  const ys = pts.map((p) => p.y * H);
+  return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+}
+/** Canvas-px pinch point of a synthetic hand: midpoint of thumb tip 4 and index tip 8. */
+function pinchPx(h, W = 1280, H = 800) {
+  const t = toDisplay(h.landmarks[4], DESKTOP_VIEW);
+  const i = toDisplay(h.landmarks[8], DESKTOP_VIEW);
+  return { x: ((t.x + i.x) / 2) * W, y: ((t.y + i.y) / 2) * H };
 }
 
 /** Display-height y of a hand moved by `k` BPM worth of pinch movement (up = +). */
@@ -418,8 +434,10 @@ test.describe("1.6 right pinch = tempo (Arp)", () => {
     await expect.poll(() => bpmNow(page)).toBe(116);
     await page.waitForTimeout(100);
     d = await drawnTempo(page);
-    const handY = (await bus(page, "right/pos")).y * 800;
-    expect(Math.abs(d.currentTickY - handY), "current tick level with the hand").toBeLessThan(2);
+    // Anchored to the pinch point (thumb tip + index tip midpoint, bus right/pinchpt), not the palm.
+    const pp = await bus(page, "right/pinchpt");
+    const handY = pp.y * 800;
+    expect(Math.abs(d.currentTickY - handY), "current tick level with the pinch point").toBeLessThan(2);
     expect(d.startTickY - d.currentTickY).toBeCloseTo(k * d.tickStep, 5); // 1 tick = 1 BPM
     expect(d.plate.h).toBeGreaterThan(40); // the one large number
     expect(d.alpha).toBe(1);
@@ -434,6 +452,46 @@ test.describe("1.6 right pinch = tempo (Arp)", () => {
     await setHands(LEFT, openRight(1, { x: R0.x, y: await yFor(page, k) }));
     await expect(tempoRow).not.toHaveClass(/gs-owned/);
     await page.locator("#controlsToggle").click();
+  });
+});
+
+test.describe("BPM shifter left of the pinching fingers (user request)", () => {
+  test("scale + plate sit left of the pinch point, clear of the hand; right of it only near the left edge", async ({ synthPage: page, setHands }) => {
+    fs.mkdirSync(SCREENS_DIR, { recursive: true });
+    await enterArp(page, setHands, { bpm: 110 });
+    const check = async (p, side, shotName) => {
+      const h = pinchAt(p);
+      await setHands(LEFT, h);
+      await expect.poll(async () => (await drawnTempo(page))?.alpha ?? null).toBe(1);
+      await page.waitForTimeout(100);
+      const d = await drawnTempo(page);
+      const pp = await bus(page, "right/pinchpt");
+      const exp = pinchPx(h);
+      // The app's pinch point = the landmarks' thumb/index tip midpoint (display space).
+      expect(Math.abs(pp.x * 1280 - exp.x)).toBeLessThan(1);
+      expect(Math.abs(pp.y * 800 - exp.y)).toBeLessThan(1);
+      expect(Math.abs(d.anchor.x - exp.x)).toBeLessThan(1);
+      const box = handBoxPx(h);
+      expect(d.side, `side at x=${p.x}`).toBe(side);
+      for (const [name, r] of [["scale", d.scale], ["plate", d.plate]]) {
+        if (side === "left") expect(r.x + r.w, `${name} left of the pinch point`).toBeLessThanOrEqual(exp.x);
+        else expect(r.x, `${name} right of the pinch point`).toBeGreaterThanOrEqual(exp.x);
+        expect(overlap(r, box), `${name} clear of the hand`).toBe(false);
+        expect(r.x).toBeGreaterThanOrEqual(0);
+        expect(r.x + r.w).toBeLessThanOrEqual(1280);
+      }
+      // Scale nearer the fingers, plate further out; plate level with the pinch point.
+      if (side === "left") expect(d.plate.x + d.plate.w).toBeLessThanOrEqual(d.scale.x + 1);
+      else expect(d.plate.x).toBeGreaterThanOrEqual(d.scale.x + d.scale.w - 1);
+      expect(Math.abs(d.plate.y + d.plate.h / 2 - Math.max(90, Math.min(800 - 110, exp.y)))).toBeLessThan(2);
+      if (shotName) await page.screenshot({ path: `${SCREENS_DIR}/${shotName}.png` });
+      await setHands(LEFT, openRight(1, p));
+      await page.waitForTimeout(1300); // the BPM lingers ~1 s
+    };
+    await check(R0, "left", "bpm-left");
+    await check({ x: 0.5, y: 0.4 }, "left");
+    await check({ x: 0.07, y: 0.5 }, "right", "bpm-left-edge-fallback");
+    expect(fs.existsSync(`${SCREENS_DIR}/bpm-left.png`)).toBe(true);
   });
 });
 

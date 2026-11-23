@@ -14,7 +14,7 @@ import { arpNoteAt, midiToHz, PATTERNS, PATTERN_LABELS } from "./arp-patterns.js
 import { RATES, MIN_BPM, MAX_BPM } from "../services/clock.js";
 import { drawEnergy } from "./chords.js";
 import { drawX2Pill, drawBpmPlate } from "../ui/hand-overlays.js";
-import { COLORS, LAYOUT, MOTION, withAlpha, drawPlate } from "../ui/theme.js";
+import { COLORS, FONT, LAYOUT, MOTION, withAlpha, drawPlate } from "../ui/theme.js";
 import { PINCH_LOOKBACK_MS } from "../input/hand-input.js";
 import { CHORD_HOLD_TIME_MS } from "../services/harmony.js";
 
@@ -98,6 +98,10 @@ export function createArpMode() {
   let shown = null; // tempo visuals after a release: { startBpm, bpm, startY, size, until (ms, linger end) }
   const dblHistory = []; // { t, v } requested double time per frame (restored at a pinch start)
   let drawnTempo = null;
+  let handBox = null; // last right HandFrame.box (display space), for the tempo feedback's clearance
+  // Pinch point + hand box relative to the palm (display units), from the last pinching frame: the lingering BPM
+  // (~1 s after the release, when `right/pinchpt` is null) stays at the same place next to the hand.
+  let tempoAnchor = null;
   const notify = () => changeListeners.forEach((cb) => cb());
 
   // Chord display / quality read these (Chords publishes them itself; in Arp the chord is the left hand's).
@@ -319,6 +323,7 @@ export function createArpMode() {
 
     update(right, c = ctx) {
       ctx = c;
+      if (right) handBox = right.box ?? null;
       if (right) {
         const t = right.t || performance.now();
         if (right.pinch) {
@@ -463,7 +468,23 @@ export function createArpMode() {
       const tp = pinch || shown;
       if (tp) {
         const alpha = pinch ? 1 : Math.min(1, (shown.until - now) / MOTION.fast);
-        drawnTempo = drawTempoFeedback(g, { p, size, tp, alpha, exprSide: bus.get("ui/sides")?.expr ?? "right" });
+        const pp = bus.get("right/pinchpt");
+        if (pinch && pp) {
+          const b = handBox;
+          tempoAnchor = {
+            dx: pp.x - pos.x, dy: pp.y - pos.y,
+            box: b ? { x0: b.x0 - pos.x, y0: b.y0 - pos.y, x1: b.x1 - pos.x, y1: b.y1 - pos.y } : null,
+          };
+        } else if (pinch) tempoAnchor = null; // synthetic frame without a pinch point: anchor to the palm
+        const A = tempoAnchor;
+        const at = A ? c.toCanvas({ x: pos.x + A.dx, y: pos.y + A.dy }) : p;
+        let box = null;
+        if (A?.box) {
+          const b0 = c.toCanvas({ x: pos.x + A.box.x0, y: pos.y + A.box.y0 });
+          const b1 = c.toCanvas({ x: pos.x + A.box.x1, y: pos.y + A.box.y1 });
+          box = { x0: b0.x, y0: b0.y, x1: b1.x, y1: b1.y };
+        }
+        drawnTempo = drawTempoFeedback(g, { at, box, p, size, tp, alpha });
         if (pinch) return;
       }
       if (!(clock.doubleTime || clock.doubleTimeActive)) return;
@@ -499,26 +520,44 @@ const smoothstep = (k) => k * k * (3 - 2 * k);
 
 const TICKS_SHOWN = 10; // ticks each side of the start tick (more when the tempo moved further)
 
+/** Gap (px) between the hand (box / pinch point) and the tempo scale. */
+const TEMPO_GAP = 12;
+
 /**
- * Relative tempo scale (1 tick = 1 BPM; start tick + current tick, the current tick level with the hand)
- * next to the right hand on the outer side when there is room, else the inner side; beyond it the big
- * BPM number on a plate with the delta ("BPM +6"). Canvas px = CSS px (the main canvas is unscaled).
+ * Relative tempo scale (1 tick = 1 BPM; start tick + current tick, the current tick level with the pinch point) to the
+ * LEFT of the pinching fingers on screen, clear of the hand box; further left the big BPM number on a plate with the
+ * delta ("BPM +6"). On the right of the hand only when there is no room on the left (pinch near the left edge).
+ * at = pinch point (thumb tip 4 / index tip 8 midpoint), box = hand bounding box, p = palm (fallback), all canvas px.
+ * Canvas px = CSS px (the main canvas is unscaled).
  */
-function drawTempoFeedback(g, { p, size, tp, alpha, exprSide }) {
+function drawTempoFeedback(g, { at, box, p, size, tp, alpha }) {
   const W = g.canvas.width;
   const H = g.canvas.height;
   const hs = Math.max(50, Math.min(size * H * 1.9, W * 0.32, 280)); // hand span (as src/ui/mode-ui.js)
   // Tick spacing = the hand movement for 1 BPM, so the ticks slide past the hand as it moves (kept readable).
   const step = Math.max(4, Math.min(14, (size * H) / PINCH_TEMPO.BPM_PER_HAND));
   const delta = tp.bpm - tp.startBpm;
-  let out = exprSide === "left" ? -1 : 1; // towards the expression edge
-  const room = out > 0 ? W - LAYOUT.gutter - p.x : p.x - LAYOUT.gutter;
-  if (room < hs * 0.55 + 150) out = -out;
-  const curY = Math.max(90, Math.min(H - 110, p.y));
+  const a = at || p;
+  // Hand extent left / right of the pinch point (no box, e.g. a synthetic frame: ~the palm's half width).
+  const handL = box ? Math.min(a.x, box.x0) : Math.min(a.x, p.x - hs * 0.42);
+  const handR = box ? Math.max(a.x, box.x1) : Math.max(a.x, p.x + hs * 0.42);
+  // Width beyond the hand: gap + scale + 34 px to the plate + the plate (same font/padding as drawBpmPlate).
+  g.save();
+  g.font = `700 ${FONT.big}px ${FONT.family}`;
+  const bw = g.measureText(String(tp.bpm)).width;
+  g.font = `600 12px ${FONT.family}`;
+  const sw = g.measureText(`BPM +${Math.abs(delta)}`).width;
+  g.restore();
+  const need = TEMPO_GAP + 5 + 34 + Math.max(bw, sw) + 18;
+  const roomL = handL - LAYOUT.gutter - 4;
+  const roomR = W - LAYOUT.gutter - 4 - handR;
+  const out = roomL >= need || roomL >= roomR ? -1 : 1; // -1 = to the left on screen
+  const curY = Math.max(90, Math.min(H - 110, a.y));
   const startY = curY + delta * step;
   const lo = Math.min(-TICKS_SHOWN, delta - 4);
   const hi = Math.max(TICKS_SHOWN, delta + 4);
-  const sx = p.x + out * hs * 0.55;
+  // Ticks run outward from sx; the scale plate spans [sx - 23, sx + 5] (left) / [sx - 5, sx + 23] (right).
+  const sx = out < 0 ? handL - TEMPO_GAP - 5 : handR + TEMPO_GAP + 5;
   const top = startY - hi * step;
   const bottom = startY - lo * step;
 
@@ -547,12 +586,15 @@ function drawTempoFeedback(g, { p, size, tp, alpha, exprSide }) {
   }
   g.restore();
 
-  // The one large number in change, beyond the scale, level with the hand.
+  // The one large number in change, beyond the scale, level with the pinch point.
   g.save();
   g.globalAlpha *= alpha;
   const plate = drawBpmPlate(g, { x: sx + out * 34, y: curY, bpm: tp.bpm, delta, align: out > 0 ? "left" : "right" });
   g.restore();
-  return { scale, plate, startTickY: startY, currentTickY: curY, tickStep: step, side: out > 0 ? "outer" : "inner", alpha };
+  return {
+    scale, plate, startTickY: startY, currentTickY: curY, tickStep: step, side: out < 0 ? "left" : "right", alpha,
+    anchor: { x: a.x, y: a.y }, handBox: box ? { ...box } : null,
+  };
 }
 
 // ---------- screen controls (mocks.md §5) ----------

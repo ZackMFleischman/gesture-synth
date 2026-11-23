@@ -1,6 +1,6 @@
 // Audio engine. One shared graph for every mode, built once, never rebuilt on a mode switch:
 //
-//   chord oscillators -> chord instance gain (attack/release) -> chordGain (Chords' right-height volume) ─┐
+//   chord oscillators -> chord instance gain (attack/release) -> chordGain (Chords' fixed voice level)   ─┐
 //   arp / lead / noteOn() voices ─────────────────────────────────────────────────────────────────────────┤
 //                                                                                                         v
 //   out (GainNode 1, the PRE-FILTER bus) -> driveIn -> waveshaper (Drive) -> driveOut -> lowpass filter
@@ -27,7 +27,7 @@
 // wet level rises the dry is trimmed by up to SPACE.DUCK so the sum keeps the same headroom.
 //
 // Gain staging (docs/architecture.md, "Accepted amendments"): normal playing never reaches the limiter.
-// Worst steady state = master 1, right volume 1, sawtooth, filter fully open (tilt +1: 5 kHz, Q 5.2), every
+// Worst steady state = master 1, chord voice 1 (Chords' fixed CHORDS_LEVEL), sawtooth, filter fully open (tilt +1: 5 kHz, Q 5.2), every
 // key/degree/voicing incl. close voicings summing in phase: 4 oscillators at level 1 peak at 5.15 after the
 // filter (square: 6.1, triangle: 4.0; measured offline over all 1344 chords). CHORD_LEVEL 0.13 puts that
 // at 0.67 (-3.5 dBFS), 1.5 dB under the limiter threshold. Arp (gate 1, x2) peaks ~0.5 and Lead (lead +
@@ -209,7 +209,7 @@ export class SynthEngine {
     this.clipper.connect(ac.destination);
   }
 
-  /** Chord-voice level (Chords' right-hand height). Unchanged semantics from the original setVolume. */
+  /** Chord-voice level (0 = rest; Chords plays at its fixed CHORDS_LEVEL). Unchanged semantics from the original setVolume. */
   setVolume(volume01) {
     if (!this.ctx) return;
     const clamped = Math.max(0, Math.min(1, volume01));
@@ -436,7 +436,7 @@ export function createAudioFacade(synth) {
     get out() { return synth.inBus; },
     /** Lead layer input: -> its own tilt filter (setLayerFilter) -> mix (dry + Space) -> master. Lead's voice connects here. */
     get layerOut() { return synth.layerIn; },
-    /** Chords' chord-voice GainNode (right-height volume in Chords). */
+    /** Chords' chord-voice GainNode (fixed level while a chord plays; 0 = rest). */
     get chordGain() { return synth.chordGain; },
     get waveform() { return synth.waveform; },
     get masterVolume() { return synth.masterVolume; },

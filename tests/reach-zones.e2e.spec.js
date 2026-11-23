@@ -48,6 +48,9 @@ test.describe("reach zones: vertical (the user's bug)", () => {
 
   test("edge-track markers stay level with the palm (±4 px) across the band and stop at its ends", async ({ synthPage: page, setHands }) => {
     const H = await page.evaluate(() => window.innerHeight);
+    // Arp: a mode with a right track (Chords has none since the right height lost its function there).
+    await setHands(leftHand(1));
+    await page.evaluate(() => window.__gsTest.router.setMode("arp"));
     for (const v of [0, 0.2, 0.5, 0.8, 1]) {
       await setHands(leftHand(1, { volume: v }), rightHand(2, { volume: v }));
       await page.waitForTimeout(250);

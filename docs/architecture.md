@@ -153,7 +153,7 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
   - `harmony.voicing` is shared across modes (Chords and Arp read/write it). `VOICING_SEMITONES` / `voicingSemitones()` live in
     `src/services/harmony.js`; the createChordStabilizer() function has `.prime(state, now)`.
   - Bus: `volume` = MASTER volume (left height; dead zone 0.04, ~140 ms smoothing, 0 at height <= 0.1, 1 at >= 0.55 (`MASTER_VOLUME`); 1 before a
-    left hand was seen). Chords' right height = `chords/volume`. `menu` (state): `{state, hoverId, selectedId, progress}` while
+    left hand was seen). It is Chords' only volume control (see "Chords volume = left hand only" below). `menu` (state): `{state, hoverId, selectedId, progress}` while
     open/countdown, `null` when closed. `right/held` (state, bool). `bpm` declared at startup. Note events carry
     `{freq, midi, voice, id}`; `note/on` pairs with `note/off` or `note/cancel` by the globally unique `id`.
   - Router option `aspect()` (canvas w/h): the menu gets `handSize / aspect` (HandFrame.handSize is in display-HEIGHT units,
@@ -294,8 +294,21 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
     (header: mode name + "right hand held" / "right hand"). Chords shows a held Volume row (`data-control=chords-volume`)
     only under the layer. Controls-panel Mode row lights base + layer; tap tempo / gate apply to the base (`S.base`).
   - UI (`S` in src/ui/mode-ui.js): `modeId/mode/rightTrack/color/name` = the right-hand mode (Lead while layered);
-    `baseId/base/baseName/baseColor/baseRightTrack`, `layerId`, `meterTrack` (meter = base's held track, dimmed). body
+    `baseId/base/baseName/baseColor/baseRightTrack`, `layerId`, `meter` (Lead layer: the base's meter — held + dimmed, except a master `volume` meter, which stays live). body
     `data-mode` = base, `data-layer`, class `gs-layer`, `--gs-base-mode`. Badge `● Arp + ● Lead` (`.gs-part-base` quieter,
     `.gs-two`); mobile pill the same (`.gs-pill-base/.gs-pill-layer`). Transport follows the base. Guide adds
     "Lead plays on top of <base>". No right edge track (Lead's ladder only).
 
+- Chords volume = left hand only + BPM shifter at the pinch (ws/volume-bpm, user requests):
+  - Chords' right height has NO function (for now): the chord voice plays at the fixed `CHORDS_LEVEL` (1, the gain
+    staging's "right = 1" worst case, src/modes/chords.js) and the left height (master `volume`) is the volume.
+    `chords/volume` is gone from the bus/wire. Chords: `rightTrack: null` (no right edge track), `meter: "volume"`.
+  - Mode field `meter` (bus name | null): what the top-right 8-bar meter shows; default = the right track's param
+    (Arp: gate, D5; Lead: none = hidden). A `volume` meter (Chords) does not dim with the right hand (`gs-meter-master`).
+    Mode field `rightLost: true` keeps the right hand's "Hand lost" plate + ghost ring without a right track (Chords).
+  - HandFrame adds `pinchPoint` (display space, midpoint of thumb tip 4 / index tip 8; null when not pinching) and `box`
+    ({x0, y0, x1, y1}, display bounding box of the 21 landmarks). Bus (hand input): `left|right/pinchpt` (null when not
+    pinching; wire `/gs/<side>/pinchpt` by the default mapping).
+  - Arp pinch feedback: tempo scale + big BPM level with the pinch point, to its LEFT on screen (scale next to the hand,
+    plate further left), clear of the hand box; on the right only when the left has less room (pinch near the left edge).
+    During the ~1 s linger after the release it keeps the last pinch point's offset from the palm.

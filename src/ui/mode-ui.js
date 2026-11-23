@@ -37,11 +37,16 @@ import { createControlsPanel } from "./controls-panel.js";
 import { createTransport } from "./transport.js";
 import { createGuide } from "./guide.js";
 
-/** What the right edge track / 8-bar meter show when a mode does not say (`mode.rightTrack`). */
+/** What the right edge track shows when a mode does not say (`mode.rightTrack`). Chords: none (right height is free). */
 export const DEFAULT_RIGHT_TRACK = {
-  chords: { param: "volume", label: "Volume" },
+  chords: null,
   arp: { param: "arp/gate", label: "Gate" },
 };
+/**
+ * What the 8-bar meter (top right) shows when a mode does not say (`mode.meter`, a bus name or null): else the right
+ * track's param. Chords = the master `volume` (its only volume control is the left height); Arp = gate (D5).
+ */
+export const DEFAULT_METER = { chords: "volume" };
 
 const LOST_GRACE_MS = 250; // a hand must be gone this long before it shows as lost
 const SIDE_LOCK_MS = 600; // the chord hand must stay on the other side this long before the tracks swap
@@ -68,13 +73,12 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
     baseColor: MODE_COLORS.chords,
     baseRightTrack: DEFAULT_RIGHT_TRACK.chords,
     layerId: null,
-    /** What the 8-bar meter shows: the right-hand mode's track, else (Lead layer) the base's held one. */
-    meterTrack: DEFAULT_RIGHT_TRACK.chords,
     modeId: null,
     name: "",
     mode: null,
     color: MODE_COLORS.chords,
     rightTrack: DEFAULT_RIGHT_TRACK.chords,
+    meter: DEFAULT_METER.chords,
     menu: { state: "closed", targetId: null },
     hands: { left: newHand(), right: newHand() },
     chordSide: "left",
@@ -117,6 +121,8 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
   const listeners = new Set(); // sub-module hooks: fn(kind: "set"|"event", name, value, playTime)
 
   const trackOf = (mode, id) => (mode && "rightTrack" in mode ? mode.rightTrack : DEFAULT_RIGHT_TRACK[id] || null);
+  /** Param the 8-bar meter shows for a mode: mode.meter, else the default, else its right track's param. */
+  const meterOf = (mode, id) => (mode && "meter" in mode ? mode.meter : DEFAULT_METER[id] ?? trackOf(mode, id)?.param ?? null);
   const nameOf = (mode, id) => mode?.name || id[0].toUpperCase() + id.slice(1);
 
   /** base = bus `mode`, layer = bus `layer` (Lead on top of the base) or null. */
@@ -137,7 +143,8 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
     S.name = nameOf(mode, id);
     S.color = MODE_COLORS[id] || mode?.color || MODE_COLORS.chords;
     S.rightTrack = trackOf(mode, id);
-    S.meterTrack = S.rightTrack || (S.layerId ? S.baseRightTrack : null);
+    // The 8-bar meter: the right-hand mode's meter param, else (Lead layer) the base's held one.
+    S.meter = meterOf(mode, id) || (S.layerId ? meterOf(base, baseId) : null);
     body.dataset.mode = baseId;
     if (S.layerId) body.dataset.layer = S.layerId;
     else delete body.dataset.layer;
@@ -145,7 +152,10 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
     if (MODE_COLORS[id]) body.style.removeProperty("--gs-mode");
     else body.style.setProperty("--gs-mode", S.color);
     body.style.setProperty("--gs-base-mode", S.baseColor);
-    body.classList.toggle("gs-no-right-track", !S.meterTrack);
+    body.classList.toggle("gs-no-right-track", !S.rightTrack);
+    body.classList.toggle("gs-no-meter", !S.meter);
+    // The meter shows the master (left hand): it does not dim with the right hand (held / lost / under the layer).
+    body.classList.toggle("gs-meter-master", S.meter === "volume");
   }
 
   function setHand(side, field, v) {
@@ -370,7 +380,7 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
       for (const p of parts) p.destroy?.();
       safeArea.destroy();
       layer.remove();
-      body.classList.remove("gs-modes", "gs-right-held", "gs-no-right-track", "gs-layer");
+      body.classList.remove("gs-modes", "gs-right-held", "gs-no-right-track", "gs-no-meter", "gs-meter-master", "gs-layer");
       delete body.dataset.mode;
       delete body.dataset.layer;
       body.style.removeProperty("--gs-base-mode");

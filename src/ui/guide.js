@@ -11,7 +11,7 @@ import { AXES } from "../core/axes.js";
 
 /** Right-hand guide rows per mode (spec table, ui-integration.md §7). A mode's own `guide` wins. */
 export const DEFAULT_GUIDE = {
-  chords: [["✊", "Menu"], ["↕", "Volume"], ["👍", "Octave down"]],
+  chords: [["✊", "Menu"], ["👍", "Octave down"]], // right height: nothing in Chords (volume = left height)
   arp: [["✊", "Menu"], ["↕", "Gate"], ["👍", "Double time"], ["🤏", "Tempo"]],
   lead: [["✊", "Menu"], ["↕", "Note"], ["🤏", "Play"], ["1️⃣2️⃣3️⃣🤘", "Note set"], ["🔼", "Pinch arrow: octave"]],
 };
