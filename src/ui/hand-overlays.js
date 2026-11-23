@@ -1,6 +1,8 @@
 // Feedback at the right hand (docs/ui-integration.md §4 "At the hand"): the filter arc, all modes.
-// Centered on the right palm, r = 0.95 hand spans, -150° -> -30° (above the hand); dot in the mode
-// color at the filter value. Held (Arp pinch): arc dims, hollow dot. Hidden while the menu is open,
+// Sits above the right hand: centered on the palm horizontally, with the arc's lowest points a
+// margin above the highest fingertip (`right/top`), so it never covers the fingers. -150° -> -30°;
+// dot in the mode color at the filter value, moving the way the fingertips lean on screen (tilt is
+// measured on the unmirrored camera image, so its sign is flipped for the mirrored display). Held (Arp pinch): arc dims, hollow dot. Hidden while the menu is open,
 // when the right hand is not tracked, and while the hand itself is under an open panel (guide /
 // controls; on phones the panels sit over the hands): feedback for a hidden hand reads as a glitch.
 //
@@ -9,22 +11,30 @@
 
 import { COLORS, FONT, STROKE, deg, drawArc, drawPill, drawPlate } from "./theme.js";
 
+/** Gap between the highest fingertip and the arc's lowest points, in hand spans. */
+const ARC_CLEARANCE = 0.12;
+
 export function createHandOverlays({ S }) {
   function draw(g, G) {
     const pos = S.drawPos("right");
     if (!pos || S.menu.state !== "closed") return;
     if (S.filter == null) return;
     const p = G.toPx(pos);
-    const r = G.hs * 0.95;
+    const r = G.hs * 0.55;
     if (S.palmCovered(p, G.hs)) return;
-    const box = { x: p.x - r - 6, y: p.y - r - 6, w: 2 * r + 12, h: r * 0.6 + 12 };
+    // Arc ends (at ±30° below horizontal from the center) sit ARC_CLEARANCE above the highest fingertip.
+    const tipY = S.hands.right.top ? G.toPx(S.hands.right.top).y : p.y - G.hs * 0.8;
+    const cy = Math.min(tipY, p.y) - G.hs * ARC_CLEARANCE + r * Math.sin(deg(30));
+    const box = { x: p.x - r - 6, y: cy - r - 6, w: 2 * r + 12, h: r * 0.5 + 12 };
     const held = S.rightHeld || S.rightReturn;
+    const dotAt = (1 - Math.max(-1, Math.min(1, S.filter))) / 2;
     drawArc(g, {
-      cx: p.x, cy: p.y, r, a0: deg(-150), a1: deg(-30),
+      cx: p.x, cy, r, a0: deg(-150), a1: deg(-30),
       color: "rgba(243, 239, 231, 0.72)", lineWidth: STROKE.thin, alpha: held ? 0.45 : 1,
-      dotAt: (Math.max(-1, Math.min(1, S.filter)) + 1) / 2, dotColor: S.color, dotHollow: held, dotRadius: 5,
+      dotAt, dotColor: S.color, dotHollow: held, dotRadius: 5,
     });
-    G.reg("filter-arc", "hand", box);
+    const dotA = deg(-150 + 120 * dotAt);
+    G.reg("filter-arc", "hand", { ...box, dot: { x: p.x + r * Math.cos(dotA), y: cy + r * Math.sin(dotA) } });
   }
   return { draw };
 }

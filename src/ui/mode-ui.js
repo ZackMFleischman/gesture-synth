@@ -169,7 +169,7 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
     "left/pos": ["left", "pos"], "right/pos": ["right", "pos"],
     "left/height": ["left", "height"], "right/height": ["right", "height"],
     "left/size": ["left", "size"], "right/size": ["right", "size"],
-    "right/pinch": ["right", "pinch"], "right/tilt": ["right", "tilt"],
+    "right/pinch": ["right", "pinch"], "right/tilt": ["right", "tilt"], "right/top": ["right", "top"],
   };
 
   // Subscribe only to what needs a push (mode changes, beat events); everything else is read with

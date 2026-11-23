@@ -224,6 +224,7 @@ export function displayDistance(a, b, view = IDENTITY_VIEW) {
 // ---- Frame construction ----
 
 const PALM = [0, 5, 9, 13, 17];
+const FINGERTIPS = [4, 8, 12, 16, 20];
 
 function isFist(landmarks, fingers, handSize, view) {
   if (fingers.index || fingers.middle || fingers.ring || fingers.pinky) return false;
@@ -289,6 +290,12 @@ export function buildHandFrame(landmarks, handedness, {
   let cx = 0, cy = 0;
   for (const i of PALM) { cx += landmarks[i].x; cy += landmarks[i].y; }
   const pos = toDisplay({ x: cx / PALM.length, y: cy / PALM.length }, view);
+  // Highest fingertip on screen (display space): at-hand feedback above the hand anchors to it.
+  let top = null;
+  for (const i of FINGERTIPS) {
+    const d = toDisplay(landmarks[i], view);
+    if (!top || d.y < top.y) top = d;
+  }
 
   return {
     handedness,
@@ -303,6 +310,7 @@ export function buildHandFrame(landmarks, handedness, {
     height: getVolumeFromHeight(landmarks),
     tilt: getHandHorizontalTilt(landmarks, handedness),
     pos,
+    top,
     handSize,
     t,
   };
@@ -310,8 +318,8 @@ export function buildHandFrame(landmarks, handedness, {
 
 // Bus names published by hand input (precomputed: no string building per frame).
 const SIDE_SIGNALS = {
-  Left: { height: "left/height", tilt: "left/tilt", pos: "left/pos", fist: "left/fist", pinch: "left/pinch", size: "left/size" },
-  Right: { height: "right/height", tilt: "right/tilt", pos: "right/pos", fist: "right/fist", pinch: "right/pinch", size: "right/size" },
+  Left: { height: "left/height", tilt: "left/tilt", pos: "left/pos", top: "left/top", fist: "left/fist", pinch: "left/pinch", size: "left/size" },
+  Right: { height: "right/height", tilt: "right/tilt", pos: "right/pos", top: "right/top", fist: "right/fist", pinch: "right/pinch", size: "right/size" },
 };
 
 const HISTORY_MS = 1000; // voicing history kept per hand (must exceed PINCH_LOOKBACK_MS)
@@ -377,6 +385,7 @@ export function createHandInput({ bus = sharedBus } = {}) {
     bus.set(s.height, f ? f.height : null);
     bus.set(s.tilt, f ? f.tilt : null);
     bus.set(s.pos, f ? f.pos : null);
+    bus.set(s.top, f ? f.top : null);
     bus.set(s.fist, f ? f.fist : false);
     bus.set(s.pinch, f ? f.pinch : false);
     bus.set(s.size, f ? f.handSize : null);
