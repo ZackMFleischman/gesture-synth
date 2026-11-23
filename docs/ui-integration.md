@@ -277,3 +277,13 @@ don't overlap each other; no persistent element (new or existing, except user-op
 - **Q4** Chip visibility: hide until output is turned on (proposed), or always show "Output off"?
 - **Q5** On narrow portrait screens the hands are close to the edges, so the Lead cursor/name and the right hand
   can overlap. A narrower mobile ladder (44px) may be needed once tested on a phone.
+
+## Lead decisions on the open questions (2026-11-22)
+- **Q1 chord-hand side:** keep the hand-following rule (master track on the edge where the chord hand is displayed). It is correct
+  whichever way MediaPipe labels hands. Do not change help text ("Left Hand") until confirmed with a real camera; the user will check
+  on the M1 instance.
+- **Q2 meter in Arp:** shows gate (the right-height control), as proposed.
+- **Q3 Settings pill:** replaced by the `Controls` toggle in the left column. Accepted (augments the existing column).
+- **Q4 connection chip:** hidden while output is off; the on/off switch + room code live in the Controls panel ("Output" row).
+  The chip appears when output is turned on. Pressing it opens the Controls panel.
+- **Q5 Lead on phones:** narrow the ladder below 520 px width; resolve during Lead integration.

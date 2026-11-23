@@ -113,3 +113,16 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
 - Always run with your own port: `PW_PORT=<assigned> npm test`. Node: `export PATH=$HOME/.local/node/bin:$PATH`.
 - Labs: standalone pages (`labs/<name>.html`, served by vite) for developing a component in isolation are encouraged.
 - Demo captures for the lead: save PNGs to `test-results/screens/` and videos (Playwright `video: "on"`) — report paths.
+
+## Accepted amendments (lead, after wave 1)
+- Bus: `bus.wants(name)`; `set()` notifies only on change (`Object.is`); `subscribe` filters accept name, `"prefix/*"`, array, or fn;
+  `ctx.param(name, {…, onChange})`.
+- ctx: `harmony.raw`, `harmony.notes()`, `harmony.describe()`, `harmony.keyVersion`; `audio.setVolume`, `audio.synth`.
+- Radial menu `update()` result also has `reason` ("empty"|"same-item"|"tracking-lost"), `opened`, `finished`; extras `snapshot()`, `reset()`,
+  `playTick()`, `registerMenuItemType()`. Choosing the current item = `cancelled` + `reason:"same-item"`.
+- Units: `pos` is 0..1 of the canvas per axis; distances that must be isotropic use canvas-width units (divide dy by aspect).
+- Mode plugin optional fields: `guide: [[emoji, label], …]` (right-hand gesture-guide rows) and `rightTrack: { param, label } | null`
+  (what the right edge track shows; Lead sets null and draws its ladder).
+- Layout contract: `clearArea()` from `src/ui/theme.js`; the master-volume track sits on the edge where the chord hand is displayed.
+- UI files: `src/ui/{theme.js, modes.css, edge-tracks.js, hand-overlays.js, readouts.js, badges.js, controls-panel.js, transport.js, guide.js}`;
+  chip in `src/output/status-chip.js`. Colors: Chords amber #e8a13d (unchanged), Arp #4fb3ff, Lead #c08cff, warning coral #ff5a5f.
