@@ -1,6 +1,8 @@
 // Lead mode sound: a monophonic lead voice (glide, retrigger, click-free envelope) and the left-hand chord as
 // a soft pad. Both feed ctx.audio.out (the pre-master bus: waveshaper -> shared tilt filter -> master volume),
-// so the shared filter and master volume apply. src/services/audio.js is NOT modified.
+// so the shared filter and master volume apply. It never touches the master gain (the router owns it).
+// Note events carry {freq, midi, voice, id}; `id` comes from `nextId` (ctx.audio.nextNoteId: app-wide unique),
+// and every note/on pairs with exactly one note/off of the same id.
 //
 // Levels leave headroom for the resonant filter: lead peak 0.2, pad <= ~0.16 total.
 
@@ -30,14 +32,19 @@ function hold(param, t) {
   }
 }
 
+const freqToMidi = (f) => Math.round(69 + 12 * Math.log2(f / 440));
+let localId = 0;
+
 /**
- * @param {object} audio ctx.audio facade ({ ac, out, synth? })
- * @param {{ bus?: object, voice?: string, padVoice?: string }} [opts]
+ * @param {object} audio ctx.audio facade ({ ac, out, synth?, nextNoteId? })
+ * @param {{ bus?: object, voice?: string, padVoice?: string, nextId?: () => number }} [opts]
  */
-export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = "pad" } = {}) {
+export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = "pad", nextId = audio.nextNoteId } = {}) {
+  const newId = typeof nextId === "function" ? nextId : () => `lead-${++localId}`;
   let nodes = null; // built lazily once the AudioContext exists
   let soundingFreq = null; // freq of the current lead note (null = released)
-  let pad = []; // [{ freq, gain, oscs }]
+  let soundingId = null; // note id of the current lead note
+  let pad = []; // [{ freq, gain, oscs, id }]
   let padKey = "";
 
   function waveform() {
@@ -73,8 +80,8 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
     return nodes;
   }
 
-  function emit(name, freq, t, extra) {
-    if (bus && bus.wants(name)) bus.emit(name, { freq, voice, ...extra }, t);
+  function emit(name, freq, t, id, extra) {
+    if (bus && bus.wants(name)) bus.emit(name, { freq, midi: freqToMidi(freq), voice, id, ...extra }, t);
   }
 
   // ---- Lead ----
@@ -98,9 +105,10 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
     n.osc.frequency.setValueAtTime(freq, ts);
     g.linearRampToValueAtTime(LEAD_PEAK, ts + ATTACK_S);
     g.setTargetAtTime(LEAD_SUSTAIN, ts + ATTACK_S, DECAY_TAU);
-    if (soundingFreq != null) emit("note/off", soundingFreq, t);
+    if (soundingFreq != null) emit("note/off", soundingFreq, t, soundingId);
     soundingFreq = freq;
-    emit("note/on", freq, ts, extra);
+    soundingId = newId();
+    emit("note/on", freq, ts, soundingId, extra);
   }
 
   /** Moves the sounding note to `freq` with a short portamento. */
@@ -110,9 +118,10 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
     const t = n.ac.currentTime;
     hold(n.osc.frequency, t);
     n.osc.frequency.exponentialRampToValueAtTime(freq, t + GLIDE_S);
-    emit("note/off", soundingFreq, t);
+    emit("note/off", soundingFreq, t, soundingId);
     soundingFreq = freq;
-    emit("note/on", freq, t, { glide: true, ...extra });
+    soundingId = newId();
+    emit("note/on", freq, t, soundingId, { glide: true, ...extra });
   }
 
   function noteOff() {
@@ -121,8 +130,9 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
     const t = n.ac.currentTime;
     hold(n.env.gain, t);
     n.env.gain.setTargetAtTime(0, t, RELEASE_TAU);
-    emit("note/off", soundingFreq, t);
+    emit("note/off", soundingFreq, t, soundingId);
     soundingFreq = null;
+    soundingId = null;
   }
 
   // ---- Pad ----
@@ -134,7 +144,7 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
     v.oscs[0].onended = () => {
       try { v.gain.disconnect(); } catch {}
     };
-    emit("note/off", v.freq, t, { voice: padVoice });
+    emit("note/off", v.freq, t, v.id, { voice: padVoice });
   }
 
   /** Holds `freqs` as the pad chord (crossfades from the previous one). null/[] = pad off. */
@@ -167,8 +177,9 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
       gain.connect(n.padTone);
       a.start(t);
       b.start(t);
-      pad.push({ freq, gain, oscs: [a, b] });
-      emit("note/on", freq, t, { voice: padVoice });
+      const id = newId();
+      pad.push({ freq, gain, oscs: [a, b], id });
+      emit("note/on", freq, t, id, { voice: padVoice });
     }
   }
 
@@ -180,7 +191,8 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
     if (!n) return;
     nodes = null;
     const t = n.ac.currentTime;
-    n.osc.stop(t + 0.5);
+    // Keep the graph until the pad has rung out (disconnecting padTone earlier would cut it: a click).
+    n.osc.stop(t + PAD_RELEASE_TAU * 8);
     n.osc.onended = () => {
       try { n.env.disconnect(); n.padTone.disconnect(); } catch {}
     };
