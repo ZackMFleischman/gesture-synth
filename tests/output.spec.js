@@ -70,6 +70,19 @@ async function openViz(browser, code) {
   return { context, page, errors };
 }
 
+/** Opens the Controls panel (if needed) and returns its Output row locators (Q4: the output setting lives here). */
+async function outputRow(page) {
+  if (await page.locator("#controlsPanel").isHidden()) await page.locator("#controlsToggle").click();
+  const row = page.locator('#controlsPanel [data-hook="output"]');
+  await expect(row).toBeVisible();
+  return {
+    row,
+    sw: row.locator('[data-control="output"]'),
+    code: row.locator('[data-hook="output-code"]'),
+    status: row.locator('[data-hook="output-status"]'),
+  };
+}
+
 const chipShot = (page, state) =>
   page.screenshot({ path: `${SCREENS}/output-chip-${state}.png`, clip: { x: 1280 - 420, y: 0, width: 420, height: 260 } });
 
@@ -81,14 +94,30 @@ async function chipLatency(synth, viz, state) {
   return changedAt - joinedAt;
 }
 
-test("chip: off → waiting → connected (< 1 s) → waiting on disconnect → reconnect", async ({ browser }) => {
+test("chip: off (hidden) → waiting → connected (< 1 s) → waiting on disconnect → reconnect", async ({ browser }) => {
   const s = await openSynth(browser);
   await s.setHands(leftHand(1), rightHand(1, { volume: 0.5 }));
+  // Q4: while the output is off the chip is hidden; the Controls panel's Output row is the setting.
   await expect(s.page.locator("#outputChip")).toHaveAttribute("data-state", "off");
-  await expect(s.page.locator("#outputChip .label")).toHaveText("Output off");
+  await expect(s.page.locator("#outputChip")).toBeHidden();
+  const r = await outputRow(s.page);
+  await expect(r.sw).toHaveAttribute("aria-pressed", "false");
+  await expect(r.status).toHaveText("Off");
+  await expect(r.code).toBeHidden();
   await chipShot(s.page, "off");
 
-  const code = await turnOn(s.page);
+  // Turn it on from the Output row: the chip appears (Waiting + code), the row shows the same code.
+  await r.sw.click();
+  await expect(s.page.locator("#outputChip")).toBeVisible();
+  await expect(s.page.locator("#outputChip")).toHaveAttribute("data-state", "waiting");
+  await expect(s.page.locator("#outputChip .label")).toHaveText(/^Code /);
+  const code = (await s.page.locator("#outputChip .label").textContent()).replace("Code ", "");
+  expect(code).toMatch(CODE_RE);
+  await expect(r.sw).toHaveAttribute("aria-pressed", "true");
+  await expect(r.code).toHaveText(code);
+  await expect(r.status).toHaveText("Waiting for a visualizer");
+  await s.page.locator("#controlsToggle").click(); // close the panel again
+  await expect(s.page.locator("#controlsPanel")).toBeHidden();
   await chipShot(s.page, "waiting");
 
   // Connect
@@ -124,15 +153,20 @@ test("chip: off → waiting → connected (< 1 s) → waiting on disconnect → 
   expect(reconnectMs).toBeLessThan(1000);
   await expect.poll(() => v2.page.evaluate(() => window.__viz.manifest.length)).toBeGreaterThan(0);
 
-  // Popover: output on/off + room code
+  // A press on the chip opens the settings = the Controls panel, whose Output row shows on + code + state.
   await s.page.locator("#outputChip").click();
-  await expect(s.page.locator("#outputPopover")).toBeVisible();
-  await expect(s.page.locator("#outputRoomCode")).toHaveText(code);
-  await expect(s.page.locator("#outputToggle")).toBeChecked();
-  await s.page.screenshot({ path: `${SCREENS}/output-chip-popover.png`, clip: { x: 1280 - 420, y: 0, width: 420, height: 420 } });
-  // Turning it off from the popover: chip off, visualizer drops to waiting.
-  await s.page.locator("#outputToggle").uncheck();
+  await expect(s.page.locator("#controlsPanel")).toBeVisible();
+  await expect(s.page.locator("#outputPopover")).toBeHidden(); // the chip's own popover is not used in the app
+  const r2 = await outputRow(s.page);
+  await expect(r2.sw).toHaveAttribute("aria-pressed", "true");
+  await expect(r2.code).toHaveText(code);
+  await expect(r2.status).toHaveText(/^Direct · \d+ ms$/);
+  await s.page.screenshot({ path: `${SCREENS}/output-controls-row.png`, clip: { x: 0, y: 0, width: 1280, height: 520 } });
+  // Turning it off from the Output row: chip off + hidden, visualizer drops to waiting.
+  await r2.sw.click();
   await expect(s.page.locator("#outputChip")).toHaveAttribute("data-state", "off");
+  await expect(s.page.locator("#outputChip")).toBeHidden();
+  await expect(r2.status).toHaveText("Off");
   await expect(v2.page.locator("#conn")).not.toHaveAttribute("data-state", "direct", { timeout: 5000 });
 
   report("chip-latency", { connectMs, disconnectMs, reconnectMs, delayLabelChangesIn2_5s: changes });
@@ -279,7 +313,7 @@ test("beat grid lights up when ctx.clock exists; visualizer beats follow the syn
     clock.bpm = 120;
     clock.start();
   });
-  // The grid is re-sent with the periodic state (the clock start itself is not a bus change).
+  // The clock start sends the grid at once (M3 3.3: clock.onTransport; timing checked in m3-output.spec.js).
   await expect.poll(() => v.page.evaluate(() => window.__viz.beatgrid?.running), { timeout: 5000 }).toBe(true);
   expect(await v.page.evaluate(() => window.__viz.beatgrid?.bpm)).toBe(120);
   expect(await v.page.evaluate(() => window.__viz.state["/gs/bpm"])).toBe(120);
@@ -458,14 +492,14 @@ test("demo video: connect → playing → disconnect → reconnect", async ({ br
     return v;
   };
   await play([[1, 1, 0.5, 0]]);
-  await s.page.locator("#outputChip").click(); // open settings
-  await s.page.waitForTimeout(400);
-  await s.page.locator("#outputToggle").check();
+  const r = await outputRow(s.page); // open settings (Controls panel, Q4)
+  await s.page.waitForTimeout(400); // let the video show the open panel
+  await r.sw.click();
   await expect(s.page.locator("#outputChip")).toHaveAttribute("data-state", "waiting");
-  await expect(s.page.locator("#outputRoomCode")).toHaveText(CODE_RE);
-  const code = (await s.page.locator("#outputRoomCode").textContent()).trim();
-  await s.page.waitForTimeout(800);
-  await s.page.mouse.click(640, 400); // close popover
+  await expect(r.code).toHaveText(CODE_RE);
+  const code = (await r.code.textContent()).trim();
+  await s.page.waitForTimeout(800); // the code stays readable on video
+  await s.page.locator("#controlsToggle").click(); // close the panel
   const v = await openTrackedViz();
   await expect(s.page.locator("#outputChip")).toHaveAttribute("data-state", "connected");
   await play([[1, 1, 0.5, 0], [4, 2, 0.7, 0.3], [5, 3, 0.8, 0.6], [6, 1, 0.6, -0.4], [2, 4, 0.5, 0], [5, 3, 0.75, 0.2]]);
@@ -488,19 +522,32 @@ test("demo video: connect → playing → disconnect → reconnect", async ({ br
 test.describe("mobile viewport", () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
-  test("chip stays on-screen and clear of the existing controls", async ({ page }) => {
+  test("chip: hidden while off; once on it stays on-screen (as a dot) and clear of the existing + new controls", async ({ page }) => {
     await page.goto(`/?mockHands&signal=${encodeURIComponent(SIGNAL)}`);
     await page.locator("#startOverlay").click();
     await page.waitForFunction(() => document.getElementById("webcam").videoWidth > 0);
+    await expect(page.locator("#outputChip")).toBeHidden();
+    await page.evaluate(() => window.__gsTest.output.setOutput(true));
+    await expect(page.locator("#outputChip")).toBeVisible();
+    await expect(page.locator("#outputChip")).toHaveAttribute("data-state", "waiting");
     await page.locator("#guideToggle").click();
     const chip = await page.locator("#outputChip").boundingBox();
     expect(chip.x).toBeGreaterThanOrEqual(0);
     expect(chip.x + chip.width).toBeLessThanOrEqual(390);
+    expect(chip.width).toBeLessThanOrEqual(40); // D12: dot only below 520 px
     const overlaps = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
-    for (const id of ["keySelect", "toneSelect", "guideToggle", "gestureGuide", "volumeMeter", "distortionDisplay",
-      "chordDisplay", "qualityDisplay", "helpButton"]) {
+    const ids = ["keySelect", "toneSelect", "guideToggle", "gestureGuide", "volumeMeter", "distortionDisplay",
+      "chordDisplay", "qualityDisplay", "helpButton"];
+    // ...and the modes UI chrome (mode badge, Controls toggle, transport, ...: every visible [data-gs-kind] element).
+    const extra = await page.evaluate(() => [...document.querySelectorAll("[data-gs-kind]")]
+      .filter((e) => e.id && e.id !== "outputChip" && e.getClientRects().length && getComputedStyle(e).display !== "none")
+      .map((e) => e.id));
+    expect(extra.length).toBeGreaterThan(0);
+    for (const id of [...ids, ...extra]) {
       const box = await page.locator(`#${id}`).boundingBox();
+      if (!box) continue;
       expect(overlaps(chip, box), `#outputChip overlaps #${id}`).toBe(false);
     }
+    await page.screenshot({ path: `${SCREENS}/output-chip-mobile.png`, clip: { x: 0, y: 0, width: 390, height: 200 } });
   });
 });

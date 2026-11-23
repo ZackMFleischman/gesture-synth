@@ -1,8 +1,10 @@
 // Screen controls (docs/ui-integration.md D8): a `Controls` toggle next to "Open Guide" opens a panel in
 // the gesture guide's slot (the two are mutually exclusive). Rows:
 //   Mode (segmented; router.setMode) | the active mode's own rows (mode.controls(container, ctx)) |
-//   Master vol | Output (on/off + room code through the M3 status chip's API when `output` is given;
-//   setOutputRow(render) replaces the row).
+//   Master vol | Output (on/off switch + room code + connection state + "New code", through the M3 status
+//   chip's API when `output` is given; setOutputRow(render) replaces the row).
+// Lead decision Q4 (docs/ui-integration.md): this row is THE output setting. The chip (top right) is
+// hidden while the output is off and, once on, a press on it opens this panel (output.setPressHandler).
 // The mode rows live in main.js's #modeControls (the router mounts/unmounts them on mode change); the
 // panel adopts that node. Without it the panel calls mode.controls() itself.
 //
@@ -89,27 +91,43 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc, output
   function defaultOutputRow(c) {
     c.innerHTML =
       '<button type="button" class="gs-switch" aria-pressed="false" aria-label="Visualizer output" data-control="output"></button>' +
-      '<span class="gs-note" data-hook="output-status">Off</span>';
+      '<span class="gs-code" data-hook="output-code" aria-label="Room code" hidden></span>' +
+      '<span class="gs-note" data-hook="output-status">Off</span>' +
+      '<button type="button" class="gs-btn gs-mini" data-control="output-new-code" title="New room code (drops connected visualizers)" hidden>New</button>';
     const sw = c.querySelector(".gs-switch");
-    const note = c.querySelector(".gs-note");
+    const code = c.querySelector('[data-hook="output-code"]');
+    const note = c.querySelector('[data-hook="output-status"]');
+    const fresh = c.querySelector('[data-control="output-new-code"]');
     if (!output) {
       sw.disabled = true;
       note.textContent = "Off · not available";
       return null;
     }
     sw.addEventListener("click", () => output.setOutput(output.status?.state === "off"));
+    fresh.addEventListener("click", () => output.newRoom?.());
     outputRefresh = () => {
       const st = output.status || { state: "off" };
       const on = st.state !== "off";
+      const live = st.state === "connected" || st.state === "relayed";
+      const delay = live && typeof st.rttMs === "number" ? ` · ${Math.max(1, Math.round(st.rttMs / 2))} ms` : "";
       const text =
         !on ? "Off" :
-        st.state === "connected" || st.state === "relayed" ? `${st.state === "connected" ? "Direct" : "Relayed"} · code ${st.room ?? "----"}` :
-        st.room ? `Code ${st.room}` : "Waiting…";
+        live ? `${st.state === "connected" ? "Direct" : "Relayed"}${delay}` :
+        st.room ? "Waiting for a visualizer" : "Connecting…";
+      const codeText = on && st.room ? st.room : "";
       if (sw.getAttribute("aria-pressed") !== String(on)) sw.setAttribute("aria-pressed", String(on));
       if (note.textContent !== text) note.textContent = text;
+      if (code.textContent !== codeText) code.textContent = codeText;
+      if (code.hidden !== !codeText) code.hidden = !codeText;
+      if (fresh.hidden !== !on) fresh.hidden = !on;
+      c.dataset.state = st.state === "connecting" ? "waiting" : st.state;
     };
     outputRefresh();
-    return () => (outputRefresh = null);
+    const offStatus = output.onStatus?.(() => outputRefresh?.()) || null;
+    return () => {
+      offStatus?.();
+      outputRefresh = null;
+    };
   }
   function setOutputRow(render) {
     outputCleanup?.();
@@ -247,6 +265,8 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc, output
     if (restoreFocus || hadFocus) toggle.focus({ preventScroll: true });
   }
   toggle.addEventListener("click", () => (isOpen() ? close() : open()));
+  // Q4: a press on the output chip opens this panel (its Output row is the output setting).
+  output?.setPressHandler?.(() => open({ focus: false }));
   // controls.js toggles the guide first (it subscribed earlier); then we close the panel if the guide opened.
   guideToggle.setAttribute("aria-expanded", String(guideOpen()));
   guideToggle.setAttribute("aria-controls", "gestureGuide");
@@ -309,6 +329,7 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc, output
       doc.removeEventListener("keydown", onKey);
       ownCleanup?.();
       outputCleanup?.();
+      output?.setPressHandler?.(null);
       if (routerHost) doc.getElementById("stage")?.append(routerHost);
       toggle.remove();
       panel.remove();

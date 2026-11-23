@@ -1,19 +1,17 @@
-// Output status chip (spec "Connection status (Milestone 3)", mock §6) + its settings popover.
+// Output status chip (spec "Connection status (Milestone 3)", mock §6) + the output on/off API.
 //
-//   Off        outline pill, empty dot,        "Output off"
+//   Off        hidden (lead decision Q4, docs/ui-integration.md: the on/off switch + room code live in
+//              the Controls panel "Output" row; the chip only shows once the output is on)
 //   Waiting    dashed outline, empty dot,      "Code K7QF-2M"
 //   Connected  green tint + green dot,         "Direct, 24 ms"
 //   Relayed    amber tint + amber dot,         "Relayed, 85 ms"
 //
 // The delay shown is the one-way estimate (RTT / 2) and changes at most once per second.
-// A press opens the settings: output on/off + room code.
+// A press opens the settings. In the app that is the Controls panel (setPressHandler(), installed by
+// src/ui/controls-panel.js); without a handler (standalone use) the chip opens its own small popover.
 //
 // This module is tiny and does no per-frame work. The WebRTC output (./webrtc-output.js) is
 // loaded with a dynamic import() ONLY when the user turns the output on.
-//
-// TODO(ui-integration): placement is provisional — just below the volume meter + "Filter: x%"
-// readout at the top right. docs/ui-integration.md (UI pass) finalizes where the chip lives
-// (the mock puts it at the very top right, next to the chord).
 
 import { defaultSignalUrl, ROOM_CODE_RE } from "./protocol.js";
 
@@ -31,6 +29,7 @@ const CSS = `
   text-shadow: 0 1px 2px rgba(0,0,0,0.8);
   transition: background-color 150ms, border-color 150ms;
 }
+#outputChip[hidden] { display: none !important; }
 #outputChip:focus-visible { outline: 2px solid rgba(235,235,235,0.8); outline-offset: 2px; }
 #outputChip .dot { width: 9px; height: 9px; border-radius: 50%; box-sizing: border-box;
   border: 1.5px solid currentColor; background: transparent; flex: none; }
@@ -85,6 +84,8 @@ export function mountStatusChip({
   const chip = doc.createElement("button");
   chip.id = "outputChip";
   chip.type = "button";
+  chip.dataset.gsKind = "status"; // layout tests find the new top-row DOM by this (docs/ui-integration.md)
+  chip.hidden = true; // off until the output is turned on (Q4)
   chip.setAttribute("aria-haspopup", "dialog");
   chip.setAttribute("aria-expanded", "false");
   chip.innerHTML = `<span class="dot"></span><span class="label"></span>`;
@@ -118,6 +119,8 @@ export function mountStatusChip({
   let delayShownAt = -Infinity;
   let lastState = null;
   let stateChangedAt = Date.now();
+  let pressHandler = null;
+  const listeners = new Set();
 
   function delayText() {
     const rtt = status.rttMs;
@@ -144,6 +147,9 @@ export function mountStatusChip({
     lastState = s;
     if (chip.dataset.state !== visual) stateChangedAt = Date.now();
     chip.dataset.state = visual;
+    const hide = s === "off";
+    if (chip.hidden !== hide) chip.hidden = hide;
+    if (hide) openPopover(false);
     if (labelEl.textContent !== text) labelEl.textContent = text;
     chip.title = `Visualizer output: ${s}`;
 
@@ -162,6 +168,9 @@ export function mountStatusChip({
   function onStatus(s) {
     status = s;
     render();
+    for (const cb of listeners) {
+      try { cb(status); } catch (e) { console.error(e); }
+    }
     const live = s.state === "connected" || s.state === "relayed";
     if (live && !tick) tick = setInterval(render, DELAY_UPDATE_MS);
     if (!live && tick) { clearInterval(tick); tick = null; }
@@ -205,7 +214,8 @@ export function mountStatusChip({
   }
   chip.addEventListener("click", (e) => {
     e.stopPropagation();
-    openPopover(pop.classList.contains("hidden"));
+    if (pressHandler) pressHandler();
+    else openPopover(pop.classList.contains("hidden"));
   });
   pop.addEventListener("click", (e) => e.stopPropagation());
   doc.addEventListener("click", () => openPopover(false));
@@ -220,6 +230,21 @@ export function mountStatusChip({
     setOutput(on) {
       toggleWanted = !!on;
       return setOutput(toggleWanted);
+    },
+    /**
+     * What a press on the chip does (the app: open the Controls panel). With a handler installed the
+     * chip's own popover is never shown. Pass null to go back to the popover.
+     */
+    setPressHandler(fn) {
+      pressHandler = typeof fn === "function" ? fn : null;
+      if (pressHandler) openPopover(false);
+    },
+    /** Ask the output for a fresh room code (drops current visualizers). No-op while off. */
+    newRoom() { if (output) output.newRoom(); },
+    /** cb(status) on every status change. Returns unsubscribe. */
+    onStatus(cb) {
+      listeners.add(cb);
+      return () => listeners.delete(cb);
     },
     get output() { return output; },
     get status() { return status; },
