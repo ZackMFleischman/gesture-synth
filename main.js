@@ -12,10 +12,30 @@ const volumeBarEls = Array.from(document.querySelectorAll(".vol-bar"));
 const qualityDisplayEl = document.getElementById("qualityDisplay");
 const startOverlayEl = document.getElementById("startOverlay");
 
+// ---- Analytics (Microsoft Clarity) ----
+// Only loaded from production builds served on a real host, never in local dev or `vite preview`.
+const IS_LOCALHOST = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+if (import.meta.env.PROD && !IS_LOCALHOST) {
+  (function(c,l,a,r,i,t,y){
+    c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+    t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+    y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+  })(window, document, "clarity", "script", "xzz1v75lj8");
+}
+
 function trackClarityEvent(eventName) {
   if (typeof window.clarity === "function") {
     window.clarity("event", eventName);
   }
+}
+
+// ---- Dev-only test hook ----
+// With ?mockHands in the URL (dev server only), MediaPipe is skipped and hand
+// results are read from window.__gsTest.results so automated tests can drive gestures.
+const MOCK_HANDS =
+  import.meta.env.DEV && new URLSearchParams(location.search).has("mockHands");
+if (import.meta.env.DEV) {
+  window.__gsTest = { results: { landmarks: [], handedness: [] } };
 }
 
 // NEW
@@ -680,6 +700,7 @@ class SynthEngine {
 }
 
 const synth = new SynthEngine();
+if (import.meta.env.DEV) window.__gsTest.synth = synth;
 
 let hasPlayedFirstSound = false;
 let lastTrackedChord = null;
@@ -776,7 +797,9 @@ async function main() {
   resizeCanvas();
   window.addEventListener("resize", resizeCanvas);
 
-  const handLandmarker = await setupHandLandmarker();
+  const handLandmarker = MOCK_HANDS
+    ? { detectForVideo: () => window.__gsTest.results }
+    : await setupHandLandmarker();
 
   let lastVideoTime = -1;
   
