@@ -6,14 +6,46 @@
 
 import { bus as sharedBus } from "../core/bus.js";
 
-// ---- Tunable thresholds (the 0.3 gesture test page will tune these) ----
+// ---- Tunable thresholds (live-tuned on labs/gesture-test.html) ----
+// `export let` = live bindings: setThresholds() changes what every importer sees.
 
 /** Fist: every index..pinky tip must be closer to the wrist than this many hand sizes. */
-export const FIST_TIP_RATIO = 1.5;
+export let FIST_TIP_RATIO = 1.5;
 /** Pinch starts when thumb-tip <-> index-tip distance (in hand sizes) drops below this... */
-export const PINCH_START = 0.3;
+export let PINCH_START = 0.3;
 /** ...and ends only when it rises above this (hysteresis). */
-export const PINCH_END = 0.45;
+export let PINCH_END = 0.45;
+/**
+ * Thumb hysteresis half-band, in hand sizes, on the thumb-tip vs thumb-IP x offset (outward = +).
+ * Used only by stateful callers (createHandInput); a lone frame keeps the plain x compare.
+ */
+export let THUMB_BAND = 0.08;
+/** On pinch start, voicingBeforePinch = the voicingCount this many ms before the start. */
+export let PINCH_LOOKBACK_MS = 300;
+
+export const DEFAULT_THRESHOLDS = Object.freeze({
+  FIST_TIP_RATIO, PINCH_START, PINCH_END, THUMB_BAND, PINCH_LOOKBACK_MS,
+});
+
+/** Current threshold values (plain object copy). */
+export function getThresholds() {
+  return { FIST_TIP_RATIO, PINCH_START, PINCH_END, THUMB_BAND, PINCH_LOOKBACK_MS };
+}
+
+/**
+ * Live-edit thresholds at runtime (gesture test page). Unknown keys / non-numbers are ignored;
+ * PINCH_END is kept >= PINCH_START. setThresholds(DEFAULT_THRESHOLDS) resets.
+ */
+export function setThresholds(t = {}) {
+  const num = (v) => typeof v === "number" && Number.isFinite(v);
+  if (num(t.FIST_TIP_RATIO)) FIST_TIP_RATIO = t.FIST_TIP_RATIO;
+  if (num(t.PINCH_START)) PINCH_START = t.PINCH_START;
+  if (num(t.PINCH_END)) PINCH_END = t.PINCH_END;
+  if (num(t.THUMB_BAND)) THUMB_BAND = t.THUMB_BAND;
+  if (num(t.PINCH_LOOKBACK_MS)) PINCH_LOOKBACK_MS = t.PINCH_LOOKBACK_MS;
+  if (PINCH_END < PINCH_START) PINCH_END = PINCH_START;
+  return getThresholds();
+}
 
 // ---- Existing gesture checks (moved unchanged from main.js) ----
 
@@ -46,13 +78,17 @@ export function getChordQuality(landmarks) {
   return middleMcp.x > wrist.x ? "minor" : "major";
 }
 
-/** Left-hand finger shape -> roman numeral (case from getChordQuality), or null. */
-export function classifyChord(landmarks, handedness) {
-  const thumb = isThumbExtended(landmarks, handedness);
-  const index = isFingerExtended(landmarks, "index");
-  const middle = isFingerExtended(landmarks, "middle");
-  const ring = isFingerExtended(landmarks, "ring");
-  const pinky = isFingerExtended(landmarks, "pinky");
+/**
+ * Left-hand finger shape -> roman numeral (case from getChordQuality), or null.
+ * `fingers` (optional, e.g. HandFrame.fingers) supplies the finger states so the
+ * stateful thumb hysteresis applies; without it they are recomputed from landmarks.
+ */
+export function classifyChord(landmarks, handedness, fingers = null) {
+  const thumb = fingers ? fingers.thumb : isThumbExtended(landmarks, handedness);
+  const index = fingers ? fingers.index : isFingerExtended(landmarks, "index");
+  const middle = fingers ? fingers.middle : isFingerExtended(landmarks, "middle");
+  const ring = fingers ? fingers.ring : isFingerExtended(landmarks, "ring");
+  const pinky = fingers ? fingers.pinky : isFingerExtended(landmarks, "pinky");
 
   const quality = getChordQuality(landmarks);
 
@@ -200,26 +236,55 @@ function isFist(landmarks, fingers, handSize, view) {
 }
 
 /**
- * Builds a HandFrame. `wasPinching` carries the hysteresis state for this hand.
+ * Thumb tip vs thumb IP x offset in hand sizes, positive = outward (away from the palm),
+ * i.e. > 0 exactly when isThumbExtended() is true.
+ */
+export function thumbOffset(landmarks, handedness, handSize, view = IDENTITY_VIEW) {
+  const outward = handedness === "Right" ? 1 : -1;
+  const dx = ((landmarks[4].x - landmarks[3].x) * view.srcW) / view.sHeight;
+  return handSize > 0 ? (outward * dx) / handSize : outward * dx;
+}
+
+/**
+ * Builds a HandFrame.
+ *  - `wasPinching` carries the pinch hysteresis state for this hand.
+ *  - `wasThumb` (optional) carries the thumb hysteresis state; omitted = plain x compare.
+ *  - `voicingBeforePinch` (optional) is filled in by createHandInput; omitted = voicingCount while pinching.
+ *
+ * Order matters: the pinch is decided BEFORE the finger count, because a pinch curls the
+ * index onto the thumb and the count then reads 3 (middle+ring+pinky). While `pinch` is
+ * true, consumers should use `voicingBeforePinch`, not `voicingCount`.
  * @returns HandFrame (see docs/architecture.md)
  */
-export function buildHandFrame(landmarks, handedness, { t = 0, view = IDENTITY_VIEW, wasPinching = false } = {}) {
+export function buildHandFrame(landmarks, handedness, {
+  t = 0, view = IDENTITY_VIEW, wasPinching = false, wasThumb, voicingBeforePinch,
+} = {}) {
+  // 1. Pinch first: thumb-index distance in hand sizes, two thresholds, needs the middle finger up.
+  const handSize = displayDistance(landmarks[0], landmarks[9], view);
+  const pinchDistance = handSize > 0 ? displayDistance(landmarks[4], landmarks[8], view) / handSize : Infinity;
+  const middle = isFingerExtended(landmarks, "middle");
+  let pinch = false;
+  if (middle) {
+    pinch = wasPinching ? pinchDistance <= PINCH_END : pinchDistance < PINCH_START;
+  }
+
+  // 2. Finger states and counts.
+  let thumb;
+  if (wasThumb === undefined) {
+    thumb = isThumbExtended(landmarks, handedness);
+  } else {
+    const off = thumbOffset(landmarks, handedness, handSize, view);
+    thumb = wasThumb ? off > -THUMB_BAND : off > THUMB_BAND;
+  }
   const fingers = {
-    thumb: isThumbExtended(landmarks, handedness),
+    thumb,
     index: isFingerExtended(landmarks, "index"),
-    middle: isFingerExtended(landmarks, "middle"),
+    middle,
     ring: isFingerExtended(landmarks, "ring"),
     pinky: isFingerExtended(landmarks, "pinky"),
   };
   const voicingCount = (fingers.index ? 1 : 0) + (fingers.middle ? 1 : 0) + (fingers.ring ? 1 : 0) + (fingers.pinky ? 1 : 0);
   const fingerCount = voicingCount + (fingers.thumb ? 1 : 0);
-
-  const handSize = displayDistance(landmarks[0], landmarks[9], view);
-  const pinchDistance = handSize > 0 ? displayDistance(landmarks[4], landmarks[8], view) / handSize : Infinity;
-  let pinch = false;
-  if (fingers.middle) {
-    pinch = wasPinching ? pinchDistance <= PINCH_END : pinchDistance < PINCH_START;
-  }
 
   let cx = 0, cy = 0;
   for (const i of PALM) { cx += landmarks[i].x; cy += landmarks[i].y; }
@@ -234,6 +299,7 @@ export function buildHandFrame(landmarks, handedness, { t = 0, view = IDENTITY_V
     fist: isFist(landmarks, fingers, handSize, view),
     pinch,
     pinchDistance,
+    voicingBeforePinch: pinch ? (voicingBeforePinch ?? voicingCount) : null,
     height: getVolumeFromHeight(landmarks),
     tilt: getHandHorizontalTilt(landmarks, handedness),
     pos,
@@ -248,8 +314,29 @@ const SIDE_SIGNALS = {
   Right: { height: "right/height", tilt: "right/tilt", pos: "right/pos", fist: "right/fist", pinch: "right/pinch" },
 };
 
+const HISTORY_MS = 1000; // voicing history kept per hand (must exceed PINCH_LOOKBACK_MS)
+
+/** Per-hand state carried between frames. Reset when the hand is lost. */
+function newHandState() {
+  return { pinch: false, thumb: undefined, latched: null, history: [] };
+}
+
+/** voicing at (t - PINCH_LOOKBACK_MS): latest sample at/before then, else the oldest, else null. */
+function voicingAt(history, t) {
+  const target = t - PINCH_LOOKBACK_MS;
+  let found = null;
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].t <= target) { found = history[i]; break; }
+  }
+  if (!found && history.length) found = history[0];
+  return found ? found.v : null;
+}
+
 /**
- * Stateful hand input: keeps pinch hysteresis per hand and publishes hand values.
+ * Stateful hand input: keeps pinch + thumb hysteresis and a short voicing history per hand,
+ * and publishes hand values. On a pinch start it latches `voicingBeforePinch` from
+ * PINCH_LOOKBACK_MS earlier (history stores the latched value during pinches, so a quick
+ * re-pinch restores the pre-pinch voicing too).
  * process() returns { frames, left, right } (left/right = last frame with that label, like the old code).
  */
 export function createHandInput({ bus = sharedBus } = {}) {
@@ -261,8 +348,25 @@ export function createHandInput({ bus = sharedBus } = {}) {
     bus.declare(side.pinch, { type: "state", owner: "hand-input" });
   }
 
-  const pinching = { Left: false, Right: false };
+  const state = { Left: newHandState(), Right: newHandState() };
   let view = IDENTITY_VIEW;
+
+  function frameFor(landmarks, handedness, t) {
+    const s = state[handedness];
+    if (!s) return buildHandFrame(landmarks, handedness, { t, view });
+    // Pinch decided first (no latched voicing yet), then latch on the rising edge.
+    const f = buildHandFrame(landmarks, handedness, { t, view, wasPinching: s.pinch, wasThumb: s.thumb });
+    if (f.pinch) {
+      if (!s.pinch || s.latched === null) s.latched = voicingAt(s.history, t) ?? f.voicingCount;
+      f.voicingBeforePinch = s.latched;
+    } else {
+      s.latched = null;
+    }
+    const h = s.history;
+    h.push({ t, v: f.pinch ? s.latched : f.voicingCount });
+    while (h.length > 1 && h[0].t < t - HISTORY_MS) h.shift();
+    return f;
+  }
 
   function publish(side, f) {
     const s = SIDE_SIGNALS[side];
@@ -284,13 +388,15 @@ export function createHandInput({ bus = sharedBus } = {}) {
       let right = null;
       results.landmarks.forEach((landmarks, i) => {
         const handedness = results.handedness[i][0].categoryName;
-        const f = buildHandFrame(landmarks, handedness, { t, view, wasPinching: pinching[handedness] || false });
+        const f = frameFor(landmarks, handedness, t);
         frames.push(f);
         if (handedness === "Left") left = f;
         if (handedness === "Right") right = f;
       });
-      pinching.Left = left ? left.pinch : false;
-      pinching.Right = right ? right.pinch : false;
+      for (const [side, f] of [["Left", left], ["Right", right]]) {
+        if (f) { state[side].pinch = f.pinch; state[side].thumb = f.fingers.thumb; }
+        else state[side] = newHandState();
+      }
       publish("Left", left);
       publish("Right", right);
       return { frames, left, right };

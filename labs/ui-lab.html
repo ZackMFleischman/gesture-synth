@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Gesture Synth UI Lab</title>
+<!-- index.html's own <style> is injected before this link at runtime (see ui-lab.js), so the lab always
+     shows the REAL existing UI; ui-lab.css holds only the proposed additive styles. -->
+<link rel="stylesheet" href="./ui-lab.css" />
+<style>
+  /* Lab chrome only (never shipped). */
+  #labBar {
+    position: fixed; top: 6px; left: 50%; transform: translateX(-50%);
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 4px;
+    max-width: min(760px, 70vw); padding: 5px; border-radius: 8px;
+    background: rgba(0,0,0,0.7); z-index: 50; font: 11px monospace;
+  }
+  #labBar button { font: 11px monospace; background: #222; color: #ccc; border: 1px solid #444; border-radius: 3px; padding: 2px 6px; cursor: pointer; }
+  #labBar button.on { color: #111; background: #e8a13d; border-color: #e8a13d; }
+  body.lab-clean #labBar { display: none; }
+</style>
+</head>
+<body>
+<div id="labBar"></div>
+<script type="module" src="./ui-lab.js"></script>
+</body>
+</html>
