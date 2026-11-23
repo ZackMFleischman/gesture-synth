@@ -289,3 +289,8 @@ don't overlap each other; no persistent element (new or existing, except user-op
 - **Q4 connection chip:** hidden while output is off; the on/off switch + room code live in the Controls panel ("Output" row).
   The chip appears when output is turned on. Pressing it opens the Controls panel.
 - **Q5 Lead on phones:** narrow the ladder below 520 px width; resolve during Lead integration.
+
+## Simplifications after real-camera testing (ws/simplify, 2026-11-22)
+- **Fixed height band:** both edge tracks (master and the right track) span exactly the middle 75 % of the screen height
+  (12.5 % .. 87.5 %, `BAND` in `src/input/reach-zones.js`), the band the palm height maps over; the marker is level with
+  the palm and stops at the band ends. Lead's ladder spans the same band. The Controls "Range" row is gone.

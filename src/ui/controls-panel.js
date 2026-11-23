@@ -18,10 +18,6 @@
 
 import { MIN_BPM, MAX_BPM } from "../services/clock.js";
 import { AXES } from "../core/axes.js";
-import { RANGE_PRESETS, DEFAULT_RANGE } from "../input/reach-zones.js";
-
-/** Range (reach-zone preset) labels, in display order. */
-const RANGE_LABELS = { comfort: "Comfort", wide: "Wide", compact: "Compact" };
 
 const MOVE = 0.05; // hand height change (0..1) that hands control back to the gesture
 const HAND_SVG =
@@ -55,7 +51,6 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc, output
     <div class="gs-mode-host"></div>
     <div class="gs-sep"></div>
     <span class="gs-k">Master vol</span><span class="gs-v gs-master-row"><input class="gs-range master" type="range" min="0" max="1" step="0.01" aria-label="Master volume" data-control="master"></span>
-    <span class="gs-k">Range</span><span class="gs-v"><div class="gs-seg" data-control="range" role="group" aria-label="Hand range"></div></span>
     ${AXES.map((a) => `<span class="gs-k">${a.label}</span><span class="gs-v gs-axis-row"><button type="button" class="gs-switch" aria-pressed="true" aria-label="${a.guide}" data-control="axis-${a.id}"></button><span class="gs-note">${a.guide.split(" → ")[0]}</span></span>`).join("")}
     <span class="gs-k">Output</span><span class="gs-v" data-hook="output"></span>`;
   (guideEl || toggle).after(panel);
@@ -65,30 +60,13 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc, output
   const master = panel.querySelector('[data-control="master"]');
   const outputEl = panel.querySelector('[data-hook="output"]');
 
-  // ---- Range (reach zone preset, bus `reach/range`) + sideways axes on/off (bus `<id>/on`, src/core/axes.js) ----
-  const rangeSeg = panel.querySelector('[data-control="range"]');
-  for (const id of Object.keys(RANGE_PRESETS)) {
-    const b = doc.createElement("button");
-    b.type = "button";
-    b.dataset.value = id;
-    b.textContent = RANGE_LABELS[id] || id;
-    b.addEventListener("click", () => bus.set("reach/range", id));
-    rangeSeg.append(b);
-  }
+  // ---- Sideways axes on/off (bus `<id>/on`, src/core/axes.js) ----
   const axisSwitches = AXES.map((a) => {
     const sw = panel.querySelector(`[data-control="axis-${a.id}"]`);
     sw.addEventListener("click", () => bus.set(`${a.id}/on`, bus.get(`${a.id}/on`) === false));
     return { a, sw };
   });
   function syncSettings() {
-    const range = bus.get("reach/range") || DEFAULT_RANGE;
-    for (const b of rangeSeg.children) {
-      const on = b.dataset.value === range;
-      if (b.classList.contains("on") !== on) {
-        b.classList.toggle("on", on);
-        b.setAttribute("aria-pressed", String(on));
-      }
-    }
     for (const { a, sw } of axisSwitches) {
       const on = String(bus.get(`${a.id}/on`) !== false);
       if (sw.getAttribute("aria-pressed") !== on) sw.setAttribute("aria-pressed", on);

@@ -6,13 +6,15 @@
 //    A screen control that wins over the hand (ui/override) also shows as hollow (value) + solid (hand).
 //  - Hand lost: that hand's markers dashed in the warning color, a "Hand lost" plate at the edge and a
 //    ghost ring where the hand was last seen. Ring and plate fade out after MOTION.lostHold + lostFade.
-// Markers are level with the hand's palm (no numbers). Each track spans that hand's vertical reach zone (bus
-// `left|right/zone`, src/input/reach-zones.js: palm y for value 1 at its top, 0 at its bottom), so the marker sits
-// level with the palm everywhere in the band and stops at the band's ends; full height until a zone is known.
+// Markers are level with the hand's palm (no numbers). Each track spans exactly the fixed height band (the middle 75 %
+// of the screen, src/input/reach-zones.js BAND: palm y for value 1 at its top, 0 at its bottom; the hand's bus
+// `left|right/zone` carries the same limits), so the marker sits level with the palm everywhere in the band and stops
+// at the band's ends.
 
 import {
   COLORS, LAYOUT, MOTION, STROKE, edgeTrackX, drawEdgeTrack, drawLabel, drawPlate, drawRing, FONT,
 } from "./theme.js";
+import { BAND } from "../input/reach-zones.js";
 
 /** Opacity of the "hand lost" ring + plate, `ms` after the hand counted as lost: 1, then fades to 0. */
 export function lostAlpha(ms) {
@@ -36,7 +38,7 @@ export function createEdgeTracks({ S, bus }) {
 
   function trackBounds(G, zone = null) {
     if (zone && zone.bottom > zone.top) return { top: zone.top * G.H, bottom: zone.bottom * G.H };
-    return { top: LAYOUT.trackTop, bottom: G.H - LAYOUT.trackBottom };
+    return { top: BAND.TOP * G.H, bottom: BAND.BOTTOM * G.H };
   }
   const valueToY = (G, v, zone = null) => {
     const { top, bottom } = trackBounds(G, zone);

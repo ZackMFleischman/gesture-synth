@@ -1,12 +1,11 @@
 // Reach zones + sideways axes in the real app (?mockHands).
-// User feedback: "For the up and down on the right hand (re: the gate on the arp mode for instance) I can't reach all
-// the way to the top or bottom because my hand starts to get cut off" -> height maps over the band where the WHOLE
-// hand stays in frame (src/input/reach-zones.js). Plus: right hand sideways = Drive, left hand sideways = Space
-// (src/core/axes.js), each with a neutral middle, a Controls switch and an at-hand tick scale.
+// User feedback after real-camera testing: the up/down range "keeps changing. It should just be 75% of the size of the
+// screen." -> height = palm y over the FIXED middle 75 % of the display height (12.5 % = 1 .. 87.5 % = 0), both hands
+// (src/input/reach-zones.js BAND). Plus: right hand sideways = Drive, left hand sideways = Space (src/core/axes.js),
+// each with a neutral middle, a Controls switch and an at-hand tick scale.
 import fs from "node:fs";
 import { test, expect, SCREENS_DIR } from "./fixtures.js";
 import { leftHand, rightHand, hand, DESKTOP_VIEW } from "./helpers/hands.js";
-import { toDisplay } from "../src/input/hand-input.js";
 import { recordAudio, rms, spectrum, centroid, writeWav } from "./helpers/audio.js";
 import { createScreencast } from "./helpers/screencast.js";
 
@@ -15,35 +14,44 @@ const dB = (x) => 20 * Math.log10(x);
 const bus = (page, name) => page.evaluate((n) => window.__gsTest.bus.get(n), name);
 const shot = (page, state) => page.screenshot({ path: `${SCREENS_DIR}/reach-${state}.png` });
 
-/**
- * A right hand (4 fingers, desktop view) whose palm sits where its topmost / bottommost landmark is `gap` from the
- * top / bottom of the frame: the highest / lowest position at which the whole hand is still in view. Built with
- * `pos` only (no reach-zone math), so it describes the user's situation independently of the implementation.
- */
-function wholeHandAt(edge, { handedness = "Right", gap = 0.035, x = 0.3, scale = 1, fingers = ["index", "middle", "ring", "pinky"] } = {}) {
-  const probe = hand({ handedness, fingers, pos: { x, y: 0.5 }, view: DESKTOP_VIEW, scale });
-  const ys = probe.landmarks.map((p) => toDisplay(p, DESKTOP_VIEW).y);
-  const up = 0.5 - Math.min(...ys);
-  const down = Math.max(...ys) - 0.5;
-  const y = edge === "top" ? gap + up : 1 - gap - down;
-  return hand({ handedness, fingers, pos: { x, y }, view: DESKTOP_VIEW, scale });
-}
-const inFrame = (h) => h.landmarks.map((p) => toDisplay(p, DESKTOP_VIEW)).every((p) => p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1);
+const BAND_TOP = 0.125; // display fractions, src/input/reach-zones.js BAND (spelled out: the user's numbers)
+const BAND_BOTTOM = 0.875;
+/** A hand whose palm is at display y `y` (built with `pos`, no reach-zone math: independent of the implementation). */
+const palmAt = (y, { handedness = "Right", x = handedness === "Right" ? 0.3 : 0.72, scale = 1, fingers = ["index", "middle", "ring", "pinky"] } = {}) =>
+  hand({ handedness, fingers, pos: { x, y }, view: DESKTOP_VIEW, scale });
 
 test.describe("reach zones: vertical (the user's bug)", () => {
-  test("a hand at the top of what it can reach in frame reads height 1.0, at the bottom 0.0, all 21 landmarks inside", async ({ synthPage: page, setHands }) => {
-    for (const scale of [0.8, 1, 1.3]) {
-      for (const [edge, want] of [["top", 1], ["bottom", 0]]) {
-        const r = wholeHandAt(edge, { scale });
-        const l = wholeHandAt(edge, { handedness: "Left", x: 0.72, scale });
-        expect(inFrame(r) && inFrame(l), `${edge} ${scale}: whole hands in frame`).toBe(true);
-        await setHands(l, r);
-        await page.waitForTimeout(700); // zone smoothing (400 ms tau) settles on the new hand size
-        const h = await page.evaluate(() => [window.__gsTest.bus.get("right/height"), window.__gsTest.bus.get("left/height")]);
-        expect(h[0], `right ${edge} scale ${scale}`).toBeCloseTo(want, 2);
-        expect(h[1], `left ${edge} scale ${scale}`).toBeCloseTo(want, 2);
+  test("palm at 12.5 % of the screen height = 1.0, 50 % = 0.5, 87.5 % = 0.0, both hands, any hand size", async ({ synthPage: page, setHands }) => {
+    for (const scale of [0.6, 1, 1.3]) {
+      for (const [y, want] of [[BAND_TOP, 1], [0.3125, 0.75], [0.5, 0.5], [0.6875, 0.25], [BAND_BOTTOM, 0]]) {
+        await setHands(palmAt(y, { handedness: "Left", scale }), palmAt(y, { scale }));
+        await expect.poll(() => bus(page, "right/height"), { message: `right palm y ${y} scale ${scale}` }).toBeCloseTo(want, 2);
+        await expect.poll(() => bus(page, "left/height"), { message: `left palm y ${y} scale ${scale}` }).toBeCloseTo(want, 2);
       }
     }
+    for (const side of ["left", "right"]) {
+      const z = await bus(page, `${side}/zone`);
+      expect([z.top, z.bottom], side).toEqual([BAND_TOP, BAND_BOTTOM]);
+    }
+  });
+
+  test("the band never changes: hand size jitter / a closer hand / a fist leave a still palm's height exactly as it was", async ({ synthPage: page, setHands }) => {
+    const y = 0.4;
+    const want = (BAND_BOTTOM - y) / (BAND_BOTTOM - BAND_TOP);
+    const seen = new Set();
+    for (const [i, scale] of [0.9, 1.1, 0.9, 1.1, 1.6, 0.7, 1].entries()) {
+      const r = i === 5 ? hand({ handedness: "Right", fist: true, pos: { x: 0.3, y }, view: DESKTOP_VIEW, scale }) : palmAt(y, { scale });
+      await setHands(palmAt(y, { handedness: "Left", scale }), r);
+      await page.waitForTimeout(150); // a few frames at this size (the old band glided for ~1 s after a size change)
+      const s = await page.evaluate(() => ({
+        rh: window.__gsTest.bus.get("right/height"), lh: window.__gsTest.bus.get("left/height"),
+        rz: window.__gsTest.bus.get("right/zone"), lz: window.__gsTest.bus.get("left/zone"),
+      }));
+      expect(s.rh, `right, scale ${scale}`).toBeCloseTo(want, 3);
+      expect(s.lh, `left, scale ${scale}`).toBeCloseTo(want, 3);
+      seen.add(`${s.rz.top}|${s.rz.bottom}|${s.lz.top}|${s.lz.bottom}`);
+    }
+    expect([...seen]).toEqual([`${BAND_TOP}|${BAND_BOTTOM}|${BAND_TOP}|${BAND_BOTTOM}`]);
   });
 
   test("edge-track markers stay level with the palm (±4 px) across the band and stop at its ends", async ({ synthPage: page, setHands }) => {
@@ -63,6 +71,7 @@ test.describe("reach zones: vertical (the user's bug)", () => {
       expect(s.lh).toBeCloseTo(v, 2);
       expect(Math.abs(s.tracks["right-track"].markerY - s.r.y * H), `right marker at ${v}`).toBeLessThanOrEqual(4);
       expect(Math.abs(s.tracks["master-track"].markerY - s.l.y * H), `master marker at ${v}`).toBeLessThanOrEqual(4);
+      expect(Math.abs(s.tracks["right-track"].markerY - (BAND_BOTTOM - v * (BAND_BOTTOM - BAND_TOP)) * H), `right marker on the band at ${v}`).toBeLessThanOrEqual(4);
       if (v === 1) await shot(page, "top");
       if (v === 0) await shot(page, "bottom");
     }
@@ -82,10 +91,10 @@ test.describe("reach zones: vertical (the user's bug)", () => {
       await setHands(leftHand(1), rightHand(2, { volume: v }));
       await expect.poll(() => bus(page, "arp/gate"), { message: `gate at ${v}` }).toBeCloseTo(v, 2);
     }
-    // ...from a whole-in-frame hand at the very top / bottom it can reach
-    for (const [edge, want] of [["top", 1], ["bottom", 0]]) {
-      await setHands(leftHand(1), wholeHandAt(edge));
-      await expect.poll(() => bus(page, "arp/gate"), { message: `gate at the ${edge}` }).toBeCloseTo(want, 2);
+    // ...from a palm at the band's ends (12.5 % / 87.5 % of the screen height) and beyond them (clamped)
+    for (const [y, want] of [[BAND_TOP, 1], [BAND_BOTTOM, 0], [0.05, 1], [0.95, 0]]) {
+      await setHands(leftHand(1), palmAt(y, { fingers: ["index", "middle"] }));
+      await expect.poll(() => bus(page, "arp/gate"), { message: `gate at palm y ${y}` }).toBeCloseTo(want, 2);
     }
     await setHands(leftHand(1), rightHand(2, { volume: 1 }));
     await page.waitForTimeout(300);
@@ -93,21 +102,28 @@ test.describe("reach zones: vertical (the user's bug)", () => {
   });
 
   test("Lead: the cursor reaches the top and bottom notes and both octave arrows inside the band", async ({ synthPage: page, setHands }) => {
-    await setHands(leftHand(1));
+    // Real orientation (chord hand on screen LEFT, melody hand on the RIGHT), placed by palm position.
+    const L = palmAt(0.5, { handedness: "Left", x: 0.25, fingers: ["index"] });
+    const R = (y) => palmAt(y, { x: 0.75 });
+    await setHands(L);
     await page.evaluate(() => window.__gsTest.router.setMode("lead"));
     const dbg = () => page.evaluate(() => window.__gsTest.router.rightMode._debug()); // Lead = a layer on the base
     const placeAtY = async (y) => {
-      await setHands(leftHand(1), rightHand(4, { pos: { x: 0.3, y }, view: DESKTOP_VIEW }));
+      await setHands(L, R(y));
       await page.waitForTimeout(250);
       return dbg();
     };
-    await setHands(leftHand(1), rightHand(4, { volume: 0.5 }));
-    await page.waitForTimeout(400);
+    await setHands(L, R(0.5));
+    await expect.poll(async () => (await bus(page, "ui/sides"))?.expr).toBe("right");
+    await page.waitForTimeout(600); // ladder clearance cache (500 ms) sees the final layout
     const H = await page.evaluate(() => window.innerHeight);
     const z = await bus(page, "right/zone");
+    expect([z.top, z.bottom]).toEqual([BAND_TOP, BAND_BOTTOM]);
     let d = await dbg();
-    // The ladder spans the band: arrows at its ends (palm at height 1 / 0), lines between.
-    expect(Math.abs(d.geo.upY - z.top * H)).toBeLessThanOrEqual(2);
+    expect(d.geo.side).toBe("right");
+    // The ladder spans the fixed band: arrows at its ends (palm at height 1 / 0), lines between. DOM chrome at that
+    // edge still wins (the arrows never sit under it): the up arrow is at the band top or below it, never above.
+    expect(d.geo.upY).toBeGreaterThanOrEqual(z.top * H - 2);
     expect(Math.abs(d.geo.downY - z.bottom * H)).toBeLessThanOrEqual(2);
     const midis = d.lines.map((l) => l.midi);
     const [lo, hi] = [Math.min(...midis), Math.max(...midis)];
@@ -116,32 +132,19 @@ test.describe("reach zones: vertical (the user's bug)", () => {
     d = await placeAtY(d.geo.bottom / H);
     expect(d.preview, "bottom line").toBe(lo);
     // Height 1 / 0 (palm at the band's ends) = the octave arrows.
-    await setHands(leftHand(1), rightHand(4, { volume: 1 }));
+    await setHands(L, R(BAND_TOP));
     await expect.poll(async () => (await dbg()).hover).toBe("up");
     await shot(page, "lead-up-arrow");
-    await setHands(leftHand(1), rightHand(4, { volume: 0 }));
+    await setHands(L, R(BAND_BOTTOM));
     await expect.poll(async () => (await dbg()).hover).toBe("down");
   });
 
-  test("Range setting: Wide / Compact change the band; the marker still follows the palm", async ({ synthPage: page, setHands }) => {
-    await setHands(leftHand(1), rightHand(2, { volume: 0.5, scale: 0.6 }));
-    await page.waitForTimeout(600);
-    const comfort = await bus(page, "right/zone");
+  test("no Range setting: the Controls panel has no band presets (the band is fixed)", async ({ synthPage: page }) => {
     await page.locator("#controlsToggle").click();
-    const seg = page.locator('[data-control="range"]');
-    await expect(seg.locator("button.on")).toHaveText("Comfort");
-    await seg.getByText("Wide").click();
-    await expect.poll(async () => (await bus(page, "right/zone")).range).toBe("wide");
-    const wide = await bus(page, "right/zone");
-    await shot(page, "range-wide");
-    await seg.getByText("Compact").click();
-    await expect.poll(async () => (await bus(page, "right/zone")).range).toBe("compact");
-    const compact = await bus(page, "right/zone");
-    expect(wide.top).toBeLessThan(comfort.top);
-    expect(wide.bottom).toBeGreaterThan(comfort.bottom);
-    expect(compact.top).toBeGreaterThan(comfort.top);
-    expect(compact.bottom).toBeLessThan(comfort.bottom);
-    await shot(page, "range-compact");
+    await expect(page.locator("#controlsPanel")).toBeVisible();
+    await expect(page.locator('[data-control="range"]')).toHaveCount(0);
+    await expect(page.locator("#controlsPanel")).not.toContainText("Comfort");
+    expect(await bus(page, "reach/range")).toBeUndefined();
   });
 });
 
@@ -384,7 +387,7 @@ test.describe("at-hand indicators, guide, help", () => {
 
   test("Controls panel rows, gesture guide rows and help text", async ({ synthPage: page }) => {
     await page.locator("#controlsToggle").click();
-    for (const c of ["range", "axis-drive", "axis-space"]) await expect(page.locator(`[data-control="${c}"]`)).toBeVisible();
+    for (const c of ["axis-drive", "axis-space"]) await expect(page.locator(`[data-control="${c}"]`)).toBeVisible();
     await shot(page, "controls");
     await page.locator("#guideToggle").click();
     const guide = page.locator("#gestureGuide");
