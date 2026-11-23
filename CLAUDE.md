@@ -34,8 +34,12 @@ Node lives at `~/.local/node/bin` on this machine (not on the default PATH):
     `test:pages` (every page incl. auto-discovered labs), `test:visual` (pixel baselines; `-- --update-snapshots`
     after an intended UI change), `test:ui`, `test:audio`, `test:smoke` (real MediaPipe, needs network).
 - `npm run signal` — visualizer output signaling/relay server (ws://localhost:5417; `SIGNAL_PORT`). Turn the output
-  on via the chip at the top right, open `/labs/visualizer.html`, type the code. `?signal=ws://…` overrides the
+  on in **Controls → Output** (switch + room code; the status chip at the top right appears only while it is on and
+  opens Controls when pressed), open `/labs/visualizer.html`, type the code. `?signal=ws://…` overrides the
   server, `?outputRelay` forces the WebSocket relay. Output code: `src/output/` (webrtc-output.js is lazy-loaded).
+  Wire mapping (bus name -> `/gs/...`, `menu` sent as an event, `pinch` derived from `right/pinch` while the bus has
+  no `pinch` event) is the `ADDRESS_TABLE` in `src/output/protocol.js`; the beat grid is re-sent on every
+  `clock.onTransport` change (start/stop/bpm/rate/x2) and every 2 s.
   Tests start the server on `PW_SIGNAL_PORT` (default PW_PORT + 200).
 
 ## How to verify changes yourself
