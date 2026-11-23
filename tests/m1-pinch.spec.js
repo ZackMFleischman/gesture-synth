@@ -15,7 +15,9 @@ import { toDisplay } from "../src/input/hand-input.js";
 const WAV_DIR = "test-results/audio";
 const TOL = 0.003; // ±3 ms (same as tests/arp.spec.js)
 // Audio timing is measured here; keep these tests off each other's CPU.
-test.describe.configure({ mode: "default" });
+// Full gate: this file's tests run one after another (its @full audio measurements stay off each other's CPU).
+// Fast run (PW_TIER=fast, no @full tests here): parallel, so the file is not one long serial job.
+test.describe.configure({ mode: process.env.PW_TIER === "fast" ? "parallel" : "default" });
 
 // Display-space positions (DESKTOP_VIEW: fake camera 640x480 on a 1280x800 canvas).
 const R0 = { x: 0.7, y: 0.55 }; // right hand home (screen right, as in real use: mirrored selfie view)
@@ -159,7 +161,7 @@ test.describe("1.6 right pinch = tempo (Arp)", () => {
   });
 
   for (const v of [1, 2, 4]) {
-    test(`UX 1.6: a pinch from voicing ${v} never changes the voicing (bus + recorded pitches)`, async ({ synthPage: page, setHands }) => {
+    test(`UX 1.6: a pinch from voicing ${v} never changes the voicing (bus + recorded pitches)`, { tag: "@full" }, async ({ synthPage: page, setHands }) => {
       test.setTimeout(45_000);
       // Lowish hand: notes ~150 ms (longer than the 85 ms pitch window) with a clear gap between them (clean onsets).
       const LOW = { x: R0.x, y: 0.7 };
@@ -204,7 +206,7 @@ test.describe("1.6 right pinch = tempo (Arp)", () => {
   // Voicing hold (src/modes/arp.js VOICING_HOLD): the hand reads 3 fingers (index curled, thumb closing in)
   // for a few frames before the pinch is detected. None of it may be heard or published.
   for (const ms of [30, 70, 120]) {
-    test(`UX 1.6: a pinch approach reading 3 fingers for ${ms} ms never sounds or publishes voicing 3`, async ({ synthPage: page, setHands }) => {
+    test(`UX 1.6: a pinch approach reading 3 fingers for ${ms} ms never sounds or publishes voicing 3`, { tag: "@full" }, async ({ synthPage: page, setHands }) => {
       test.setTimeout(45_000);
       const P = { x: R0.x, y: 0.7 }; // ~150 ms notes: each fills the pitch window, clean gaps between them
       await enterArp(page, setHands, { bpm: 110, q: 1, p: P });
@@ -346,7 +348,7 @@ test.describe("1.6 right pinch = tempo (Arp)", () => {
     expect(L.filter((e) => e.n === "held").map((e) => e.v)).toEqual([{ "arp/gate": g0 }, null]);
   });
 
-  test("recorded audio: no lost or doubled step across a tempo change made by pinch", async ({ page, setHands }, info) => {
+  test("recorded audio: no lost or doubled step across a tempo change made by pinch", { tag: "@full" }, async ({ page, setHands }, info) => {
     test.setTimeout(60_000);
     const LOW = { x: R0.x, y: 0.82 }; // short notes (low gate) so each step is a clean onset
     await retryOnCaptureGlitch(info, async ({ track }) => {
@@ -495,7 +497,7 @@ test.describe("BPM shifter left of the pinching fingers (user request)", () => {
   });
 });
 
-test("screenshots: m1-pinch-{pinch-start, pinch-up, after-release-return}", async ({ synthPage: page, setHands }) => {
+test("screenshots: m1-pinch-{pinch-start, pinch-up, after-release-return}", { tag: "@media" }, async ({ synthPage: page, setHands }) => {
   fs.mkdirSync(SCREENS_DIR, { recursive: true });
   await enterArp(page, setHands, { bpm: 110, q: 3 });
   await setHands(leftHand(4), openRight(3, R0, { tilt: 0.3 }));
@@ -515,7 +517,7 @@ test("screenshots: m1-pinch-{pinch-start, pinch-up, after-release-return}", asyn
   for (const f of ["pinch-start", "pinch-up", "after-release-return"]) expect(fs.existsSync(`${SCREENS_DIR}/m1-pinch-${f}.png`), f).toBe(true);
 });
 
-test("video: pinch tempo up and down, release, return (test-results/videos/m1-pinch.webm)", async ({ synthPage: page, setHands, browser }) => {
+test("video: pinch tempo up and down, release, return (test-results/videos/m1-pinch.webm)", { tag: "@media" }, async ({ synthPage: page, setHands, browser }) => {
   test.setTimeout(90_000);
   const OUT = "test-results/videos/m1-pinch.webm";
   await enterArp(page, setHands, { bpm: 110, q: 2 });

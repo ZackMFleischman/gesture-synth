@@ -13,7 +13,7 @@ const cache = process.env.PLAYWRIGHT_BROWSERS_PATH || path.join(os.homedir(), ".
 const hasFfmpeg = fs.existsSync(cache) && fs.readdirSync(cache).some((d) => d.startsWith("ffmpeg"));
 test.use({ video: hasFfmpeg ? { mode: "on", size: { width: 1280, height: 800 } } : "off" });
 
-test("a short melody", async ({ lab: page }, testInfo) => {
+test("a short melody", { tag: "@media" }, async ({ lab: page }, testInfo) => {
   test.setTimeout(45_000);
   await setNoteSet(page, 2);
   const notes = await page.evaluate(() => window.__gsTest.lead._controller.state.ladder.notes.map((n) => n.midi));

@@ -42,7 +42,9 @@ test.use({
   },
 });
 // Timing checks: keep these tests off each other's CPU.
-test.describe.configure({ mode: "default" });
+// Full gate: this file's tests run one after another (its @full audio measurements stay off each other's CPU).
+// Fast run (PW_TIER=fast, no @full tests here): parallel, so the file is not one long serial job.
+test.describe.configure({ mode: process.env.PW_TIER === "fast" ? "parallel" : "default" });
 
 // Display-space positions on the 1280x800 synth (DESKTOP_VIEW), same as m1-integration.spec.js.
 const R0 = { x: 0.7, y: 0.42 }; // right hand home (screen right, as in real use)
@@ -187,7 +189,7 @@ test("fist menu: /gs/menu (open → arc + progress → countdown → close) and 
   await s.context.close();
 });
 
-test("beat grid: sent at once on clock start / tempo / rate / x2 / stop; visualizer beats on the synth's audio clock", async ({ browser }, info) => {
+test("beat grid: sent at once on clock start / tempo / rate / x2 / stop; visualizer beats on the synth's audio clock", { tag: "@full" }, async ({ browser }, info) => {
   const { s, v } = await connected(browser);
   await installSynthLog(s.page);
   expect(await v.page.evaluate(() => window.__viz.beatgrid?.running ?? false)).toBe(false);
@@ -283,7 +285,7 @@ test("beat grid: sent at once on clock start / tempo / rate / x2 / stop; visuali
   await s.context.close();
 });
 
-test("Arp notes: sent before their playTime, shown on time, on/off paired by id, note/cancel honored", async ({ browser }, info) => {
+test("Arp notes: sent before their playTime, shown on time, on/off paired by id, note/cancel honored", { tag: "@full" }, async ({ browser }, info) => {
   const { s, v } = await connected(browser);
   // Log first: entering Arp starts the clock, which schedules (and sends) its first notes right away.
   await installSynthLog(s.page);
@@ -472,7 +474,7 @@ test("screens: Controls Output row, chip waiting/connected, visualizer following
   await s.context.close();
 });
 
-test("video: switching to Arp with the fist menu while the visualizer follows (m3-visualizer.webm)", async ({ browser }) => {
+test("video: switching to Arp with the fist menu while the visualizer follows (m3-visualizer.webm)", { tag: "@media" }, async ({ browser }) => {
   test.setTimeout(90_000);
   const rec = createScreencast();
   const s = await openSynth(browser);

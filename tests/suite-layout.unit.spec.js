@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
-import { LAYER_PATTERNS, LEGACY } from "../playwright.config.js";
+import { LAYER_PATTERNS, LEGACY, FULL_ONLY } from "../playwright.config.js";
 
 const TESTS = path.resolve("tests");
 const specs = fs.readdirSync(TESTS, { recursive: true })
@@ -43,4 +43,14 @@ test("unit specs are pure: no browser fixtures, no page helpers", () => {
     if (why.length) offenders.push(`${path.relative(TESTS, f)}: ${why.join(", ")}`);
   }
   expect(offenders).toEqual([]);
+});
+
+test("tiers: FULL_ONLY lists browser specs that exist; the full / media tags are only used in browser layers", () => {
+  const byName = new Map(specs.map((f) => [path.basename(f), f]));
+  const missing = FULL_ONLY.filter((f) => !byName.has(f));
+  expect(missing, "remove these from FULL_ONLY in playwright.config.js").toEqual([]);
+  const unitOnly = FULL_ONLY.filter((f) => layersOf(byName.get(f))[0] === "unit");
+  expect(unitOnly, "unit specs always run (they take ~2 s)").toEqual([]);
+  const tagged = specs.filter((f) => layersOf(f)[0] === "unit" && /tag:\s*(\[[^\]]*)?"@(full|media)"/.test(fs.readFileSync(f, "utf8")));
+  expect(tagged.map((f) => path.relative(TESTS, f)), "unit tests are never @full / @media").toEqual([]);
 });

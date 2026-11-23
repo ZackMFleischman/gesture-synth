@@ -17,7 +17,9 @@ const DESKTOP = { width: 1280, height: 800 };
 const SC = scene(DESKTOP);
 const TOP = { x: SC.R.x, y: 0.3 }; // fist start: room below for Sound + its sub-ring
 
-test.describe.configure({ mode: "default" });
+// Full gate: this file's tests run one after another (its @full audio measurements stay off each other's CPU).
+// Fast run (PW_TIER=fast, no @full tests here): parallel, so the file is not one long serial job.
+test.describe.configure({ mode: process.env.PW_TIER === "fast" ? "parallel" : "default" });
 
 const snap = (page) => page.evaluate(() => {
   const s = window.__gsTest.router.menu.snapshot();
@@ -204,7 +206,7 @@ function dbAt(spec, f, ref) {
   return 20 * Math.log10(m / ref + 1e-12);
 }
 
-test("Arp + Warm under Lead + Bright: one recording, two timbres (triangle: no even harmonics; sawtooth: all)", async ({ context }, info) => {
+test("Arp + Warm under Lead + Bright: one recording, two timbres (triangle: no even harmonics; sawtooth: all)", { tag: "@full" }, async ({ context }, info) => {
   test.setTimeout(120_000);
   await retryOnCaptureGlitch(info, async ({ track }) => {
     const page = await openApp(context);
@@ -274,7 +276,7 @@ test("Arp + Warm under Lead + Bright: one recording, two timbres (triangle: no e
   });
 });
 
-test("switching the instrument while a chord sounds: no gap, no click (Warm -> Organ -> Electric -> Sax -> Warm)", async ({ context }, info) => {
+test("switching the instrument while a chord sounds: no gap, no click (Warm -> Organ -> Electric -> Sax -> Warm)", { tag: "@full" }, async ({ context }, info) => {
   test.setTimeout(120_000);
   await retryOnCaptureGlitch(info, async ({ track }) => {
     const page = await openApp(context);
@@ -308,7 +310,7 @@ test("switching the instrument while a chord sounds: no gap, no click (Warm -> O
   });
 });
 
-test("video test-results/videos/sound-menu.webm (with sound): pick Electric for Chords, Lead on top, pick Sax for the lead", async ({ synthPage: page, browser }) => {
+test("video test-results/videos/sound-menu.webm (with sound): pick Electric for Chords, Lead on top, pick Sax for the lead", { tag: "@media" }, async ({ synthPage: page, browser }) => {
   test.setTimeout(120_000);
   const rec = createScreencast();
   await rec.track(page, "app");

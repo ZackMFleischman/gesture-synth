@@ -103,11 +103,12 @@ for (const [vpName, vp] of Object.entries(VIEWPORTS)) {
   test.describe(`modes UI layout ${vpName}`, () => {
     test.use({ viewport: vp });
 
+    // Fast run: the real orientation only (chord hand left); the mirrored scenes are @full.
     for (const swap of [false, true]) {
       const tag = swap ? " (chord hand right)" : "";
       const sfx = swap ? "-swap" : "";
 
-      test(`chords-play${tag}`, async ({ synthPage: page, setHands }) => {
+      test(`chords-play${tag}`, { tag: swap ? "@full" : [] }, async ({ synthPage: page, setHands }) => {
         await setHands(...scene(vp, { swap }));
         await expect(page.locator("#chordDisplay")).toHaveText("D(IV)");
         await frames(page, 4);
@@ -116,7 +117,7 @@ for (const [vpName, vp] of Object.entries(VIEWPORTS)) {
         checkLayout(await collectLayout(page, EXISTING), vp, { rightTrack: false });
       });
 
-      test(`arp-play${tag}`, async ({ synthPage: page, setHands }) => {
+      test(`arp-play${tag}`, { tag: swap ? "@full" : [] }, async ({ synthPage: page, setHands }) => {
         await toArp(page);
         await setHands(...scene(vp, { swap }));
         await frames(page, 30);
@@ -250,7 +251,8 @@ test.describe("modes UI behavior", () => {
   });
 
   for (const swap of [false, true]) {
-    test(`edge-track markers are level with the hands${swap ? " (swapped)" : ""}`, async ({ synthPage: page, setHands }) => {
+    // Fast run: the real orientation (chord hand on the screen left); the full gate also checks the mirrored one.
+    test(`edge-track markers are level with the hands${swap ? " (swapped)" : ""}`, { tag: swap ? "@full" : [] }, async ({ synthPage: page, setHands }) => {
       await toArp(page); // a mode with a right track (Chords has none since the right height lost its function there)
       // (0.4, was 0.3: markers stop at the ends of the hand's reach zone, src/input/reach-zones.js, and this tilted
       // synthetic hand's zone starts at 0.36 of the height. Level-with-the-palm inside the band is unchanged.)

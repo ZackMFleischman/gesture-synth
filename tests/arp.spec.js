@@ -1,5 +1,5 @@
 // Arp engine (milestone 1.1), proven on recorded audio from labs/arp-lab.html.
-// Timing is checked three ways: onset-to-onset intervals, drift against an ideal grid over >= 10 s,
+// Timing is checked three ways: onset-to-onset intervals, drift against an ideal grid over 10 s (1/8; 4 s at 1/16),
 // and each onset against the play time the clock scheduled (via onStep), after fitting the constant
 // capture offset.
 import fs from "node:fs";
@@ -55,18 +55,21 @@ function checkClean(samples, sampleRate, onsets, label) {
   expect(c.atBoundary, `${label}: click metric at note edges vs body ${c.body}`).toBeLessThanOrEqual(c.body * 1.2);
 }
 
-for (const { rate, label, step } of [
-  { rate: 1 / 8, label: "1/8", step: 0.25 },
-  { rate: 1 / 16, label: "1/16", step: 0.125 },
+// Drift (the AudioContext clock vs the scheduler) grows with run time, not with the rate, so the 10 s run at 1/8 is the
+// drift check; 1/16 proves the same ±3 ms per step at the faster rate in 4 s (32 onsets). The scheduler's own math is
+// checked over a 2-minute fake-clock run in arp-patterns.spec.js.
+for (const { rate, label, step, secs } of [
+  { rate: 1 / 8, label: "1/8", step: 0.25, secs: 10 },
+  { rate: 1 / 16, label: "1/16", step: 0.125, secs: 4 },
 ]) {
-  test(`timing: 120 BPM ${label} stays on the grid for 10 s (no drift, ±3 ms)`, async ({ page }, info) => {
+  test(`timing: 120 BPM ${label} stays on the grid for ${secs} s (no drift, ±3 ms)`, { tag: "@full" }, async ({ page }, info) => {
     test.setTimeout(60_000);
     await retryOnCaptureGlitch(info, async ({ track }) => {
       await openLab(page, { rate, gate: 0.25 });
-      const r = await record(page, 10_500);
+      const r = await record(page, secs * 1000 + 500);
       track(r); // a failure on a glitched capture is retried once (helpers/audio.js retryOnCaptureGlitch)
       const on = detectOnsets(r.samples, r.sampleRate);
-      expect(on.length).toBeGreaterThanOrEqual(Math.floor(10 / step));
+      expect(on.length).toBeGreaterThanOrEqual(Math.floor(secs / step));
 
       // 1) Scheduled times (onStep) are an exact grid.
       const log = r.stepLog;
@@ -114,7 +117,7 @@ test("pitches: A major voicing 1, up -> A3 E4 A4 C#5 ...", async ({ page }) => {
   expect(Math.abs(f / et(220, [0, 7, 12, 16][pos0 % 4]) - 1)).toBeLessThan(0.01);
 });
 
-test("pitches: down / up-down / 2 octaves / minor 7th follow the pattern", async ({ page }) => {
+test("pitches: down / up-down / 2 octaves / minor 7th follow the pattern", { tag: "@full" }, async ({ page }) => {
   // B minor 7 (ii, voicing 3): B3 D4 F#4 A4, two octaves, up-down.
   await openLab(page, { chord: { key: "A", degree: 2, isMajor: false }, voicing: 3, pattern: "updown", octaves: 2, gate: 0.4 });
   const notes = [59, 62, 66, 69, 71, 74, 78, 81];
@@ -130,7 +133,7 @@ test("pitches: down / up-down / 2 octaves / minor 7th follow the pattern", async
   }
 });
 
-test("chord change mid-pattern lands on the next step, keeps the rhythm and the pattern position", async ({ page }, info) => {
+test("chord change mid-pattern lands on the next step, keeps the rhythm and the pattern position", { tag: "@full" }, async ({ page }, info) => {
   await retryOnCaptureGlitch(info, async ({ track }) => {
     await openLab(page, { chord: { key: "A", degree: 1, isMajor: true }, voicing: 1, pattern: "up", gate: 0.3 });
     const recStart = await startRecording(page);
@@ -177,7 +180,7 @@ test("chord change mid-pattern lands on the next step, keeps the rhythm and the 
   });
 });
 
-test("gate: low = short plucked notes, high = long overlapping notes", async ({ page }) => {
+test("gate: low = short plucked notes, high = long overlapping notes", { tag: "@full" }, async ({ page }) => {
   await openLab(page, { gate: 0.05, rate: 1 / 8 });
   const low = await record(page, 2000);
   const lowOn = detectOnsets(low.samples, low.sampleRate);
@@ -212,7 +215,7 @@ test("gate: low = short plucked notes, high = long overlapping notes", async ({ 
   expect(peakAbs(high.samples), "overlapping notes keep headroom").toBeLessThan(0.6);
 });
 
-test("double time: the rate doubles exactly at the next beat", async ({ page }, info) => {
+test("double time: the rate doubles exactly at the next beat", { tag: "@full" }, async ({ page }, info) => {
   await retryOnCaptureGlitch(info, async ({ track }) => {
     await openLab(page, { rate: 1 / 8, gate: 0.2 });
     const recStart = await startRecording(page);
@@ -260,7 +263,7 @@ test("double time: the rate doubles exactly at the next beat", async ({ page }, 
   });
 });
 
-test("tempo change: no lost or doubled step", async ({ page }, info) => {
+test("tempo change: no lost or doubled step", { tag: "@full" }, async ({ page }, info) => {
   await retryOnCaptureGlitch(info, async ({ track }) => {
     await openLab(page, { rate: 1 / 8, gate: 0.2 });
     const recStart = await startRecording(page);
@@ -296,7 +299,7 @@ test("tempo change: no lost or doubled step", async ({ page }, info) => {
   });
 });
 
-test("left fist: the arp rests while the clock keeps counting, then resumes in phase", async ({ page }, info) => {
+test("left fist: the arp rests while the clock keeps counting, then resumes in phase", { tag: "@full" }, async ({ page }, info) => {
   await retryOnCaptureGlitch(info, async ({ track }) => {
     await openLab(page, { chord: { key: "A", degree: 1, isMajor: true }, voicing: 1, pattern: "up", rate: 1 / 8, gate: 0.25 });
     const recStart = await startRecording(page);
@@ -444,7 +447,7 @@ test("screen controls drive the arp; lab screenshot", async ({ page }) => {
   expect(await page.evaluate(() => window.__lab.ctx.clock.running)).toBe(false);
 });
 
-test("demo: 4 bars (I - V - vi - IV) saved as WAV", async ({ page }) => {
+test("demo: 4 bars (I - V - vi - IV) saved as WAV", { tag: "@media" }, async ({ page }) => {
   test.setTimeout(45_000);
   await page.goto("/labs/arp-lab.html");
   await page.waitForFunction(() => window.__lab);

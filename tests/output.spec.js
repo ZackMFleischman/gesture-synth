@@ -178,7 +178,7 @@ test("chip: off (hidden) → waiting → connected (< 1 s) → waiting on discon
   await s.context.close();
 });
 
-test("visualizer gets manifest, full state, fast frames, timed events, periodic state, clock sync", async ({ browser }, info) => {
+test("visualizer gets manifest, full state, fast frames, timed events, periodic state, clock sync", { tag: "@full" }, async ({ browser }, info) => {
   const s = await openSynth(browser);
   // Chord set BEFORE the visualizer connects: must show up from the connect snapshot.
   await s.setHands(leftHand(4), rightHand(3, { volume: 0.75, tilt: 0.5 }));
@@ -305,7 +305,7 @@ test("visualizer gets manifest, full state, fast frames, timed events, periodic 
   await s.context.close();
 });
 
-test("beat grid lights up when ctx.clock exists; visualizer beats follow the synth clock", async ({ browser }, info) => {
+test("beat grid lights up when ctx.clock exists; visualizer beats follow the synth clock", { tag: "@full" }, async ({ browser }, info) => {
   const s = await openSynth(browser);
   await s.setHands(leftHand(1), rightHand(1, { volume: 0.5 }));
   const code = await turnOn(s.page);
@@ -388,7 +388,7 @@ test("beat grid lights up when ctx.clock exists; visualizer beats follow the syn
   await s.context.close();
 });
 
-test("relay fallback: forced relay connects, chip shows Relayed (amber), data flows", async ({ browser }) => {
+test("relay fallback: forced relay connects, chip shows Relayed (amber), data flows", { tag: "@full" }, async ({ browser }) => {
   const s = await openSynth(browser, { relay: true });
   await s.setHands(leftHand(6, { minor: true }), rightHand(2, { volume: 0.6 }));
   await expect(s.page.locator("#chordDisplay")).toHaveText("F#m(vi)");
@@ -502,7 +502,7 @@ test("output off: no module load, no bus subscription, no extra frame cost", asy
   await s.context.close();
 });
 
-test("demo video: connect → playing → disconnect → reconnect", async ({ browser }) => {
+test("demo video: connect → playing → disconnect → reconnect", { tag: "@media" }, async ({ browser }) => {
   test.setTimeout(90_000);
   const rec = createScreencast();
   const s = await openSynth(browser);

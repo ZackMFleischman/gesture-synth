@@ -22,6 +22,26 @@ export const LEGACY = {
 };
 const legacy = (layer) => LEGACY[layer].map((f) => `**/tests/${f}`);
 
+// Tiers (docs/testing.md "Fast run vs full gate"):
+//   full gate  `npm run verify`     every layer, every test except @media
+//   fast run   `npm test`           PW_TIER=fast: also skips tests tagged @full and the FULL_ONLY files below
+//   media      `npm run test:media` only @media tests (videos, demo WAVs, screenshot sets: little to assert, slow)
+// Tag a test with `test("title", { tag: "@full" }, async (...) => ...)`. @full = valuable but slow (long real-time
+// audio measurements, real MediaPipe, pixel baselines); the fast run keeps a cheaper test of the same journey.
+export const FAST = process.env.PW_TIER === "fast";
+export const FULL_ONLY = [
+  "smoke.spec.js", // real MediaPipe from the CDN (network), ~25 s
+  "visual.e2e.spec.js", // pixel baselines: re-taken after UI changes, not a per-edit signal
+  "gain-staging.e2e.spec.js", // limiter headroom on long recordings / offline renders
+  "instruments.e2e.spec.js", // per-instrument pitch / loudness / timbre on recorded audio (plugin guard is a unit)
+  "lead.spec.js", // Lead UX in its lab; the app journeys are in m2-lead / lead-layer / camera-feedback
+  "mobile-ui.int.spec.js", // mobile prototype lab (96 small tests); the real app's phone UI is mobile-ui.e2e
+  "ui-lab.spec.js", // layout contract on mock-ups, superseded by m1-ui in the app (to be retired)
+];
+const tier = FAST
+  ? { testIgnore: FULL_ONLY.map((f) => `**/tests/${f}`), grepInvert: /@full|@media/ }
+  : { grepInvert: /@media/ };
+
 // Parallel agents/worktrees must each use their own port: PW_PORT=52xx npm test
 const PORT = Number(process.env.PW_PORT) || 5199;
 // Signaling server for the output tests (tests/output.spec.js): PW_SIGNAL_PORT or PORT + 200.
@@ -72,9 +92,16 @@ export default defineConfig({
     },
   },
   projects: [
-    { name: "unit", testMatch: [LAYER_PATTERNS.unit, ...legacy("unit")] },
-    { name: "integration", testMatch: [LAYER_PATTERNS.integration, ...legacy("integration")] },
-    { name: "e2e", testMatch: [LAYER_PATTERNS.e2e, ...legacy("e2e")] },
+    { name: "unit", testMatch: [LAYER_PATTERNS.unit, ...legacy("unit")], ...tier },
+    { name: "integration", testMatch: [LAYER_PATTERNS.integration, ...legacy("integration")], ...tier },
+    { name: "e2e", testMatch: [LAYER_PATTERNS.e2e, ...legacy("e2e")], ...tier },
+    // Opt-in demo media (not in `npm test` / `verify`): `npm run test:media` -> test-results/{videos,audio,screens}.
+    {
+      name: "media",
+      testMatch: [LAYER_PATTERNS.integration, ...legacy("integration"), LAYER_PATTERNS.e2e, ...legacy("e2e")],
+      grep: /@media/,
+      timeout: 120_000,
+    },
     // Builds dist/ and serves it with `vite preview` itself (see tests/production.build.spec.js).
     { name: "build", testMatch: [LAYER_PATTERNS.build], timeout: 90_000 },
   ],

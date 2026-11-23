@@ -10,7 +10,9 @@ import { menuChosen } from "./helpers/m2-lead.js";
 
 const WAV_DIR = "test-results/audio";
 // The switch tests measure audio continuity; keep them off each other's CPU.
-test.describe.configure({ mode: "default" });
+// Full gate: this file's tests run one after another (its @full audio measurements stay off each other's CPU).
+// Fast run (PW_TIER=fast, no @full tests here): parallel, so the file is not one long serial job.
+test.describe.configure({ mode: process.env.PW_TIER === "fast" ? "parallel" : "default" });
 
 // Display-space positions (DESKTOP_VIEW: fake camera 640x480 on a 1280x800 canvas).
 // Hand size ~0.11 canvas widths -> select radius ~0.1 width (x) / ~0.15 height (y).
@@ -151,7 +153,7 @@ test.describe("mode switching with the fist menu", () => {
   });
 
   for (const [from, to, dir] of [["chords", "arp", "right"], ["arp", "chords", "up"]]) {
-    test(`no click or gap across ${from} -> ${to} while the left hand holds a chord`, async ({ synthPage: page, setHands }, info) => {
+    test(`no click or gap across ${from} -> ${to} while the left hand holds a chord`, { tag: "@full" }, async ({ synthPage: page, setHands }, info) => {
       test.setTimeout(45_000);
       // High right hand: Chords = loud pad, Arp = long overlapping notes (so silence = a real gap).
       const HIGH = { x: 0.7, y: 0.3 };
@@ -271,7 +273,7 @@ test.describe("Arp in the app", () => {
   }
   const arpState = (page) => page.evaluate(() => window.__gsTest.registry.getMode("arp").state);
 
-  test("right height = gate (measured note length)", async ({ synthPage: page, setHands }) => {
+  test("right height = gate (measured note length)", { tag: "@full" }, async ({ synthPage: page, setHands }) => {
     await enterArp(page, setHands);
     // Low hand: short plucked notes.
     await setHands(LEFT, openRight(1, { x: 0.7, y: 0.86 }));
@@ -306,7 +308,7 @@ test.describe("Arp in the app", () => {
     expect(await bus(page, "filter")).toBe(-1);
   });
 
-  test("right thumb = double time from the next beat", async ({ synthPage: page, setHands }) => {
+  test("right thumb = double time from the next beat", { tag: "@full" }, async ({ synthPage: page, setHands }) => {
     await enterArp(page, setHands);
     const req = await page.evaluate(() => {
       const c = window.__gsTest.ctx.clock;
@@ -343,7 +345,7 @@ test.describe("Arp in the app", () => {
     expect(await page.evaluate(() => window.__gsTest.ctx.harmony.chord.rootMidi)).toBe(66);
   });
 
-  test("left fist: the arp rests, the clock keeps counting", async ({ synthPage: page, setHands }) => {
+  test("left fist: the arp rests, the clock keeps counting", { tag: "@full" }, async ({ synthPage: page, setHands }) => {
     await enterArp(page, setHands);
     const leftFist = hand({ handedness: "Left", fingers: [] });
     await setHands(leftFist, openRight(1));
@@ -368,7 +370,7 @@ test.describe("Arp in the app", () => {
 });
 
 test.describe("1.3 left height = master volume", () => {
-  test("a chord change with the left hand does not move the volume (dead zone + smoothing)", async ({ synthPage: page, setHands }) => {
+  test("a chord change with the left hand does not move the volume (dead zone + smoothing)", { tag: "@full" }, async ({ synthPage: page, setHands }) => {
     await setHands(leftHand(1), openRight(1));
     await page.waitForTimeout(600);
     const read = () => page.evaluate(() => ({ v: window.__gsTest.bus.get("volume"), g: window.__gsTest.synth.masterGain.gain.value }));
@@ -444,7 +446,7 @@ test.describe("1.3 left height = master volume", () => {
   });
 });
 
-test("screenshots: chords-play, menu-open, menu-selected-arp, countdown, arp-play", async ({ synthPage: page, setHands }) => {
+test("screenshots: chords-play, menu-open, menu-selected-arp, countdown, arp-play", { tag: "@media" }, async ({ synthPage: page, setHands }) => {
   fs.mkdirSync(SCREENS_DIR, { recursive: true });
   await setHands(leftHand(4), openRight(3, R0, { tilt: 0.4 }));
   await page.waitForTimeout(500);
@@ -466,7 +468,7 @@ test("screenshots: chords-play, menu-open, menu-selected-arp, countdown, arp-pla
 // Real-time video of the whole Chords -> Arp -> Chords switch. Playwright's `video: "on"` needs an
 // ffmpeg build that is not installed here, so (as in tests/radial-menu-video.spec.js) CDP screencast
 // frames are re-timed into a canvas stream and encoded with the browser's MediaRecorder.
-test("video: Chords -> Arp -> Chords (test-results/videos/m1-switch.webm)", async ({ synthPage: page, setHands, context }) => {
+test("video: Chords -> Arp -> Chords (test-results/videos/m1-switch.webm)", { tag: "@media" }, async ({ synthPage: page, setHands, context }) => {
   test.setTimeout(90_000);
   const W = 1280, H = 800, OUT = "test-results/videos/m1-switch.webm";
   const cdp = await context.newCDPSession(page);

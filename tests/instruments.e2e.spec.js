@@ -218,7 +218,7 @@ test("switching instrument mid-chord (Chords) and mid-note (Lead): no gap, no cl
   }
 });
 
-test("demo WAVs: test-results/audio/instrument-<name>-<mode>.wav (Chords progression, Arp, Lead melody)", async ({ page }) => {
+test("demo WAVs: test-results/audio/instrument-<name>-<mode>.wav (Chords progression, Arp, Lead melody)", { tag: "@media" }, async ({ page }) => {
   test.setTimeout(240_000);
   const I = [C4, E4, G4], IV = [midi(65), midi(69), midi(72)], V = [midi(67), midi(71), midi(74)], VI = [midi(69), midi(72), midi(76)];
   const prog = [[0, I], [1.2, VI], [2.4, IV], [3.6, V], [4.8, I]];

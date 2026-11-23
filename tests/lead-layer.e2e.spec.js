@@ -24,7 +24,9 @@ const STEP = { right: [0.014, 0], left: [-0.014, 0], up: [0, -0.022], down: [0, 
 const mod12 = (n) => ((n % 12) + 12) % 12;
 const pcOf = (f) => mod12(Math.round(69 + 12 * Math.log2(f / 440)));
 
-test.describe.configure({ mode: "default" }); // audio measurements: keep this file's tests off each other's CPU
+// Full gate: this file's tests run one after another (its @full audio measurements stay off each other's CPU).
+// Fast run (PW_TIER=fast, no @full tests here): parallel, so the file is not one long serial job.
+test.describe.configure({ mode: process.env.PW_TIER === "fast" ? "parallel" : "default" });
 
 const state = (page) =>
   page.evaluate(() => {
@@ -92,7 +94,7 @@ async function leadY(page, i) {
 // Sound: the base keeps playing under the lead
 // =====================================================================================================
 
-test("Arp -> Lead: arp keeps its held gate / tempo / voicing, follows left-hand chords; lead on top; no gap or click", async ({ context }, info) => {
+test("Arp -> Lead: arp keeps its held gate / tempo / voicing, follows left-hand chords; lead on top; no gap or click", { tag: "@full" }, async ({ context }, info) => {
   test.setTimeout(120_000);
   await retryOnCaptureGlitch(info, async ({ track }) => {
     const page = await openApp(context);
@@ -182,7 +184,7 @@ test("Arp -> Lead: arp keeps its held gate / tempo / voicing, follows left-hand 
   });
 });
 
-test("Chords -> Lead: the chord keeps sounding at the held voicing / volume, left-hand chords still change it, lead on top", async ({ context }, info) => {
+test("Chords -> Lead: the chord keeps sounding at the held voicing / volume, left-hand chords still change it, lead on top", { tag: "@full" }, async ({ context }, info) => {
   test.setTimeout(120_000);
   await retryOnCaptureGlitch(info, async ({ track }) => {
     const page = await openApp(context);
@@ -483,7 +485,7 @@ test("menu with the layer on: screenshot layer-menu-with-layer.png (Lead current
 // Video with sound: Arp -> Lead -> back
 // =====================================================================================================
 
-test("video test-results/videos/lead-layer.webm (with sound): Arp -> Lead on top -> back to Arp", async ({ synthPage: page, browser }) => {
+test("video test-results/videos/lead-layer.webm (with sound): Arp -> Lead on top -> back to Arp", { tag: "@media" }, async ({ synthPage: page, browser }) => {
   test.setTimeout(120_000);
   const rec = createScreencast();
   await rec.track(page, "app");
