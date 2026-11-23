@@ -30,6 +30,7 @@ and is merged into the integration branch by the lead after its tests pass.
 | 2 | Integrate menu (1.2) + Arp mode (1.1) onto refactor · Gesture test page + pinch/fist tuning (0.3) · Shared UI chrome from the UI spec (edge tracks, badge, beat bar, controls panel) + left height master volume (1.3) · Lead engine (pure) · WebRTC output skeleton (bus consumer, signaling server) | wave 1 |
 | 3 | Arp gestures 1.4 gate · 1.5 thumb x2 · 1.6 pinch tempo · Lead mode 2.1–2.5 integration · Output 3 (room code, chip, two channels, manifest, clock sync) + test visualizer page | wave 2 |
 | 2b | **Test architecture**: layer split, verify gate, page smoke for all pages, prod-build smoke, visual baselines | wave 1 merged |
+| 2c | **Mobile UI pass** — phase A: audit + compact/minimizable design + prototype (`docs/mobile-ui.md`, `labs/mobile-lab.html`); phase B: implement in the app after M1 UI merges | M1 UI |
 | 4 | End-to-end polish pass, help/guide content, full regression, milestone demos | all |
 
 ## Milestones (each ends with a dev instance for you to try)
