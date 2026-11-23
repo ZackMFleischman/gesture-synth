@@ -17,7 +17,9 @@ export const LAYER_PATTERNS = {
 };
 export const LEGACY = {
   unit: ["arp-patterns.spec.js", "output-protocol.spec.js"],
-  integration: ["arp.spec.js", "lead.spec.js", "lead-demo.spec.js", "radial-menu-video.spec.js", "ui-lab.spec.js"],
+  integration: ["arp.spec.js", "lead.spec.js", "lead-demo.spec.js", "radial-menu-video.spec.js", "ui-lab.spec.js",
+    // TEMP: mobile phase B (ws/mobile-ui) renames/splits this per docs/testing.md and removes this entry.
+    "mobile-ui.spec.js"],
   e2e: ["analytics.spec.js", "audio.spec.js", "bus.spec.js", "gestures.spec.js", "output.spec.js", "smoke.spec.js", "ui.spec.js"],
 };
 const legacy = (layer) => LEGACY[layer].map((f) => `**/tests/${f}`);
