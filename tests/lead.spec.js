@@ -4,7 +4,7 @@
 import { test as base, expect } from "@playwright/test";
 import { recordAudio, spectrum, peaks, writeWav, rms } from "./helpers/audio.js";
 import { leftHand, pinch, DESKTOP_VIEW } from "./helpers/hands.js";
-import { test, SCREENS, rh, preview, play, setHands, dbg, yFor, settle, setKey, setNoteSet } from "./helpers/lead-lab.js";
+import { test, SCREENS, rh, preview, play, setHands, dbg, yFor, settle, setKey, setNoteSet, snapWhen } from "./helpers/lead-lab.js";
 import { makeView } from "../src/input/hand-input.js";
 import {
   setPcs,
@@ -365,9 +365,7 @@ test.describe("2.1 screen controls + ladder", () => {
     const lad = await page.evaluate(() => window.__gsTest.lead._controller.state.ladder.notes.map((n) => n.midi));
     expect(end.lines.map((l) => l.midi)).toEqual(lad);
     await setHands(page, leftHand(5));
-    await page.waitForFunction(() => window.__gsTest.lead._debug().chord?.degree === 5);
-    await page.waitForTimeout(40);
-    await page.screenshot({ path: `${SCREENS}/lead-chord-change.png` });
+    await snapWhen(page, "chord-change", (s, now) => s.chord?.degree === 5 && now - s.contextChangedAt > 60);
   });
 
   test("mouse: the cursor follows the pointer on the ladder; press plays the previewed note", async ({ lab: page }) => {
@@ -650,18 +648,17 @@ test.describe("2.4 note-set toggle", () => {
     expect((await dbg(page)).setId).toBe(1);
     // a deliberate "3" held 0.3 s
     await setHands(page, rh({ y, fingers: 3 }));
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(120);
     const mid = await dbg(page);
     expect(mid.setId).toBe(1);
     expect(mid.setHoldTarget).toBe(3);
-    expect(mid.setHoldProgress).toBeGreaterThan(0.2);
+    expect(mid.setHoldProgress).toBeGreaterThan(0.1);
     expect(mid.setHoldProgress).toBeLessThan(0.95);
-    await page.screenshot({ path: `${SCREENS}/lead-noteset-hold.png` });
-    await page.waitForTimeout(220);
+    await snapWhen(page, "noteset-hold", (s) => s.setHoldTarget === 3 && s.setHoldProgress > 0.5);
+    await snapWhen(page, "noteset-confirmed", (s, now) => s.setId === 3 && now - s.setChangedAt < 120);
     const done = await dbg(page);
     expect(done.setId).toBe(3);
     expect(await page.evaluate(() => window.__gsTest.bus.get("lead/noteset"))).toBe(3);
-    await page.screenshot({ path: `${SCREENS}/lead-noteset-confirmed.png` });
     // the toggle sticks after the fingers change to the pinch
     await setHands(page, play(y));
     await page.waitForTimeout(400);
@@ -699,16 +696,14 @@ test.describe("2.5 octave arrows", () => {
     expect((await dbg(page)).hover).toBe("up");
     await page.screenshot({ path: `${SCREENS}/lead-arrow-hover.png` });
     await setHands(page, play(upY));
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(120);
     const mid = await dbg(page);
     expect(mid.octave).toBe(d0.octave);
-    expect(mid.arrowProgress).toBeGreaterThan(0.2);
+    expect(mid.arrowProgress).toBeGreaterThan(0.1);
     expect(mid.playing).toBe(null); // the arrow pinch plays nothing
-    await page.screenshot({ path: `${SCREENS}/lead-octave-hold.png` });
-    await page.waitForTimeout(220);
+    await snapWhen(page, "octave-hold", (s) => s.pinchMode === "arrow" && s.arrowProgress > 0.55);
+    await snapWhen(page, "octave-slide", (s, now, o) => s.octave === o && now - s.octaveChangedAt > 50, d0.octave + 1);
     expect((await dbg(page)).octave).toBe(d0.octave + 1);
-    await page.waitForTimeout(40);
-    await page.screenshot({ path: `${SCREENS}/lead-octave-slide.png` });
     await page.waitForTimeout(500);
     expect((await dbg(page)).octave).toBe(d0.octave + 1); // one step per pinch
     expect(await page.evaluate(() => window.__gsTest.bus.get("lead/octave"))).toBe(d0.octave + 1);

@@ -51,5 +51,23 @@ export async function setNoteSet(page, n) {
   await page.mouse.move(400, 400); // off the ladder strip
 }
 
+/**
+ * Waits (per animation frame) until `cond(s, now)` holds for the Lead controller state `s`, freezes the lab
+ * loop, saves test-results/screens/lead-<name>.png, and unfreezes. `cond` is serialized into the page.
+ */
+export async function snapWhen(page, name, cond, arg) {
+  await page.waitForFunction(
+    ([src, arg]) => {
+      const t = window.__gsTest;
+      const ok = new Function("s", "now", "arg", `return (${src})(s, now, arg);`)(t.lead._controller.state, t.ctx.now, arg);
+      if (ok) t.freeze(true);
+      return ok;
+    },
+    [cond.toString(), arg],
+    { polling: "raf", timeout: 5000 }
+  );
+  await page.screenshot({ path: `${SCREENS}/lead-${name}.png` });
+  await page.evaluate(() => window.__gsTest.freeze(false));
+}
 
 export { expect };

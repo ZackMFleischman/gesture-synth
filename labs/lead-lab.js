@@ -115,7 +115,10 @@ async function main() {
   let lastVideoTime = -1;
   let left = null;
   let right = null;
+  let frozen = false;
+  window.__gsTest.freeze = (on) => { frozen = !!on; }; // tests: hold the current picture for a screenshot
   function loop() {
+    if (frozen) { requestAnimationFrame(loop); return; }
     const now = performance.now();
     if (videoEl.currentTime !== lastVideoTime || !videoEl.videoWidth) {
       lastVideoTime = videoEl.currentTime;

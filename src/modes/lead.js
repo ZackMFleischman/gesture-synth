@@ -34,12 +34,12 @@ const LOOK = {
   lineThin: 40, // scale-note line length
   lineChord: 56, // chord-note line length
   widthThin: 1.5,
-  widthChord: 3.5,
+  widthChord: 4,
   topPx: 176, // top note line (below the filter readout)
   bottomInset: 140, // bottom note line = H - this (palm must still reach the down arrow above the frame edge)
   arrowGap: 28, // arrow centre beyond the end lines
   arrowSize: 18,
-  cursorR: 10,
+  cursorR: 12,
   nameSize: 28,
   badge: { x: 200, y: 25 }, // top-left status row, right of the mode badge slot
   lineMoveMs: 150, // chord-note lines move to the new chord
@@ -240,13 +240,13 @@ function roundRect(g, x, y, w, h, r) {
   g.roundRect ? g.roundRect(x, y, w, h, r) : g.rect(x, y, w, h);
 }
 
-function plateLabel(g, text, x, y, { size = 13, weight = 600, color = C.ink, align = "left", padX = 7, padY = 4, stroke = null } = {}) {
+function plateLabel(g, text, x, y, { size = 13, weight = 600, color = C.ink, align = "left", padX = 7, padY = 4, stroke = null, fill = C.plate } = {}) {
   g.font = `${weight} ${size}px ${FONT}`;
   const w = g.measureText(text).width;
   const h = size * 1.15;
   const left = align === "right" ? x - w : align === "center" ? x - w / 2 : x;
   roundRect(g, left - padX, y - h / 2 - padY, w + padX * 2, h + padY * 2, (h + padY * 2) / 2);
-  g.fillStyle = C.plate;
+  g.fillStyle = fill;
   g.fill();
   if (stroke) { g.lineWidth = 1.5; g.strokeStyle = stroke; g.stroke(); }
   g.textAlign = "left";
@@ -292,27 +292,33 @@ function drawSetSegments(g, x, yBase, { active, scale = 1, target = null, progre
   return { w: 4 * w + 3 * gap, h: (4 + 4 * 3.5) * scale };
 }
 
-function drawArrow(g, cx, cy, dir, { lit, grey, progress }) {
+function drawArrow(g, cx, cy, dir, { lit, grey, progress, flash = 0 }) {
   const s = LOOK.arrowSize;
   g.save();
+  // hit target / ring backing
+  g.beginPath();
+  g.arc(cx, cy, s * 1.05, 0, Math.PI * 2);
+  g.fillStyle = grey ? "rgba(0,0,0,0.15)" : "rgba(0,0,0,0.32)";
+  g.fill();
   g.beginPath();
   const d = dir === "up" ? -1 : 1;
-  g.moveTo(cx, cy + d * s * 0.5);
-  g.lineTo(cx - s * 0.6, cy - d * s * 0.35);
-  g.lineTo(cx + s * 0.6, cy - d * s * 0.35);
+  g.moveTo(cx, cy + d * s * 0.42);
+  g.lineTo(cx - s * 0.55, cy - d * s * 0.32);
+  g.lineTo(cx + s * 0.55, cy - d * s * 0.32);
   g.closePath();
   g.lineJoin = "round";
   if (grey) {
-    g.fillStyle = "rgba(0,0,0,0.3)";
-    g.fill();
-    strokeHalo(g, "rgba(160,160,160,0.45)", 1.5);
+    // At the limit: grey, never lights up.
+    g.globalAlpha = 0.55;
+    strokeHalo(g, "rgba(150,150,150,0.8)", 1.5, [2, 3]);
   } else {
     g.fillStyle = lit ? LEAD_COLOR : "rgba(0,0,0,0.35)";
     g.fill();
-    strokeHalo(g, lit ? LEAD_COLOR : C.quiet, 1.5);
+    strokeHalo(g, lit ? "#fff" : "rgba(243, 239, 231, 0.85)", lit ? 2 : 1.5);
   }
+  g.globalAlpha = 1;
+  const r = s * 1.05;
   if (progress > 0) {
-    const r = s * 1.05;
     g.beginPath();
     g.arc(cx, cy, r, 0, Math.PI * 2);
     g.lineWidth = 3;
@@ -322,6 +328,16 @@ function drawArrow(g, cx, cy, dir, { lit, grey, progress }) {
     g.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
     g.lineCap = "round";
     strokeHalo(g, LEAD_COLOR, 3);
+  }
+  if (flash > 0) {
+    // Confirmed: the full ring flashes.
+    g.beginPath();
+    g.arc(cx, cy, r + 2 * (1 - flash), 0, Math.PI * 2);
+    g.fillStyle = withAlpha(LEAD_COLOR, 0.45 * flash);
+    g.fill();
+    g.lineWidth = 3;
+    g.strokeStyle = `rgba(255,255,255,${flash})`;
+    g.stroke();
   }
   g.restore();
 }
@@ -412,6 +428,18 @@ const lead = {
     const ladderAlpha = holding ? LOOK.dimDuringHold : 1;
 
     g.save();
+    // ---- Soft dark backing so the ladder reads over bright video ----
+    {
+      const x0 = geo.right - LOOK.lineChord - 8;
+      const grad = g.createLinearGradient(x0, 0, W, 0);
+      grad.addColorStop(0, "rgba(0,0,0,0)");
+      grad.addColorStop(0.35, "rgba(0,0,0,0.22)");
+      grad.addColorStop(1, "rgba(0,0,0,0.3)");
+      roundRect(g, x0, geo.top - 16, W - x0, span + 32, 10);
+      g.fillStyle = grad;
+      g.fill();
+    }
+
     // ---- Ladder lines (clipped to the ladder band during slides) ----
     g.save();
     g.beginPath();
@@ -437,32 +465,38 @@ const lead = {
     // ---- Octave arrows + marks ----
     const hoverUp = S.hover === "up" && S.present;
     const hoverDown = S.hover === "down" && S.present;
+    const octFlash = Math.max(0, 1 - (now - S.octaveChangedAt) / LOOK.flashMs);
     drawArrow(g, geo.cx, geo.upY, "up", {
       lit: hoverUp && S.octave < OCTAVE_MAX,
-      grey: S.octave >= OCTAVE_MAX,
+      grey: S.octave >= OCTAVE_MAX && !(octFlash > 0 && S.octaveDir > 0),
       progress: S.pinchMode === "arrow" && S.arrowDir > 0 ? S.arrowProgress : 0,
+      flash: S.octaveDir > 0 ? octFlash : 0,
     });
     drawArrow(g, geo.cx, geo.downY, "down", {
       lit: hoverDown && S.octave > OCTAVE_MIN,
-      grey: S.octave <= OCTAVE_MIN,
+      grey: S.octave <= OCTAVE_MIN && !(octFlash > 0 && S.octaveDir < 0),
       progress: S.pinchMode === "arrow" && S.arrowDir < 0 ? S.arrowProgress : 0,
+      flash: S.octaveDir < 0 ? octFlash : 0,
     });
-    const octFlash = Math.max(0, 1 - (now - S.octaveChangedAt) / (LOOK.flashMs * 2));
-    const ox = geo.cx - LOOK.arrowSize - 14;
-    for (let i = OCTAVE_MIN; i <= OCTAVE_MAX; i++) {
-      const y = geo.upY + 12 - (i - OCTAVE_MIN) * 8;
-      g.beginPath();
-      g.arc(ox, y, i === S.octave ? 3.5 : 2.5, 0, Math.PI * 2);
-      g.fillStyle = i === S.octave ? LEAD_COLOR : "rgba(0,0,0,0.45)";
+    // Octave marks: 4 short dashes stacked beside the up arrow (lowest octave at the bottom), one lit.
+    {
+      const mx = geo.cx - LOOK.arrowSize - 22;
+      const n = OCTAVE_MAX - OCTAVE_MIN + 1;
+      const step = 7;
+      const y0 = geo.upY + ((n - 1) * step) / 2;
+      roundRect(g, mx - 11, y0 - (n - 1) * step - 7, 22, (n - 1) * step + 14, 6);
+      g.fillStyle = "rgba(20,20,20,0.5)";
       g.fill();
-      g.lineWidth = 1;
-      g.strokeStyle = i === S.octave ? C.halo : C.quiet;
-      g.stroke();
-      if (i === S.octave && octFlash > 0) {
+      for (let i = OCTAVE_MIN; i <= OCTAVE_MAX; i++) {
+        const y = y0 - (i - OCTAVE_MIN) * step;
+        const on = i === S.octave;
         g.beginPath();
-        g.arc(ox, y, 7, 0, Math.PI * 2);
-        g.fillStyle = `rgba(255,255,255,${0.6 * octFlash})`;
-        g.fill();
+        g.moveTo(mx - (on ? 7 : 5), y);
+        g.lineTo(mx + (on ? 7 : 5), y);
+        g.lineCap = "round";
+        g.lineWidth = on ? 3.5 : 2;
+        g.strokeStyle = on ? (octFlash > 0 ? "#fff" : LEAD_COLOR) : C.quiet;
+        g.stroke();
       }
     }
 
@@ -477,13 +511,13 @@ const lead = {
       const cy = onArrow ? (S.hover === "up" ? geo.upY : geo.downY) : uToY(geo, cl.u);
       const cx = geo.cx;
       const playing = S.pinchMode === "note" && !lost;
-      // Dotted guide from the hand to the name.
-      const nameRight = cx - LOOK.cursorR - 10;
-      if (view.hand && !lost) {
+      const nameRight = geo.right - LOOK.lineChord - 12;
+      // Dotted guide from the hand to the cursor (stops at the name plate).
+      if (view.hand && !lost && view.hand.x < nameRight - 90) {
         g.save();
         g.beginPath();
         g.moveTo(view.hand.x, view.hand.y);
-        g.lineTo(nameRight - 70, cy);
+        g.lineTo(onArrow ? geo.cx - LOOK.arrowSize - 40 : nameRight - 80, cy);
         g.lineWidth = 4;
         g.strokeStyle = "rgba(0,0,0,0.3)";
         g.lineCap = "round";
@@ -495,26 +529,37 @@ const lead = {
         g.restore();
       }
       if (!onArrow) {
+        const r = LOOK.cursorR;
         g.save();
-        g.beginPath();
-        g.arc(cx, cy, LOOK.cursorR, 0, Math.PI * 2);
         if (lost) {
+          g.beginPath();
+          g.arc(cx, cy, r, 0, Math.PI * 2);
           g.fillStyle = "rgba(0,0,0,0.35)";
           g.fill();
           strokeHalo(g, C.warn, 2, [3, 3]);
         } else if (playing) {
-          g.shadowColor = withAlpha(LEAD_COLOR, 0.9);
-          g.shadowBlur = 22;
+          // Filled + soft glow: "this note plays now".
+          const glow = g.createRadialGradient(cx, cy, r * 0.6, cx, cy, r * 2.6);
+          glow.addColorStop(0, withAlpha(LEAD_COLOR, 0.75));
+          glow.addColorStop(1, withAlpha(LEAD_COLOR, 0));
+          g.beginPath();
+          g.arc(cx, cy, r * 2.6, 0, Math.PI * 2);
+          g.fillStyle = glow;
+          g.fill();
+          g.beginPath();
+          g.arc(cx, cy, r, 0, Math.PI * 2);
           g.fillStyle = LEAD_COLOR;
           g.fill();
-          g.shadowBlur = 0;
           g.lineWidth = 2;
           g.strokeStyle = "#fff";
           g.stroke();
         } else {
-          g.fillStyle = "rgba(0,0,0,0.4)";
+          // Hollow: "a pinch will play this note".
+          g.beginPath();
+          g.arc(cx, cy, r, 0, Math.PI * 2);
+          g.fillStyle = "rgba(0,0,0,0.45)";
           g.fill();
-          strokeHalo(g, LEAD_COLOR, 2.5);
+          strokeHalo(g, LEAD_COLOR, 3);
         }
         g.restore();
         if (!lost) {
@@ -523,13 +568,14 @@ const lead = {
             size: LOOK.nameSize,
             weight: 700,
             align: "right",
-            color: playing ? LEAD_COLOR : C.ink,
+            color: playing ? "#111" : C.ink,
+            fill: playing ? LEAD_COLOR : C.plate,
             padX: 10,
             padY: 4,
           });
         }
       }
-      if (lost) plateLabel(g, "Hand lost", geo.right - LOOK.lineChord - 18, cy, { size: 11, color: C.warn, align: "right", stroke: withAlpha(C.warn, 0.6) });
+      if (lost) plateLabel(g, "Hand lost", nameRight, cy, { size: 11, color: C.warn, align: "right", stroke: withAlpha(C.warn, 0.6) });
     }
 
     // ---- Note-set badge (status, top left row) ----
@@ -558,10 +604,11 @@ const lead = {
     const since = now - S.setChangedAt;
     if (holding || since < LOOK.badgeLingerMs) {
       const alpha = holding ? 1 : 1 - easeOut(Math.max(0, since - LOOK.flashMs) / (LOOK.badgeLingerMs - LOOK.flashMs));
-      const anchor = view.hand || { x: geo.cx - 150, y: cl ? uToY(geo, cl.u) : (geo.top + geo.bottom) / 2 };
+      // Beside the hand on the inner side, so the fingers doing the count stay visible.
+      const anchor = view.hand || { x: geo.right - LOOK.lineChord - 60, y: cl ? uToY(geo, cl.u) : (geo.top + geo.bottom) / 2 };
       const hs = Math.max(60, view.handSize || 90);
-      const ax = Math.min(anchor.x - 40, geo.right - LOOK.lineChord - 190);
-      const ay = Math.max(70, anchor.y - hs * 1.3);
+      const ax = Math.max(70, Math.min(anchor.x - hs * 1.5, geo.right - LOOK.lineChord - 200));
+      const ay = Math.min(H - 60, Math.max(70, anchor.y - hs * 0.4));
       const target = holding ? S.setHoldTarget : null;
       const label = NOTE_SETS[holding ? S.setHoldTarget : S.setId].name;
       g.save();
@@ -604,6 +651,8 @@ const lead = {
         .lead-controls button[aria-pressed="true"] { background:${LEAD_COLOR}; color:#111; border-color:${LEAD_COLOR}; }
         .lead-controls button:disabled { opacity:0.35; cursor:default; }
         .lead-controls .oct { min-width:14px; text-align:center; }
+        @media (max-width: 700px) { .lead-controls { right:auto; left:12px; bottom:auto; top:128px; gap:6px; padding:5px 6px; }
+          .lead-controls .lbl { display:none; } .lead-controls button { padding:3px 5px; min-width:22px; } }
         .lead-pad { position:absolute; top:0; right:0; bottom:0; width:170px; z-index:3; cursor:crosshair; touch-action:none; }
       </style>
       <div class="grp" role="group" aria-label="Note set"><span class="lbl">Notes</span>
