@@ -120,10 +120,10 @@ test.describe("pinch", () => {
 
 test.describe("pos and handSize", () => {
   test("pos is mirrored into display space", () => {
-    const r = frameOf(rightHand(1)); // right hand sits at image x ~0.7
-    expect(r.pos.x).toBeLessThan(0.5);
-    const l = frameOf(leftHand(1)); // left hand at image x ~0.3
-    expect(l.pos.x).toBeGreaterThan(0.5);
+    const r = frameOf(rightHand(1)); // right hand sits at image x ~0.3 -> screen right (selfie view, as in real use)
+    expect(r.pos.x).toBeGreaterThan(0.5);
+    const l = frameOf(leftHand(1)); // left (chord) hand at image x ~0.7 -> screen left
+    expect(l.pos.x).toBeLessThan(0.5);
     expect(toDisplay({ x: 0.2, y: 0.3 })).toEqual({ x: 0.8, y: 0.3 });
   });
 
@@ -138,7 +138,7 @@ test.describe("pos and handSize", () => {
 
   test("pinchPoint = thumb tip / index tip midpoint in display space while pinching, else null; box holds the hand", () => {
     for (const view of [undefined, DESKTOP_VIEW]) {
-      const h = pinch({ pos: { x: 0.3, y: 0.45 }, view });
+      const h = pinch({ pos: { x: 0.7, y: 0.45 }, view });
       const f = frameOf(h, { view });
       expect(f.pinch).toBe(true);
       const t = toDisplay(h.landmarks[4], view);
@@ -151,12 +151,12 @@ test.describe("pos and handSize", () => {
         expect(p.y).toBeGreaterThanOrEqual(f.box.y0);
         expect(p.y).toBeLessThanOrEqual(f.box.y1);
       }
-      expect(frameOf(rightHand(1, { pos: { x: 0.3, y: 0.45 }, view }), { view }).pinchPoint).toBeNull();
+      expect(frameOf(rightHand(1, { pos: { x: 0.7, y: 0.45 }, view }), { view }).pinchPoint).toBeNull();
     }
     // Published as right/pinchpt (null when not pinching).
     const bus = createBus();
     const input = createHandInput({ bus });
-    input.process(results(pinch({ pos: { x: 0.3, y: 0.45 } })), 0);
+    input.process(results(pinch({ pos: { x: 0.7, y: 0.45 } })), 0);
     expect(bus.get("right/pinchpt")).toEqual(expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }));
     input.process(results(rightHand(1)), 20);
     expect(bus.get("right/pinchpt")).toBeNull();
@@ -192,7 +192,7 @@ test("createHandInput publishes hand values on the bus", () => {
   input.process(results(leftHand(1), rightHand(1, { volume: 0.25, tilt: 0.5 })), 0);
   expect(seen["right/height"]).toBeCloseTo(0.25, 5);
   expect(seen["right/tilt"]).toBeCloseTo(0.5, 5);
-  expect(seen["left/pos"].x).toBeGreaterThan(0.5);
+  expect(seen["left/pos"].x).toBeLessThan(0.5); // chord hand on the screen left (real use)
   expect(seen["right/fist"]).toBe(false);
   input.process(results(leftHand(1)), 1);
   expect(seen["right/height"]).toBeNull();

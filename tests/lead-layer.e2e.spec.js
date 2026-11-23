@@ -19,7 +19,7 @@ import { clearArea } from "../src/ui/theme.js";
 const WAV_DIR = "test-results/audio";
 const DESKTOP = { width: 1280, height: 800 };
 const MOBILE = { width: 390, height: 844 };
-const SC = scene(DESKTOP); // chord hand on the screen right -> expression hand + ladder on the LEFT
+const SC = scene(DESKTOP); // real use: chord hand on the screen left -> expression hand + ladder on the RIGHT
 const STEP = { right: [0.014, 0], left: [-0.014, 0], up: [0, -0.022], down: [0, 0.022] };
 const mod12 = (n) => ((n % 12) + 12) % 12;
 const pcOf = (f) => mod12(Math.round(69 + 12 * Math.log2(f / 440)));
@@ -457,17 +457,17 @@ test("menu with the layer on: screenshot layer-menu-with-layer.png (Lead current
   await page.evaluate(() => { window.__gsTest.router.setMode("arp"); window.__gsTest.router.setMode("lead"); });
   await setHands(page, L1, SC.preview(0.45));
   await page.waitForTimeout(400);
-  await setHands(page, L1, SC.fistAt({ x: 0.4, y: 0.45 }));
+  await setHands(page, L1, SC.fistAt({ x: 0.6, y: 0.45 }));
   await expect.poll(async () => (await bus(page, "menu"))?.state).toBe("open");
   // Toward Arp (the base underneath): selected, hint "Open hand: Lead off".
   for (let i = 1; i <= 10; i++) {
-    await setHands(page, L1, SC.fistAt({ x: 0.4 + 0.014 * i, y: 0.45 }));
+    await setHands(page, L1, SC.fistAt({ x: 0.6 + 0.014 * i, y: 0.45 }));
     await page.waitForTimeout(35);
   }
   await expect.poll(async () => (await bus(page, "menu"))?.selectedId).toBe("arp");
   await page.waitForTimeout(250);
   await page.screenshot({ path: `${SCREENS_DIR}/layer-menu-with-layer.png` });
-  await setHands(page, L1, SC.fistAt({ x: 0.4, y: 0.45 }));
+  await setHands(page, L1, SC.fistAt({ x: 0.6, y: 0.45 }));
   await page.waitForTimeout(200);
   await setHands(page, L1, SC.preview(0.45));
   await expect.poll(async () => (await bus(page, "menu")) ?? null).toBe(null);

@@ -20,7 +20,7 @@ import { filterText } from "../src/ui/hand-overlays.js";
 const WAV_DIR = "test-results/audio";
 const DESKTOP = { width: 1280, height: 800 };
 const MOBILE = { width: 390, height: 844 };
-const SC = scene(DESKTOP); // chord hand on the screen right -> ladder on the LEFT edge
+const SC = scene(DESKTOP); // real use: chord hand on the screen left -> ladder on the RIGHT edge
 
 /** Right-hand set shapes at height y (display) in scene `sc`. 0 = open hand (4 fingers), 5 = open + thumb. */
 function shape(sc, n, y = sc.R.y, o = {}) {
@@ -241,7 +241,7 @@ for (const [vpName, vp] of [["desktop", DESKTOP], ["mobile", MOBILE]]) {
   test.describe(`ladder labels ${vpName} ${vp.width}x${vp.height}`, () => {
     test.use({ viewport: vp });
     for (const swap of [false, true]) {
-      test(`every line labelled; current note larger + mode-colored; no overlaps${swap ? " (ladder right)" : " (ladder left)"}`, async ({ synthPage: page }) => {
+      test(`every line labelled; current note larger + mode-colored; no overlaps${swap ? " (ladder left)" : " (ladder right)"}`, async ({ synthPage: page }) => {
         const sc = scene(vp, { swap });
         await setHandsOn(page, sc.left(1), sc.preview(0.5));
         await enterMode(page, "lead");

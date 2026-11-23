@@ -51,16 +51,16 @@ test("gesture guide (key of A)", async ({ synthPage: page, setHands }) => {
 });
 
 test("Lead layer chrome (Chords + Lead badge, note-set badge, chord, held meter)", async ({ synthPage: page, setHands }) => {
-  // Same scene as the Lead e2e tests: chord hand on the screen right, pre-pinch claw on the left.
+  // Same scene as the Lead e2e tests (real use): chord hand on the screen left, pre-pinch claw on the right.
   const view = makeView(640, 480, 1280, 800);
   const hands = () => setHands(
-    leftHand(4, { pos: { x: 0.72, y: 0.5 }, view }),
-    pinch({ pos: { x: 0.3, y: 0.42 }, view, distance: 0.55, fingers: ["index", "middle", "ring", "pinky"] })
+    leftHand(4, { pos: { x: 0.28, y: 0.5 }, view }),
+    pinch({ pos: { x: 0.7, y: 0.42 }, view, distance: 0.55, fingers: ["index", "middle", "ring", "pinky"] })
   );
   // Chords first plays root position (1 finger, thumb in): the voicing / volume it HOLDS under the Lead layer.
   await setHands(
-    leftHand(4, { pos: { x: 0.72, y: 0.5 }, view }),
-    rightHand(1, { pos: { x: 0.3, y: 0.42 }, view, volume: 0.6 })
+    leftHand(4, { pos: { x: 0.28, y: 0.5 }, view }),
+    rightHand(1, { pos: { x: 0.7, y: 0.42 }, view, volume: 0.6 })
   );
   await expect(page.locator("#qualityDisplay")).toHaveText("Major");
   await page.waitForTimeout(200);

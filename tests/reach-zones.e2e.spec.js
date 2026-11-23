@@ -20,7 +20,7 @@ const shot = (page, state) => page.screenshot({ path: `${SCREENS_DIR}/reach-${st
  * top / bottom of the frame: the highest / lowest position at which the whole hand is still in view. Built with
  * `pos` only (no reach-zone math), so it describes the user's situation independently of the implementation.
  */
-function wholeHandAt(edge, { handedness = "Right", gap = 0.035, x = 0.3, scale = 1, fingers = ["index", "middle", "ring", "pinky"] } = {}) {
+function wholeHandAt(edge, { handedness = "Right", gap = 0.035, x = 0.7, scale = 1, fingers = ["index", "middle", "ring", "pinky"] } = {}) {
   const probe = hand({ handedness, fingers, pos: { x, y: 0.5 }, view: DESKTOP_VIEW, scale });
   const ys = probe.landmarks.map((p) => toDisplay(p, DESKTOP_VIEW).y);
   const up = 0.5 - Math.min(...ys);
@@ -35,7 +35,7 @@ test.describe("reach zones: vertical (the user's bug)", () => {
     for (const scale of [0.8, 1, 1.3]) {
       for (const [edge, want] of [["top", 1], ["bottom", 0]]) {
         const r = wholeHandAt(edge, { scale });
-        const l = wholeHandAt(edge, { handedness: "Left", x: 0.72, scale });
+        const l = wholeHandAt(edge, { handedness: "Left", x: 0.28, scale });
         expect(inFrame(r) && inFrame(l), `${edge} ${scale}: whole hands in frame`).toBe(true);
         await setHands(l, r);
         await page.waitForTimeout(700); // zone smoothing (400 ms tau) settles on the new hand size
@@ -68,7 +68,7 @@ test.describe("reach zones: vertical (the user's bug)", () => {
     }
     // Beyond the band the value clamps and the marker stays at the band's end.
     const z = await bus(page, "right/zone");
-    await setHands(leftHand(1), rightHand(2, { pos: { x: 0.3, y: z.top - 0.06 }, view: DESKTOP_VIEW }));
+    await setHands(leftHand(1), rightHand(2, { pos: { x: 0.7, y: z.top - 0.06 }, view: DESKTOP_VIEW }));
     await page.waitForTimeout(250);
     expect(await bus(page, "right/height")).toBe(1);
     const m = await page.evaluate(() => window.__gsTest.ui.tracks["right-track"].markerY);
@@ -97,7 +97,7 @@ test.describe("reach zones: vertical (the user's bug)", () => {
     await page.evaluate(() => window.__gsTest.router.setMode("lead"));
     const dbg = () => page.evaluate(() => window.__gsTest.router.rightMode._debug()); // Lead = a layer on the base
     const placeAtY = async (y) => {
-      await setHands(leftHand(1), rightHand(4, { pos: { x: 0.3, y }, view: DESKTOP_VIEW }));
+      await setHands(leftHand(1), rightHand(4, { pos: { x: 0.7, y }, view: DESKTOP_VIEW }));
       await page.waitForTimeout(250);
       return dbg();
     };
@@ -157,6 +157,7 @@ test.describe("reach zones: horizontal", () => {
     const zr = await bus(page, "right/zone");
     // Each band is on the side the hand is displayed on (`ui/sides`), outer end toward that edge.
     const sides = await bus(page, "ui/sides");
+    expect(sides).toEqual({ chord: "left", expr: "right" }); // default hands = real use: chord hand on the screen left
     expect(zl.side).toBe(sides.chord);
     expect(zr.side).toBe(sides.expr);
     expect(zr.side === "left" ? zr.outer < zr.inner : zr.outer > zr.inner).toBe(true);
@@ -405,7 +406,7 @@ test.describe("at-hand indicators, guide, help", () => {
     const { setPlacementView, viewFor } = await import("./helpers/hands.js");
     setPlacementView(viewFor(390, 844));
     const view = viewFor(390, 844);
-    await setHands(leftHand(1, { pos: { x: 0.75, y: 0.5 }, view, scale: 0.5 }), rightHand(2, { pos: { x: 0.2, y: 0.45 }, view, scale: 0.5 }));
+    await setHands(leftHand(1, { pos: { x: 0.25, y: 0.5 }, view, scale: 0.5 }), rightHand(2, { pos: { x: 0.8, y: 0.45 }, view, scale: 0.5 }));
     await page.waitForTimeout(400);
     const r = await page.evaluate(() => window.__gsTest.ui.regions.filter((x) => x.name.startsWith("axis-")).map((x) => x.rect));
     expect(r.length).toBe(2);
