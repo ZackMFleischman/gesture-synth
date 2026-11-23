@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Radial Menu Lab</title>
+<style>
+  :root { color-scheme: dark; --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  html, body { margin: 0; height: 100%; background: #0b0d12; overflow: hidden; font-family: var(--ui); color: #e8eaf0; }
+  #stage { position: fixed; inset: 0; }
+  video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  video { object-fit: cover; transform: scaleX(-1); filter: brightness(0.8) saturate(0.85); }
+  #backdrop { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 40%, #2a3140 0%, #12151c 60%, #0b0d12 100%); }
+  canvas { cursor: crosshair; touch-action: none; }
+  .panel { position: fixed; z-index: 2; background: rgba(10, 12, 18, 0.72); border: 1px solid rgba(255,255,255,0.12);
+           border-radius: 12px; padding: 10px 12px; font-size: 12px; backdrop-filter: blur(6px); }
+  #badge { top: 14px; left: 14px; padding: 6px 14px; border-radius: 999px; font-weight: 650; font-size: 13px;
+           transition: background 150ms, border-color 150ms; }
+  #controls { top: 14px; right: 14px; display: flex; gap: 12px; align-items: center; }
+  #controls label { display: flex; gap: 8px; align-items: center; color: #b8bdc9; }
+  #controls input[type=range] { width: 110px; accent-color: #9aa3b5; }
+  button { font: inherit; color: #e8eaf0; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18);
+           border-radius: 8px; padding: 5px 10px; cursor: pointer; }
+  button[aria-pressed=true] { border-color: #f5b041; color: #f5b041; }
+  #log { bottom: 14px; left: 14px; min-width: 240px; max-height: 40vh; overflow: hidden; font-variant-numeric: tabular-nums; }
+  #log div { padding: 2px 0; color: #b8bdc9; }
+  #log div b { color: #e8eaf0; font-weight: 600; }
+  #help { bottom: 14px; right: 14px; color: #8e95a5; max-width: 300px; line-height: 1.5; }
+  #status { position: fixed; z-index: 2; bottom: 14px; left: 50%; transform: translateX(-50%); font-size: 12px; color: #8e95a5; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="backdrop"></div>
+  <video id="video" autoplay muted playsinline></video>
+  <canvas id="canvas"></canvas>
+</div>
+<div id="badge" class="panel" data-testid="badge">Chords</div>
+<div id="controls" class="panel">
+  <label>Hand size <input id="size" type="range" min="0.05" max="0.25" step="0.005" value="0.12" /> <span id="sizeVal">0.12</span></label>
+  <button id="drop" aria-pressed="false">Drop tracking</button>
+</div>
+<div id="log" class="panel" data-testid="log"><div>Events</div></div>
+<div id="help" class="panel">Hold the mouse button = right fist. Move toward an arc, release = open hand.</div>
+<div id="status" data-testid="status">closed</div>
+<script type="module" src="./menu-lab.js"></script>
+</body>
+</html>
