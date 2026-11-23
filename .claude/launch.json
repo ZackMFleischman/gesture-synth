@@ -4,8 +4,47 @@
     {
       "name": "gesture-synth",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "PATH=$HOME/.local/node/bin:$PATH npx vite --port 5173 --strictPort"],
+      "runtimeArgs": [
+        "-c",
+        "PATH=$HOME/.local/node/bin:$PATH npx vite --port 5173 --strictPort"
+      ],
       "port": 5173
+    },
+    {
+      "name": "snapshot-m0",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /home/zack/repos/gesture-synth/.claude/worktrees/snapshot-m0 && PATH=$HOME/.local/node/bin:$PATH npx vite --port 5180 --strictPort"
+      ],
+      "port": 5180
+    },
+    {
+      "name": "snapshot-m1",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /home/zack/repos/gesture-synth/.claude/worktrees/snapshot-m1 && PATH=$HOME/.local/node/bin:$PATH npx vite --port 5181 --strictPort"
+      ],
+      "port": 5181
+    },
+    {
+      "name": "snapshot-m2",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /home/zack/repos/gesture-synth/.claude/worktrees/snapshot-m2 && PATH=$HOME/.local/node/bin:$PATH npx vite --port 5182 --strictPort"
+      ],
+      "port": 5182
+    },
+    {
+      "name": "snapshot-m3",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /home/zack/repos/gesture-synth/.claude/worktrees/snapshot-m3 && PATH=$HOME/.local/node/bin:$PATH npx vite --port 5183 --strictPort"
+      ],
+      "port": 5183
     }
   ]
 }
