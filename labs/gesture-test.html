@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gesture test</title>
+<style>
+  :root {
+    --bg: #111317; --panel: #1a1d23; --line: #2c313a; --text: #d9dde4; --dim: #7d8592;
+    --on: #4fd18b; --pinch: #4fb3ff; --fist: #ff6b6b; --warn: #f0b341; --tick: #f0b341;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  header { display: flex; gap: 14px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line);
+    flex-wrap: wrap; }
+  header h1 { font-size: 13px; margin: 0; font-weight: 600; }
+  .dim { color: var(--dim); }
+  button, input[type=number] { font: inherit; color: var(--text); background: #252a32; border: 1px solid #3a404b;
+    border-radius: 3px; padding: 2px 8px; }
+  button:hover { background: #2e343e; }
+  button.rec { border-color: #a33; }
+  button.rec.active { background: #a33; color: #fff; }
+  input[type=number] { width: 48px; padding: 2px 4px; }
+  main { display: grid; grid-template-columns: minmax(280px, 520px) 1fr; gap: 10px; padding: 10px; }
+  #viewWrap { position: relative; background: #000; border: 1px solid var(--line); aspect-ratio: 4 / 3; }
+  #view { width: 100%; height: 100%; display: block; }
+  #webcam { display: none; }
+  .hands { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-content: start; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; }
+  .panel h2 { margin: 0 0 6px; font-size: 13px; display: flex; justify-content: space-between; }
+  .panel h2 .seen { font-weight: normal; }
+  .row { display: grid; grid-template-columns: 62px 1fr 116px; gap: 8px; align-items: center; min-height: 22px; }
+  .row > .k { color: var(--dim); }
+  .row > .v { text-align: right; white-space: nowrap; }
+  .dots { display: flex; gap: 6px; }
+  .dot { width: 18px; height: 18px; border-radius: 50%; border: 1px solid #4a515d; color: var(--dim);
+    display: grid; place-items: center; font-size: 10px; }
+  .dot.on { background: var(--on); border-color: var(--on); color: #0b2316; font-weight: 700; }
+  .track { position: relative; height: 10px; background: #0d0f12; border: 1px solid var(--line); border-radius: 2px; }
+  .track .fill { position: absolute; top: 0; bottom: 0; left: 0; background: #2f6f9c; }
+  .track .mark { position: absolute; top: -4px; width: 3px; height: 16px; margin-left: -1px; background: #fff; border-radius: 1px; }
+  .track .tick { position: absolute; top: -5px; bottom: -5px; width: 2px; margin-left: -1px; background: var(--tick); }
+  .track .tick.end { background: #c77dff; }
+  .track .center { position: absolute; top: -3px; bottom: -3px; left: 50%; width: 1px; background: #555; }
+  .track .band { position: absolute; top: 0; bottom: 0; background: #f0b34133; }
+  .state { display: inline-block; min-width: 54px; text-align: center; padding: 0 4px; border-radius: 3px;
+    border: 1px solid #3a404b; color: var(--dim); }
+  .state.pinch { background: var(--pinch); border-color: var(--pinch); color: #06223a; font-weight: 700; }
+  .state.fist { background: var(--fist); border-color: var(--fist); color: #2a0808; font-weight: 700; }
+  .state.thumb { background: var(--on); border-color: var(--on); color: #0b2316; font-weight: 700; }
+  .flk { display: flex; gap: 10px; }
+  .flk .hot { color: var(--warn); font-weight: 700; }
+  .last { color: var(--text); }
+  .side { display: grid; gap: 10px; align-content: start; }
+  .thr { display: grid; grid-template-columns: 120px 1fr 48px; gap: 8px; align-items: center; min-height: 22px; }
+  .thr input[type=range] { width: 100%; }
+  #copyOut { display: block; width: 100%; margin-top: 6px; padding: 4px 6px; background: #0d0f12; color: var(--text);
+    border: 1px solid var(--line); font: inherit; resize: none; }
+  #log { max-height: 260px; overflow: auto; white-space: pre; color: var(--dim); }
+  .legend span { margin-right: 10px; }
+  .legend i { display: inline-block; width: 10px; height: 3px; vertical-align: middle; margin-right: 3px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } .hands { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Gesture test</h1>
+  <span id="source" class="dim">source: …</span>
+  <span id="fps" class="dim">— fps</span>
+  <span>
+    <button id="recBtn" class="rec">● Record</button>
+    <input id="recSecs" type="number" min="1" max="120" value="10" /> s
+    <span id="recStatus" class="dim"></span>
+  </span>
+  <span class="dim">replay: <code>?replay=/path/rec.json</code> · app: <code>/?replay=…</code></span>
+</header>
+<main>
+  <div class="side">
+    <div id="viewWrap"><canvas id="view"></canvas><video id="webcam" autoplay playsinline muted></video></div>
+    <div class="panel">
+      <h2>Thresholds <span class="dim seen">live (hand-input.js)</span></h2>
+      <div id="thresholds"></div>
+      <div style="margin-top:6px; display:flex; gap:8px;">
+        <button id="copyBtn">Copy values</button><button id="resetBtn">Reset defaults</button>
+        <span class="legend dim"><span><i style="background:var(--tick)"></i>start</span><span><i style="background:#c77dff"></i>end</span></span>
+      </div>
+      <textarea id="copyOut" rows="2" readonly></textarea>
+    </div>
+  </div>
+  <div class="side">
+    <div class="hands" id="hands"></div>
+    <div class="panel"><h2>Event log <span class="dim seen">newest first · frame time</span></h2><div id="log"></div></div>
+  </div>
+</main>
+<script type="module" src="./gesture-test.js"></script>
+</body>
+</html>
