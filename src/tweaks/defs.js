@@ -6,7 +6,7 @@ import { DEFAULT_THRESHOLDS, getThresholds, setThresholds } from "../input/hand-
 import { VOICING_HOLD } from "../modes/arp.js";
 import { MOTION, CONFIRM } from "../ui/theme.js";
 import { MASTER_VOLUME } from "../router.js";
-import { CHORD_LEVEL, LIMITER, setChordLevel, setLimiterThreshold } from "../services/audio.js";
+import { CHORD_LEVEL, LIMITER, LAYER_BALANCE, setChordLevel, setLimiterThreshold, setLayerBalance } from "../services/audio.js";
 import { DEFAULT_LEAD_CONFIG, LEAD_TWEAKS, setLeadConfig } from "../modes/lead-config.js";
 
 // Radial menu config (src/menu/menu-config.js, from ws/menu-autoselect). import.meta.glob resolves to {} while the
@@ -148,6 +148,16 @@ function defineDisplayTweaks() {
 
 function defineAudioTweaks(synth) {
   const group = "Audio";
+  defineTweak({
+    group, key: "audio.layerBaseDb", label: "Under Lead: base level", type: "slider", default: LAYER_BALANCE.baseDb, min: -12, max: 0, step: 0.5, unit: "dB",
+    info: "While Lead plays on top, the Chords/Arp underneath dips by this much so the melody stands out.",
+    apply: (v) => setLayerBalance({ baseDb: v }, synth),
+  });
+  defineTweak({
+    group, key: "audio.layerLeadDb", label: "Under Lead: lead boost", type: "slider", default: LAYER_BALANCE.leadDb, min: -6, max: 6, step: 0.5, unit: "dB",
+    info: "Extra level on the lead when it plays on top of Chords/Arp. Higher values may reach the limiter on loud notes.",
+    apply: (v) => setLayerBalance({ leadDb: v }, synth),
+  });
   defineTweak({
     group, key: "audio.masterLow", label: "Master volume: low", type: "slider", default: MASTER_VOLUME.LOW, min: 0, max: 0.6, step: 0.01, unit: "height",
     info: "Left-hand height (0 = bottom, 1 = top of the band) at or below which the master volume is 0.",

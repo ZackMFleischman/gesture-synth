@@ -86,7 +86,19 @@ const CLIP_CEIL = 0.09; // headroom above the knee (curve end ≈ 0.972)
 /** Base level while the Lead layer plays on top (setLayerMix): -1.9 dB. Measured worst steady Chords + Lead (sawtooth,
  *  right 1, voicing 3, both filters open, master 1): -1.74 dBFS at the limiter input without it (over the -2 dB
  *  threshold), see tests/gain-staging.e2e.spec.js. */
-export const BASE_UNDER_LAYER = 0.8;
+export const BASE_UNDER_LAYER = 0.8; // superseded by LAYER_BALANCE.baseDb (kept for reference/tests)
+/** Lead-over-base balance while the Lead layer is on (user: the lead should sit a bit louder than what it plays over).
+ *  baseDb = how far the base (Chords/Arp) dips; leadDb = boost on the lead bus. Mutable: setLayerBalance() (Tweaks). */
+export const LAYER_BALANCE = { baseDb: -4, leadDb: 2 };
+const dbToGain = (db) => Math.pow(10, db / 20);
+/** Tweaks: change the lead-over-base balance live. */
+export function setLayerBalance(partial, synth = null) {
+  Object.assign(LAYER_BALANCE, partial);
+  const ac = synth?.ctx;
+  if (!ac) return;
+  if (synth.layerIn) synth.layerIn.gain.setTargetAtTime(dbToGain(LAYER_BALANCE.leadDb), ac.currentTime, 0.05);
+  if (synth.baseGain && synth.layerOn) synth.baseGain.gain.setTargetAtTime(dbToGain(LAYER_BALANCE.baseDb), ac.currentTime, 0.05);
+}
 const LAYER_MIX_TAU = 0.12;
 /** Master limiter: a safety net for transients only (steady playing stays below the threshold). */
 export const LIMITER = { threshold: -2, knee: 1, ratio: 20, attack: 0.001, release: 0.1 }; // mutable: setLimiterThreshold() (Tweaks)
@@ -283,6 +295,7 @@ export class SynthEngine {
 
     // Lead layer: its own tilt filter into `mix` (after the shared filter and Drive, before Space).
     this.layerIn = ac.createGain();
+    this.layerIn.gain.value = dbToGain(LAYER_BALANCE.leadDb);
     this.layerFilter = ac.createBiquadFilter();
     this.layerFilter.type = "lowpass";
     this.layerFilter.frequency.value = 1200;
@@ -338,10 +351,11 @@ export class SynthEngine {
     this.setVolume(volume01);
   }
 
-  /** Lead layer on/off: eases the base (everything through the shared filter) to BASE_UNDER_LAYER / back to 1. */
+  /** Lead layer on/off: eases the base (everything through the shared filter) to LAYER_BALANCE.baseDb / back to 1. */
   setLayerMix(on) {
     if (!this.ctx) return;
-    this.baseGain.gain.setTargetAtTime(on ? BASE_UNDER_LAYER : 1, this.ctx.currentTime, LAYER_MIX_TAU);
+    this.layerOn = !!on;
+    this.baseGain.gain.setTargetAtTime(on ? dbToGain(LAYER_BALANCE.baseDb) : 1, this.ctx.currentTime, LAYER_MIX_TAU);
   }
 
   /** Master volume (left-hand height, every mode). The router already smooths it; this only de-zippers. */
