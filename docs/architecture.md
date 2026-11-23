@@ -163,3 +163,19 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
     controls (`data-control="bpm-tap"`).
   - main.js redraws the video frame every animation frame (no build-up of translucent overlays) and schedules the next frame
     first, so an exception in a drawing layer never stops the router/sound.
+- M2 Lead integration (ws/m2-lead-integration):
+  - Lead is registered in main.js (menu left). It never writes the master gain and never touches `synth.oscillators`
+    (Chords' `exit` releases its chord; the router owns the master). `hold(ctx)`: the lead note stops, the ladder
+    dims, the pad keeps playing and follows the left-hand chord; after the menu a pinch still closed from before
+    must open once before it plays.
+  - Lead publishes `chord` + `voicing` (1 = the pad's triad) + `chords/octave` (false), `filter` (right tilt),
+    `lead/noteset`, `lead/octave`; note events `{freq, midi, voice: "lead"|"pad", id}` with ids from
+    `ctx.audio.nextNoteId`.
+  - The ladder follows `ui/sides` (`expr` edge; "right" when unpublished, e.g. the lab), mirrored on the left;
+    narrower below 520 px (44 px to the inner end of the chord lines, 22 px note name); respects the safe-area
+    inset of its edge; keeps its arrows clear of DOM controls on that edge (measured every 500 ms). With Lead
+    following the sides, the master track always stays on the chord hand's edge (edge-tracks.js).
+  - Lead's screen controls are Controls-panel rows (`.lead-controls`: note set `[data-control=noteset]`, octave
+    `[data-control=octave-up|down|octave]`); its mouse strip `#leadPad` is mounted on `#stage` over the ladder band.
+  - `#noteSetBadge` is placed with the CSS variable `--gs-noteset-left` on `body` (no inline position on the badge);
+    flashes (`.gs-flash`) on a change. Lead first-use labels: "Height: note", "Fingers: notes", "Pinch: play".
