@@ -71,9 +71,11 @@ export function createGuide({ S, doc, bus }) {
       row.append(e, l);
       frag.append(row);
     }
-    for (const [emoji, label] of axisRows()) {
+    // Sound menu (every mode): the fist menu's down arc picks the instrument (the lead's while Lead is on).
+    const extra = [["✊⬇", S.layerId ? "Fist down: lead sound" : "Fist down: sound", "gs-guide-sound"]];
+    for (const [emoji, label, cls] of [...extra, ...axisRows().map(([e, l]) => [e, l, "gs-guide-axis"])]) {
       const row = doc.createElement("div");
-      row.className = "gesture-guide-row gs-guide-axis gs-guide-ext";
+      row.className = `gesture-guide-row ${cls} gs-guide-ext`;
       const e = doc.createElement("span");
       e.className = "gesture-guide-gesture";
       e.textContent = emoji;

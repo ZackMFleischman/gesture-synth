@@ -132,7 +132,7 @@ export function createArpMode() {
     entry.midi = currentNote(entry.pos);
     entry.handle = null;
     if (entry.midi == null) return;
-    if (ctx.audio.waveform) voice.waveform = ctx.audio.waveform;
+    voice.instrument = ctx.audio.instrument ? ctx.audio.instrument("base") : ctx.audio.waveform; // Sound menu / tone select
     entry.handle = voice.playStep(midiToHz(entry.midi), entry.time, entry.dur, params.gate.value, {
       midi: entry.midi,
       step: entry.step,
@@ -306,7 +306,7 @@ export function createArpMode() {
         pattern: ctx.param("arp/pattern", { type: "state", value: params?.pattern.value ?? "up" }),
         octaves: ctx.param("arp/octaves", { type: "state", value: params?.octaves.value ?? 1, min: 1, max: 3 }),
       };
-      voice = createArpVoice(ctx.audio.ac, ctx.audio.out, { waveform: ctx.audio.waveform, onNote, nextId: ctx.audio.nextNoteId });
+      voice = createArpVoice(ctx.audio.ac, ctx.audio.out, { instrument: ctx.audio.instrument?.("base") ?? ctx.audio.waveform, onNote, nextId: ctx.audio.nextNoteId });
       unsub = [ctx.clock.onStep(onStep), ctx.clock.onStepChange(onStepChange), ctx.clock.onStop(cancelPending)];
       thumbWas = null;
       resetPinch();

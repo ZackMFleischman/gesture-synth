@@ -1,4 +1,6 @@
-// One-shot note voice for the arp: oscillator (current waveform) -> per-note gain envelope -> destination.
+// One-shot note voice for the arp: instrument source (src/services/instruments.js) -> per-note gain envelope ->
+// the instrument's POST chain (this voice's rack) -> destination. Instrument plugins (src/instruments): the voice uses
+// only their interface (release() at the note end = palm mute / key-up fade; a no-op for plain oscillators).
 //
 // Every envelope point is scheduled up front on the audio clock, as explicit, continuous segments
 // (no jumps), so notes start and end click-free at any length:
@@ -6,6 +8,7 @@
 // Gain values leave headroom: several overlapping notes (high gate) stay well below full scale.
 
 import { gateToDuration } from "./arp-patterns.js";
+import { createSource, createRack, instrumentFromTone, defaultInstrumentId } from "../instruments/index.js";
 
 export const VOICE_DEFAULTS = {
   peak: 0.22, // per-note peak; ~3 notes overlap at most (gate 1 = 2 steps + release)
@@ -24,7 +27,8 @@ export const VOICE_DEFAULTS = {
  */
 export function createArpVoice(ac, destination, opts = {}) {
   const cfg = { ...VOICE_DEFAULTS, ...opts };
-  let waveform = opts.waveform || "triangle";
+  let instrument = instrumentFromTone(opts.instrument || opts.waveform) || defaultInstrumentId();
+  let rack = null;
   let onNote = opts.onNote || null;
   let localId = 1;
   const newId = typeof opts.nextId === "function" ? opts.nextId : () => localId++;
@@ -44,9 +48,9 @@ export function createArpVoice(ac, destination, opts = {}) {
     const end = t0 + Math.max(dur, A + 0.004);
     const stopAt = end + R + 0.006;
 
-    const osc = ac.createOscillator();
-    osc.type = waveform;
-    osc.frequency.value = freq;
+    const inst = instrument;
+    const osc = createSource(ac, inst, freq, t0, { voice: "arp" });
+    if (!rack) rack = createRack(ac, destination);
     const g = ac.createGain();
     g.gain.value = 0;
     const p = g.gain;
@@ -60,8 +64,8 @@ export function createArpVoice(ac, destination, opts = {}) {
     p.exponentialRampToValueAtTime(Math.max(vEnd * 0.001, 1e-5), end + R);
     p.linearRampToValueAtTime(0, end + R + 0.004);
     osc.connect(g);
-    g.connect(destination);
-    osc.start(t0);
+    g.connect(rack.input(inst));
+    osc.release(end); // the instrument's own note end (under the envelope's release)
     osc.stop(stopAt);
 
     const id = newId();
@@ -86,7 +90,7 @@ export function createArpVoice(ac, destination, opts = {}) {
         note.cancelled = true;
         p.cancelScheduledValues(0);
         p.value = 0;
-        osc.stop(); // before its start time -> never sounds
+        osc.stop(0); // before its start time -> never sounds
         if (onNote) onNote({ type: "cancel", id, freq, time: t0, ...meta });
         return true;
       },
@@ -99,11 +103,21 @@ export function createArpVoice(ac, destination, opts = {}) {
     playStep(freq, time, stepDur, gate, meta) {
       return play(freq, time, gateToDuration(gate, stepDur), meta);
     },
+    /** Tone-select value of the instrument (kept for the labs; "triangle" etc.). */
     get waveform() {
-      return waveform;
+      return instrument;
     },
+    /** Accepts a tone-select value or an instrument id. */
     set waveform(w) {
-      waveform = w;
+      const id = instrumentFromTone(w);
+      if (id) instrument = id;
+    },
+    get instrument() {
+      return instrument;
+    },
+    set instrument(id) {
+      const v = instrumentFromTone(id);
+      if (v) instrument = v;
     },
     set onNote(cb) {
       onNote = cb;
