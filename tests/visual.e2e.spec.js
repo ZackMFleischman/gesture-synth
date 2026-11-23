@@ -49,7 +49,7 @@ test("gesture guide (key of A)", async ({ synthPage: page, setHands }) => {
   await expect(page).toHaveScreenshot("gesture-guide.png", { stylePath: STYLE });
 });
 
-test("Lead mode chrome (mode + note-set badges, pad chord, no meter)", async ({ synthPage: page, setHands }) => {
+test("Lead layer chrome (Chords + Lead badge, note-set badge, chord, held meter)", async ({ synthPage: page, setHands }) => {
   // Same scene as the Lead e2e tests: chord hand on the screen right, pre-pinch claw on the left.
   const view = makeView(640, 480, 1280, 800);
   const hands = () => setHands(
@@ -65,7 +65,7 @@ test("Lead mode chrome (mode + note-set badges, pad chord, no meter)", async ({ 
   await expect(page.locator("#chordDisplay")).toHaveText("D(IV)");
   await expect(page.locator("#qualityDisplay")).toHaveText("Major");
   await expect(page.locator("#noteSetBadge i.on")).toHaveCount(1);
-  await expect(page.locator("#volumeMeter")).toBeHidden();
+  await expect(page.locator("#modeBadge")).toHaveText("Chords+Lead");
   // First-use labels (3 s at the hand) are gone before the baseline is taken.
   await expect.poll(() => page.evaluate(() => window.__gsTest.ui.firstUse), { timeout: 6000 }).toBe(false);
   await expect(page).toHaveScreenshot("lead-playing.png", { stylePath: STYLE });

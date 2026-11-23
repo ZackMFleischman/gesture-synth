@@ -64,7 +64,7 @@ export async function ensureMenu(page) {
     if (t.router.menu) return;
     const { createRadialMenu } = await import("/src/menu/radial-menu.js");
     const { registry } = await import("/src/core/registry.js");
-    t.router.setMenu(createRadialMenu({ items: () => registry.menuItems(t.router.modeId), currentId: () => t.router.modeId }));
+    t.router.setMenu(createRadialMenu({ items: () => registry.menuItems(t.router.modeId, { layerId: t.router.layerId }), currentId: () => t.router.rightModeId }));
   });
 }
 
