@@ -26,21 +26,34 @@ function pitchOf(samples, sampleRate) {
   return p.length ? p[0].freq : 0;
 }
 
+const isMobile = (page) => page.evaluate(() => document.body.classList.contains("gs-mobile"));
+/** Opens the Controls panel: the toggle on desktop, the Controls sheet of the phone bar (docs/mobile-ui.md). */
+async function openControls(page) {
+  if (await isMobile(page)) await page.evaluate(() => window.__gsTest.mobile.openSheet("controls"));
+  else await page.locator("#controlsToggle").click();
+  await expect(page.locator("#controlsPanel")).toBeVisible();
+}
+async function closeControls(page) {
+  if (await isMobile(page)) await page.evaluate(() => window.__gsTest.mobile.closeSheets());
+  else await page.locator("#controlsToggle").click();
+  await expect(page.locator("#controlsPanel")).toBeHidden();
+  const vp = page.viewportSize();
+  await page.mouse.move(vp.width / 2, vp.height / 2); // off the ladder strip
+}
+
 /** Lead via the Controls panel's Mode row (the screen path); leaves the mouse off the ladder strip. */
 async function enterLeadByPanel(page) {
-  await page.locator("#controlsToggle").click();
+  await openControls(page);
   await page.locator('#controlsPanel [data-control="mode"] button[data-value="lead"]').click();
   await expect.poll(() => modeId(page)).toBe("lead");
-  await page.locator("#controlsToggle").click();
-  await page.mouse.move(640, 400);
+  await closeControls(page);
 }
 
 /** Note set through the Controls panel row (opens and closes the panel). */
 async function setNoteSet(page, n) {
-  await page.locator("#controlsToggle").click();
+  await openControls(page);
   await page.locator(`#controlsPanel .lead-controls [data-set="${n}"]`).click();
-  await page.locator("#controlsToggle").click();
-  await page.mouse.move(640, 400);
+  await closeControls(page);
   expect((await dbg(page)).setId).toBe(n);
 }
 
@@ -253,10 +266,9 @@ test.describe("Lead UX checks in the app", () => {
     await expect(page.locator("#noteSetBadge i.on")).toHaveCount(1);
     await expect(page.locator("#noteSetBadge i").nth(2)).toHaveClass(/on/);
     await expect(page.locator("#noteSetBadge")).toHaveAttribute("title", "Note set: Full scale");
-    await page.locator("#controlsToggle").click();
+    await openControls(page);
     await expect(page.locator('#controlsPanel .lead-controls [data-set="3"]')).toHaveAttribute("aria-pressed", "true");
-    await page.locator("#controlsToggle").click();
-    await page.mouse.move(640, 400);
+    await closeControls(page);
     // The toggle sticks through the pinch that follows.
     await setHandsOn(page, SC.play(y));
     await page.waitForTimeout(400);
@@ -304,10 +316,9 @@ test.describe("Lead UX checks in the app", () => {
     await setHandsOn(page, SC.play(upY));
     await page.waitForTimeout(500);
     expect((await dbg(page)).octave).toBe(OCTAVE_MAX);
-    await page.locator("#controlsToggle").click();
+    await openControls(page);
     await expect(page.locator('#controlsPanel [data-control="octave-up"]')).toBeDisabled();
-    await page.locator("#controlsToggle").click();
-    await page.mouse.move(640, 400);
+    await closeControls(page);
     // Down to the bottom with the down arrow.
     const downY = d0.geo.downY / d0.geo.H;
     for (let k = 0; k < OCTAVE_MAX - OCTAVE_MIN; k++) {
@@ -441,7 +452,7 @@ test.describe("Lead with the menu and the master", () => {
 // =====================================================================================================
 
 const CONTROLS = ["keySelect", "toneSelect", "guideToggle", "controlsToggle", "modeBadge", "noteSetBadge", "helpButton",
-  "distortionDisplay", "chordDisplay", "qualityDisplay", "outputChip", "transport", "volumeMeter"];
+  "distortionDisplay", "chordDisplay", "qualityDisplay", "outputChip", "transport", "volumeMeter", "gsBar", "gsPill"];
 
 for (const [vpName, vp] of [["desktop", DESKTOP], ["mobile", MOBILE]]) {
   test.describe(`layout ${vpName} ${vp.width}x${vp.height}`, () => {

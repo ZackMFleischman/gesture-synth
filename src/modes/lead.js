@@ -27,6 +27,7 @@ import {
 import { createLeadVoice } from "./lead-voice.js";
 import { drawEnergy } from "./chords.js";
 import { MODE_COLORS, COLORS, FONT as THEME_FONT, MOTION, withAlpha, easeOut } from "../ui/theme.js";
+import { createSafeArea } from "../ui/mobile/safe-area.js";
 
 // ---- Look: shared tokens from src/ui/theme.js; Lead-specific geometry below ----
 export const LEAD_COLOR = MODE_COLORS.lead;
@@ -111,7 +112,8 @@ export function ladderGeometry(W, H, side = "right", inset = 0, clear = null) {
 
 // ---- DOM controls at the ladder's edge (status chips, readouts, left column, help button) ----
 // The ladder's arrows must never sit under them. Measured at most every 500 ms (layout reads are not free).
-const CLEAR_SEL = '#keySelect, #toneSelect, #guideToggle, #helpButton, #volumeMeter, #distortionDisplay, #outputChip, [data-gs-kind="status"]';
+const CLEAR_SEL = '#keySelect, #toneSelect, #guideToggle, #helpButton, #volumeMeter, #distortionDisplay, #outputChip, ' +
+  '[data-gs-kind="status"], #gsBar, #gsPill';
 const clearCache = { key: "", at: -Infinity, value: null };
 function edgeClearance(W, H, side, now) {
   if (typeof document === "undefined") return null;
@@ -137,25 +139,12 @@ const uToY = (geo, u) => geo.bottom - u * (geo.bottom - geo.top);
 const yToU = (geo, y) => (geo.bottom - y) / (geo.bottom - geo.top);
 const ox = (geo, d) => geo.edge + geo.dir * d; // x at distance d inward from the line ends
 
-// ---- Safe-area insets (landscape phones): measured with a probe element, re-read when the size changes ----
-let insetProbe = null;
-let insetFor = "";
-let insets = { left: 0, right: 0 };
-function safeInsets(W, H) {
-  if (typeof document === "undefined") return insets;
-  const k = `${W}x${H}`;
-  if (k === insetFor) return insets;
-  insetFor = k;
-  if (!insetProbe) {
-    insetProbe = document.createElement("div");
-    insetProbe.setAttribute("aria-hidden", "true");
-    insetProbe.style.cssText = "position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;" +
-      "padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)";
-    document.body.appendChild(insetProbe);
-  }
-  const cs = getComputedStyle(insetProbe);
-  insets = { left: parseFloat(cs.paddingLeft) || 0, right: parseFloat(cs.paddingRight) || 0 };
-  return insets;
+// ---- Safe-area insets (landscape phones): the shared probe from src/ui/mobile/safe-area.js ----
+let safeArea = null;
+function safeInsets() {
+  if (typeof document === "undefined" || !document.body) return { left: 0, right: 0 };
+  if (!safeArea) safeArea = createSafeArea(document);
+  return safeArea.get();
 }
 
 // ---- Mode state (module singleton, like chords.js) ----
@@ -542,7 +531,7 @@ const lead = {
     const H = g.canvas.height;
     const sides = ctx?.bus?.get?.("ui/sides");
     const side = sides && sides.expr === "left" ? "left" : "right";
-    const geo = (lastGeo = ladderGeometry(W, H, side, safeInsets(W, H)[side], edgeClearance(W, H, side, now)));
+    const geo = (lastGeo = ladderGeometry(W, H, side, safeInsets()[side], edgeClearance(W, H, side, now)));
     const sz = geo.sz;
     const dir = geo.dir;
     const alignIn = side === "left" ? "left" : "right"; // labels on the inner side of the ladder
