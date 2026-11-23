@@ -1,4 +1,4 @@
-// Lead mode sound: a monophonic lead voice (glide, retrigger, click-free envelope) and the left-hand chord as
+// Lead mode sound: a monophonic lead voice (discrete note steps, retrigger, click-free envelope) and the left-hand chord as
 // a soft pad. Both feed ctx.audio.out (the pre-master bus: waveshaper -> shared tilt filter -> master volume),
 // so the shared filter and master volume apply. It never touches the master gain (the router owns it).
 // Note events carry {freq, midi, voice, id}; `id` comes from `nextId` (ctx.audio.nextNoteId: app-wide unique),
@@ -13,7 +13,12 @@ export const ATTACK_S = 0.01; // linear attack
 export const DECAY_TAU = 0.08; // peak -> sustain
 export const RELEASE_TAU = 0.03; // ~150 ms to silence
 export const RETRIGGER_DIP_S = 0.008; // a new pinch on a sounding voice dips to 0 first (audible onset, no click)
-export const GLIDE_S = 0.07; // portamento between notes while pinched
+// Moving to another note while pinched steps the pitch (lead decision after the real-camera session: the 70 ms
+// portamento sounded like a slide guitar). The step is a 3 ms exponential ramp, not a jump to the new value
+// at an arbitrary sample: the oscillator keeps its phase either way, the ramp only rounds the slope kink.
+// Measured: no click under the lab's click metric (max jump / steady max < 1.6), no intermediate pitch in an
+// 85 ms FFT window (tests/lead.spec.js "audio quality").
+export const PITCH_STEP_S = 0.003;
 export const LEAD_TONE_HZ = 3200; // fixed lowpass that takes the edge off bright waveforms
 
 export const PAD_LEVEL = 0.03; // per pad note (4 notes, 2 oscillators each)
@@ -111,17 +116,17 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
     emit("note/on", freq, ts, soundingId, extra);
   }
 
-  /** Moves the sounding note to `freq` with a short portamento. */
-  function glideTo(freq, extra) {
+  /** Moves the sounding note to `freq` at once (legato: no new attack, the envelope keeps going). */
+  function stepTo(freq, extra) {
     const n = ensure();
     if (!n || soundingFreq == null) return;
     const t = n.ac.currentTime;
     hold(n.osc.frequency, t);
-    n.osc.frequency.exponentialRampToValueAtTime(freq, t + GLIDE_S);
+    n.osc.frequency.exponentialRampToValueAtTime(freq, t + PITCH_STEP_S);
     emit("note/off", soundingFreq, t, soundingId);
     soundingFreq = freq;
     soundingId = newId();
-    emit("note/on", freq, t, soundingId, { glide: true, ...extra });
+    emit("note/on", freq, t, soundingId, { legato: true, ...extra });
   }
 
   function noteOff() {
@@ -200,7 +205,7 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
 
   return {
     noteOn,
-    glideTo,
+    stepTo,
     noteOff,
     setPad,
     stop,
