@@ -166,7 +166,7 @@ export function createArpMode() {
       unsub.forEach((u) => u());
       unsub = [];
       cancelPending();
-      voice?.releaseAll(0.08); // sounding notes ring out briefly; the clock keeps running (shared)
+      voice?.releaseAll(0.15); // sounding notes ring out briefly (overlapping the next mode); the clock keeps running (shared)
     },
 
     update(right, c = ctx) {

@@ -3,20 +3,18 @@
 //   shared services (src/services) + signal bus (src/core/bus.js) reach modes through ctx.
 import { setupCamera, setupHandLandmarker } from "./src/input/camera.js";
 
-import { bus, createParam } from "./src/core/bus.js";
+import { bus } from "./src/core/bus.js";
 import { registry, registerMode } from "./src/core/registry.js";
-import { createHandInput, makeView } from "./src/input/hand-input.js";
-import { createRouter } from "./src/router.js";
-import { SynthEngine, createAudioFacade } from "./src/services/audio.js";
-import { createHarmony } from "./src/services/harmony.js";
+import { createAppContext } from "./src/core/app-context.js";
+import { makeView } from "./src/input/hand-input.js";
 import { initAnalytics, trackClarityEvent } from "./src/services/analytics.js";
 import { drawFrame } from "./src/ui/overlay.js";
 import { mountIndicators } from "./src/ui/indicators.js";
 import { mountControls } from "./src/ui/controls.js";
-import { createClock } from "./src/services/clock.js";
 import { createRadialMenu, playTick } from "./src/menu/radial-menu.js";
 import chordsMode from "./src/modes/chords.js";
 import arpMode from "./src/modes/arp.js";
+import { mountStatusChip } from "./src/output/status-chip.js"; // M3 output hook (see below)
 
 initAnalytics();
 
@@ -38,32 +36,7 @@ if (import.meta.env.DEV) {
   window.__gsTest = { results: { landmarks: [], handedness: [] } };
 }
 
-// ---- Services ----
-const synth = new SynthEngine({ bus, onFirstSound: () => trackClarityEvent("first_sound") });
-const audio = createAudioFacade(synth);
-const harmony = createHarmony();
-const handInput = createHandInput({ bus });
-
-// One shared tempo clock for every mode, created with the AudioContext (first user gesture).
-// Arp's enter() starts it; leaving Arp leaves it running.
-let clock = null;
-const getClock = () => {
-  if (!clock && synth.ctx) clock = createClock(synth.ctx, { bus });
-  return clock;
-};
-
-const ctx = {
-  audio,
-  get clock() { return getClock(); },
-  harmony,
-  bus,
-  param: (name, opts) => createParam(bus, name, { owner: router?.modeId ?? undefined, ...opts }),
-  toCanvas: (p) => ({ x: p.x * canvasEl.width, y: p.y * canvasEl.height }),
-  now: 0,
-  masterVolume: 0, // router: left height -> master volume (1.3)
-  rightLocked: null, // router: the right HandFrame locked when the menu opened
-};
-
+// ---- Services + ctx + router (src/core/app-context.js; the labs use the same wiring) ----
 // Container for the active mode's screen controls (empty for Chords).
 const modeControlsEl = document.createElement("div");
 modeControlsEl.id = "modeControls";
@@ -72,15 +45,23 @@ modeControlsEl.id = "modeControls";
 modeControlsEl.hidden = true;
 stageEl.appendChild(modeControlsEl);
 
-const router = createRouter({
-  bus, registry, harmony, ctx,
+const { synth, audio, harmony, handInput, ctx, router } = createAppContext({
+  bus,
+  registry,
+  canvasEl,
   controlsContainer: modeControlsEl,
-  aspect: () => (canvasEl.width && canvasEl.height ? canvasEl.width / canvasEl.height : 1),
+  onFirstSound: () => trackClarityEvent("first_sound"),
 });
 
 // ---- UI ----
 mountControls({ harmony, audio, synth, canvasEl });
 mountIndicators(meterBus(bus));
+
+// ---- OUTPUT HOOK (milestone 3) ----
+// Status chip only. The WebRTC output module is dynamic-imported when the user turns the
+// output on, so with the output off it is never loaded and does no work.
+const outputChip = mountStatusChip({ bus, ctx, parent: stageEl });
+// ---- end OUTPUT HOOK ----
 
 // ---- Modes ----
 // Menu directions: Chords up, Arp right (Lead left lands in milestone 2; down stays free).
@@ -104,6 +85,7 @@ if (import.meta.env.DEV) {
   window.__gsTest.router = router;
   window.__gsTest.ctx = ctx;
   window.__gsTest.handInput = handInput;
+  window.__gsTest.output = outputChip;
 }
 
 /**
@@ -129,7 +111,7 @@ function meterBus(b) {
             else if (name !== "volume" && wanted(name)) consumer.onSet?.(name, v);
           },
         },
-        (n) => n === "mode" || n === "volume" || n.endsWith("/volume") || n.endsWith("/gate") || wanted(n)
+        (n) => n !== "volume" && (n === "mode" || n.endsWith("/volume") || n.endsWith("/gate") || wanted(n))
       );
     },
   };

@@ -193,10 +193,12 @@ export class SynthEngine {
     const g = this.chordInstance.gain;
     // Not cancelAndHoldAtTime: after a finished linear ramp Chrome holds a wrong (about half) value,
     // which is an audible step. The attack ramp is long over, so g.value is the real level.
+    // Equal-power (cosine) fade: keeps the level up while the next mode's voices come in.
     const v = g.value;
+    const curve = new Float32Array(64);
+    for (let i = 0; i < curve.length; i++) curve[i] = v * Math.cos((Math.PI / 2) * (i / (curve.length - 1)));
     g.cancelScheduledValues(0);
-    g.setValueAtTime(v, t);
-    g.linearRampToValueAtTime(0, t + fade);
+    g.setValueCurveAtTime(curve, t, fade);
     const node = this.chordInstance;
     const oscs = this.oscillators;
     this._emitOff();

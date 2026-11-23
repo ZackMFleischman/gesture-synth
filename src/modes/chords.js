@@ -190,6 +190,9 @@ export default {
     held.volume = locked ? Math.max(0, Math.min(1, locked.height)) : held.volume;
     view.volume = held.volume;
     volumeParam.value = held.volume;
+    // Start the pad right now (same call as the previous mode's exit), not on the next frame:
+    // a slow frame must not open a gap in the sound.
+    if (ctx.rightLocked) this.hold(ctx);
   },
 
   exit(ctx) {

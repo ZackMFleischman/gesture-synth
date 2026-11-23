@@ -23,6 +23,7 @@ export const MASTER_VOLUME = Object.freeze({
   TAU_MS: 140, // one-pole smoothing time constant (right height uses ~30-50 ms in the audio graph)
   LOW: 0.1, // height at/below which the master is 0 (low left hand = rest)
   HIGH: 0.7, // height at/above which the master is 1
+  INITIAL: 1, // before a left hand was ever seen (e.g. a right-hand-only Lead melody); the first left frame sets it directly
 });
 
 /** Crossfade from locked right-hand values to the live hand after the menu releases it. */
@@ -35,7 +36,7 @@ export const RESUME_MS = 200;
 export function createMasterVolume(opts = {}) {
   const o = { ...MASTER_VOLUME, ...opts };
   let anchor = null; // dead-zoned height
-  let value = 0;
+  let value = o.INITIAL;
   let lastT = null;
   const map = (h) => Math.max(0, Math.min(1, (h - o.LOW) / (o.HIGH - o.LOW)));
   return {
