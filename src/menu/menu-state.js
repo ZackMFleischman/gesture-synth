@@ -19,10 +19,11 @@ export const MENU_TIMING = Object.freeze({
 
 /** Radii as multiples of the entry hand size (wrist -> middle MCP). */
 export const MENU_GEOMETRY = Object.freeze({
-  DEAD_R: 0.3, // center dead zone: no arc lit inside this radius
-  INNER_R: 0.42, // drawn inner edge of the arcs (fill starts here)
-  SELECT_R: 0.85, // select radius ~ one hand width; drawn outer edge of the arcs
-  DESELECT_R: 0.62, // hysteresis: once selected, stays selected until the fist is back inside this
+  // Pulled in ~30% after real-camera use (2026-11-22): selecting needed too much arm travel.
+  DEAD_R: 0.22, // center dead zone: no arc lit inside this radius
+  INNER_R: 0.3, // drawn inner edge of the arcs (fill starts here)
+  SELECT_R: 0.6, // select radius ~ 0.6 hand width; drawn outer edge of the arcs
+  DESELECT_R: 0.44, // hysteresis: once selected, stays selected until the fist is back inside this
   SECTOR_HYST_DEG: 10, // angular hysteresis between neighbouring directions
 });
 

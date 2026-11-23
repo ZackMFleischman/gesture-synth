@@ -279,7 +279,8 @@ don't overlap each other; no persistent element (new or existing, except user-op
   can overlap. A narrower mobile ladder (44px) may be needed once tested on a phone.
 
 ## Lead decisions on the open questions (2026-11-22)
-- **Q1 chord-hand side:** keep the hand-following rule (master track on the edge where the chord hand is displayed). It is correct
+- **Q1 chord-hand side — RESOLVED (user, real camera, 2026-11-22): the player's physical LEFT hand plays chords;
+  MediaPipe's "Left" label is correct as the app uses it. Help text "Left Hand" stays.** Original note: keep the hand-following rule (master track on the edge where the chord hand is displayed). It is correct
   whichever way MediaPipe labels hands. Do not change help text ("Left Hand") until confirmed with a real camera; the user will check
   on the M1 instance.
 - **Q2 meter in Arp:** shows gate (the right-height control), as proposed.

@@ -2,6 +2,10 @@
 import { test as base, expect as baseExpect } from "@playwright/test";
 import { createMenuState, MENU_GEOMETRY as G, MENU_TIMING as T, pickDirection } from "../src/menu/menu-state.js";
 
+// Distances inside the approach band (past the dead zone, short of the select radius), from the geometry.
+const APPROACH = (G.DEAD_R + G.SELECT_R) / 2;
+const along = (f) => G.DEAD_R + f * (G.SELECT_R - G.DEAD_R);
+
 // ---------------------------------------------------------------------------------------
 // Unit tests: pure state machine
 // ---------------------------------------------------------------------------------------
@@ -103,7 +107,7 @@ base.describe("radial menu state machine", () => {
     for (const [dx, dy, id] of cases) {
       const r = rig({ items: FOUR });
       r.open();
-      r.moveTo(dx * 0.6, dy * 0.6);
+      r.moveTo(dx * APPROACH, dy * APPROACH);
       const res = r.run(16);
       expect(res.hoverId, `${dx},${dy}`).toBe(id);
       expect(res.selectedId).toBe(null);
@@ -129,7 +133,7 @@ base.describe("radial menu state machine", () => {
     expect(res.hoverId).toBe(null);
     expect(res.progress).toBe(0);
     const ps = [];
-    for (const d of [0.35, 0.5, 0.7]) {
+    for (const d of [along(0.2), along(0.5), along(0.8)]) {
       r.moveTo(d, 0);
       ps.push(r.run(16).progress);
     }
@@ -205,7 +209,7 @@ base.describe("radial menu state machine", () => {
   base("cancel: open hand with nothing selected -> cancelled, no change", () => {
     const r = rig();
     r.open();
-    r.moveTo(0.5, 0); // approaching, not selected
+    r.moveTo(APPROACH, 0); // approaching, not selected
     expect(r.run(16).hoverId).toBe("arp");
     r.h.fist = false;
     const res = r.run(T.OPEN_DEBOUNCE_MS + 16);
@@ -282,7 +286,7 @@ base.describe("radial menu state machine", () => {
   base("scale invariance: same relative movement gives same result at any hand size", () => {
     for (const size of [0.05, 0.1, 0.22]) {
       for (const [d, sel] of [
-        [0.5, null],
+        [APPROACH, null],
         [G.SELECT_R + 0.05, "arp"],
       ]) {
         const r = rig({ size });
