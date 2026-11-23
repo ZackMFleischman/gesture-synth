@@ -19,8 +19,11 @@ import {
   fanLayout,
 } from "./menu-state.js";
 import { createMenuRenderer, viewFromCtx, MENU_THEME } from "./menu-draw.js";
+import { menuConfig, setMenuConfig, resetMenuConfig, MENU_CONFIG_DEFAULTS } from "./menu-config.js";
 
 export { MENU_TIMING, MENU_GEOMETRY, MENU_THEME, DIRECTIONS, BACK_ID, registerMenuItemType, pickDirection, pickSlot, fanLayout };
+// Live config (read every frame by the state machine + renderer): Tweaks panel / labs.
+export { menuConfig, setMenuConfig, resetMenuConfig, MENU_CONFIG_DEFAULTS };
 
 /**
  * @param {{
