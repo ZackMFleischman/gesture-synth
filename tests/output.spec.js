@@ -5,6 +5,7 @@ import fs from "node:fs";
 import { test, expect } from "@playwright/test";
 import { results, leftHand, rightHand, masterAt } from "./helpers/hands.js";
 import { createScreencast } from "./helpers/screencast.js";
+import { installSynthLog, checkRender } from "./helpers/output-timing.js";
 
 const SCREENS = "test-results/screens";
 const VIDEOS = "test-results/videos";
@@ -70,6 +71,19 @@ async function openViz(browser, code) {
   return { context, page, errors };
 }
 
+/** Opens the Controls panel (if needed) and returns its Output row locators (Q4: the output setting lives here). */
+async function outputRow(page) {
+  if (await page.locator("#controlsPanel").isHidden()) await page.locator("#controlsToggle").click();
+  const row = page.locator('#controlsPanel [data-hook="output"]');
+  await expect(row).toBeVisible();
+  return {
+    row,
+    sw: row.locator('[data-control="output"]'),
+    code: row.locator('[data-hook="output-code"]'),
+    status: row.locator('[data-hook="output-status"]'),
+  };
+}
+
 const chipShot = (page, state) =>
   page.screenshot({ path: `${SCREENS}/output-chip-${state}.png`, clip: { x: 1280 - 420, y: 0, width: 420, height: 260 } });
 
@@ -81,14 +95,30 @@ async function chipLatency(synth, viz, state) {
   return changedAt - joinedAt;
 }
 
-test("chip: off → waiting → connected (< 1 s) → waiting on disconnect → reconnect", async ({ browser }) => {
+test("chip: off (hidden) → waiting → connected (< 1 s) → waiting on disconnect → reconnect", async ({ browser }) => {
   const s = await openSynth(browser);
   await s.setHands(leftHand(1), rightHand(1, { volume: 0.5 }));
+  // Q4: while the output is off the chip is hidden; the Controls panel's Output row is the setting.
   await expect(s.page.locator("#outputChip")).toHaveAttribute("data-state", "off");
-  await expect(s.page.locator("#outputChip .label")).toHaveText("Output off");
+  await expect(s.page.locator("#outputChip")).toBeHidden();
+  const r = await outputRow(s.page);
+  await expect(r.sw).toHaveAttribute("aria-pressed", "false");
+  await expect(r.status).toHaveText("Off");
+  await expect(r.code).toBeHidden();
   await chipShot(s.page, "off");
 
-  const code = await turnOn(s.page);
+  // Turn it on from the Output row: the chip appears (Waiting + code), the row shows the same code.
+  await r.sw.click();
+  await expect(s.page.locator("#outputChip")).toBeVisible();
+  await expect(s.page.locator("#outputChip")).toHaveAttribute("data-state", "waiting");
+  await expect(s.page.locator("#outputChip .label")).toHaveText(/^Code /);
+  const code = (await s.page.locator("#outputChip .label").textContent()).replace("Code ", "");
+  expect(code).toMatch(CODE_RE);
+  await expect(r.sw).toHaveAttribute("aria-pressed", "true");
+  await expect(r.code).toHaveText(code);
+  await expect(r.status).toHaveText("Waiting for a visualizer");
+  await s.page.locator("#controlsToggle").click(); // close the panel again
+  await expect(s.page.locator("#controlsPanel")).toBeHidden();
   await chipShot(s.page, "waiting");
 
   // Connect
@@ -124,15 +154,20 @@ test("chip: off → waiting → connected (< 1 s) → waiting on disconnect → 
   expect(reconnectMs).toBeLessThan(1000);
   await expect.poll(() => v2.page.evaluate(() => window.__viz.manifest.length)).toBeGreaterThan(0);
 
-  // Popover: output on/off + room code
+  // A press on the chip opens the settings = the Controls panel, whose Output row shows on + code + state.
   await s.page.locator("#outputChip").click();
-  await expect(s.page.locator("#outputPopover")).toBeVisible();
-  await expect(s.page.locator("#outputRoomCode")).toHaveText(code);
-  await expect(s.page.locator("#outputToggle")).toBeChecked();
-  await s.page.screenshot({ path: `${SCREENS}/output-chip-popover.png`, clip: { x: 1280 - 420, y: 0, width: 420, height: 420 } });
-  // Turning it off from the popover: chip off, visualizer drops to waiting.
-  await s.page.locator("#outputToggle").uncheck();
+  await expect(s.page.locator("#controlsPanel")).toBeVisible();
+  await expect(s.page.locator("#outputPopover")).toBeHidden(); // the chip's own popover is not used in the app
+  const r2 = await outputRow(s.page);
+  await expect(r2.sw).toHaveAttribute("aria-pressed", "true");
+  await expect(r2.code).toHaveText(code);
+  await expect(r2.status).toHaveText(/^Direct · \d+ ms$/);
+  await s.page.screenshot({ path: `${SCREENS}/output-controls-row.png`, clip: { x: 0, y: 0, width: 1280, height: 520 } });
+  // Turning it off from the Output row: chip off + hidden, visualizer drops to waiting.
+  await r2.sw.click();
   await expect(s.page.locator("#outputChip")).toHaveAttribute("data-state", "off");
+  await expect(s.page.locator("#outputChip")).toBeHidden();
+  await expect(r2.status).toHaveText("Off");
   await expect(v2.page.locator("#conn")).not.toHaveAttribute("data-state", "direct", { timeout: 5000 });
 
   report("chip-latency", { connectMs, disconnectMs, reconnectMs, delayLabelChangesIn2_5s: changes });
@@ -142,7 +177,7 @@ test("chip: off → waiting → connected (< 1 s) → waiting on disconnect → 
   await s.context.close();
 });
 
-test("visualizer gets manifest, full state, fast frames, timed events, periodic state, clock sync", async ({ browser }) => {
+test("visualizer gets manifest, full state, fast frames, timed events, periodic state, clock sync", async ({ browser }, info) => {
   const s = await openSynth(browser);
   // Chord set BEFORE the visualizer connects: must show up from the connect snapshot.
   await s.setHands(leftHand(4), rightHand(3, { volume: 0.75, tilt: 0.5 }));
@@ -231,8 +266,9 @@ test("visualizer gets manifest, full state, fast frames, timed events, periodic 
   const earlyMs = arp.playLocal - arp.recvLocal; // how early it arrived
   const showErrMs = arp.shownLocal - arp.playLocal; // shown vs scheduled (render frame granularity)
   expect(earlyMs).toBeGreaterThan(50);
-  expect(showErrMs).toBeGreaterThanOrEqual(0);
-  expect(showErrMs).toBeLessThan(40);
+  // Painted in the first frame at/after its play time; < 40 ms unless that frame was stalled (annotated).
+  checkRender(info, "scheduled note", [{ due: arp.playLocal, shown: arp.shownLocal, prevFrame: arp.prevFrame }],
+    { lateMs: 40, longTasks: await v.page.evaluate(() => window.__viz.longTasks.slice()) });
 
   // Periodic state every 2 s.
   const snaps0 = await v.page.evaluate(() => window.__viz.snapshots);
@@ -263,7 +299,7 @@ test("visualizer gets manifest, full state, fast frames, timed events, periodic 
   await s.context.close();
 });
 
-test("beat grid lights up when ctx.clock exists; visualizer beats follow the synth clock", async ({ browser }) => {
+test("beat grid lights up when ctx.clock exists; visualizer beats follow the synth clock", async ({ browser }, info) => {
   const s = await openSynth(browser);
   await s.setHands(leftHand(1), rightHand(1, { volume: 0.5 }));
   const code = await turnOn(s.page);
@@ -274,27 +310,44 @@ test("beat grid lights up when ctx.clock exists; visualizer beats follow the syn
   expect(await v.page.evaluate(() => window.__viz.beatgrid?.running ?? false)).toBe(false);
 
   // Start the shared clock (what Arp's enter() does): 120 BPM on the AudioContext timeline.
+  await installSynthLog(s.page); // the synth's beats on its audio clock (getOutputTimestamp), epoch ms
   await s.page.evaluate(() => {
     const clock = window.__gsTest.ctx.clock;
     clock.bpm = 120;
     clock.start();
   });
-  // The grid is re-sent with the periodic state (the clock start itself is not a bus change).
+  // The clock start sends the grid at once (M3 3.3: clock.onTransport; timing checked in m3-output.spec.js).
   await expect.poll(() => v.page.evaluate(() => window.__viz.beatgrid?.running), { timeout: 5000 }).toBe(true);
   expect(await v.page.evaluate(() => window.__viz.beatgrid?.bpm)).toBe(120);
   expect(await v.page.evaluate(() => window.__viz.state["/gs/bpm"])).toBe(120);
   await v.page.evaluate(() => (window.__viz.beatsShown.length = 0));
   await v.page.waitForTimeout(2600);
-  const beats = await v.page.evaluate(() => window.__viz.beatsShown.filter((b) => !b.event));
+  const viz = await v.page.evaluate(() => ({
+    beats: window.__viz.beatsShown.filter((b) => !b.event).map((b) => ({ ...b, origin: performance.timeOrigin })),
+    longTasks: window.__viz.longTasks.slice(),
+  }));
+  const beats = viz.beats;
+  const synthBeats = await s.page.evaluate(() => window.__m3.beats.slice());
   expect(beats.length).toBeGreaterThanOrEqual(4);
-  const intervals = beats.slice(1).map((b, i) => b.local - beats[i].local);
-  // Beats are drawn on render frames: allow ~3 frames of jitter (CI machines run many pages at once).
-  for (const d of intervals) expect(Math.abs(d - 500)).toBeLessThan(60);
-  const lateness = beats.map((b) => b.local - b.expected);
-  for (const l of lateness) expect(l).toBeLessThan(60);
+  // 1. The visualizer's beat clock (grid + synced offset) vs the synth's audio-clock beats: the spec requirement.
+  //    Each computed beat time is matched to the nearest synth beat; same tolerance as the phase check below.
+  const beatErr = beats.map((b) => {
+    const e = b.expected + b.origin;
+    const m = synthBeats.reduce((a, x) => (Math.abs(x.epoch - e) < Math.abs(a.epoch - e) ? x : a));
+    expect(b.beat).toBe(m.beat - 1); // same beat of the bar (bus beat = 1..4)
+    return e - m.epoch;
+  });
+  for (const d of beatErr) expect(Math.abs(d)).toBeLessThan(15);
+  const intervals = beats.slice(1).map((b, i) => b.expected - beats[i].expected); // computed, not painted
+  for (const d of intervals) expect(Math.abs(d - 500)).toBeLessThan(15);
   // Beat index cycles through the bar.
   const idx = beats.map((b) => b.beat);
   for (let i = 1; i < idx.length; i++) expect(idx[i]).toBe((idx[i - 1] + 1) % 4);
+  // 2. Painting: each dot in the first frame at/after its beat; paint delay < 60 ms (~3 frames) unless that frame
+  //    itself came late (main-thread stall -> annotated "render-stall", reported, not a timing failure).
+  const lateness = beats.map((b) => b.local - b.expected);
+  const stalls = checkRender(info, "beat dots", beats.map((b) => ({ due: b.expected, shown: b.local, prevFrame: b.prevFrame })),
+    { lateMs: 60, longTasks: viz.longTasks });
 
   // The grid matches the synth's AudioContext beats (converted to wall clock on both sides).
   // Best of a few samples: each side's read is itself delayed by test-harness scheduling.
@@ -317,8 +370,10 @@ test("beat grid lights up when ctx.clock exists; visualizer beats follow the syn
   expect(phaseErrMs).toBeLessThan(15);
 
   report("beat-grid", {
+    beatClockErrVsSynthAudioMs: beatErr.map((d) => +d.toFixed(2)),
     beatIntervalsMs: intervals.map((d) => +d.toFixed(1)),
     beatShownLateMs: lateness.map((d) => +d.toFixed(1)),
+    renderStalls: stalls.length,
     gridPhaseErrorVsSynthMs: +phaseErrMs.toFixed(2),
   });
   expect(s.errors).toEqual([]);
@@ -458,14 +513,14 @@ test("demo video: connect → playing → disconnect → reconnect", async ({ br
     return v;
   };
   await play([[1, 1, 0.5, 0]]);
-  await s.page.locator("#outputChip").click(); // open settings
-  await s.page.waitForTimeout(400);
-  await s.page.locator("#outputToggle").check();
+  const r = await outputRow(s.page); // open settings (Controls panel, Q4)
+  await s.page.waitForTimeout(400); // let the video show the open panel
+  await r.sw.click();
   await expect(s.page.locator("#outputChip")).toHaveAttribute("data-state", "waiting");
-  await expect(s.page.locator("#outputRoomCode")).toHaveText(CODE_RE);
-  const code = (await s.page.locator("#outputRoomCode").textContent()).trim();
-  await s.page.waitForTimeout(800);
-  await s.page.mouse.click(640, 400); // close popover
+  await expect(r.code).toHaveText(CODE_RE);
+  const code = (await r.code.textContent()).trim();
+  await s.page.waitForTimeout(800); // the code stays readable on video
+  await s.page.locator("#controlsToggle").click(); // close the panel
   const v = await openTrackedViz();
   await expect(s.page.locator("#outputChip")).toHaveAttribute("data-state", "connected");
   await play([[1, 1, 0.5, 0], [4, 2, 0.7, 0.3], [5, 3, 0.8, 0.6], [6, 1, 0.6, -0.4], [2, 4, 0.5, 0], [5, 3, 0.75, 0.2]]);
@@ -488,22 +543,34 @@ test("demo video: connect → playing → disconnect → reconnect", async ({ br
 test.describe("mobile viewport", () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
-  test("chip stays on-screen and clear of the existing controls", async ({ page }) => {
+  test("chip: hidden while off; once on it stays on-screen (as a dot) and clear of the existing + new controls", async ({ page }) => {
     await page.goto(`/?mockHands&signal=${encodeURIComponent(SIGNAL)}`);
     await page.locator("#startOverlay").click();
     await page.waitForFunction(() => document.getElementById("webcam").videoWidth > 0);
+    await expect(page.locator("#outputChip")).toBeHidden();
+    await page.evaluate(() => window.__gsTest.output.setOutput(true));
+    await expect(page.locator("#outputChip")).toBeVisible();
+    await expect(page.locator("#outputChip")).toHaveAttribute("data-state", "waiting");
     // Phones: the top-left controls live in the mobile bar's tray (docs/mobile-ui.md).
     if (!(await page.locator("#guideToggle").isVisible())) await page.locator("#gsPill").click();
     await page.locator("#guideToggle").click();
     const chip = await page.locator("#outputChip").boundingBox();
     expect(chip.x).toBeGreaterThanOrEqual(0);
     expect(chip.x + chip.width).toBeLessThanOrEqual(390);
+    expect(chip.width).toBeLessThanOrEqual(40); // D12: dot only below 520 px
     const overlaps = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
-    for (const id of ["keySelect", "toneSelect", "guideToggle", "gestureGuide", "volumeMeter", "distortionDisplay",
-      "chordDisplay", "qualityDisplay", "helpButton", "gsBar"]) {
+    const ids = ["keySelect", "toneSelect", "guideToggle", "gestureGuide", "volumeMeter", "distortionDisplay",
+      "chordDisplay", "qualityDisplay", "helpButton", "gsBar"];
+    // ...and the modes UI chrome (mode badge, Controls toggle, transport, ...: every visible [data-gs-kind] element;
+    // on phones most of it is folded into the mobile bar, #gsBar above) and the mobile bar's own parts.
+    const extra = await page.evaluate(() => [...document.querySelectorAll("[data-gs-kind], #gsBar [id]")]
+      .filter((e) => e.id && e.id !== "outputChip" && e.getClientRects().length && getComputedStyle(e).display !== "none")
+      .map((e) => e.id));
+    for (const id of [...ids, ...extra]) {
       const box = await page.locator(`#${id}`).boundingBox();
       if (!box) continue; // folded into the collapsed mobile bar (checked as #gsBar)
       expect(overlaps(chip, box), `#outputChip overlaps #${id}`).toBe(false);
     }
+    await page.screenshot({ path: `${SCREENS}/output-chip-mobile.png`, clip: { x: 0, y: 0, width: 390, height: 200 } });
   });
 });
