@@ -304,3 +304,10 @@ body.gs-modes .gs-collapsed { display: none !important; }
   body.gs-modes.gs-panel-open #outputChip,
   body.gs-modes.gs-panel-open #outputPopover { display: none; }
 }
+
+/* Shown until the hand model has loaded (main.js). Top center, clear of the controls and the chord display. */
+#trackingStatus {
+  position: absolute; left: 50%; top: 24px; transform: translateX(-50%); z-index: 8;
+  font-family: monospace; font-size: 13px; color: #e8a13d; background: rgba(20, 20, 20, 0.85);
+  border: 1px solid #3a3428; border-radius: 999px; padding: 4px 12px; pointer-events: none;
+}

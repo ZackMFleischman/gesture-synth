@@ -127,7 +127,16 @@ async function main() {
   } else if (MOCK_HANDS) {
     handLandmarker = { detectForVideo: () => window.__gsTest.results };
   } else {
-    handLandmarker = await setupHandLandmarker();
+    // Show the camera at once; landmarks start when the model has loaded (first visit: ~8 MB download).
+    const NO_HANDS = { landmarks: [], handedness: [] };
+    handLandmarker = { detectForVideo: () => NO_HANDS };
+    const status = document.createElement("div");
+    status.id = "trackingStatus";
+    status.textContent = "Loading hand tracking…";
+    document.getElementById("stage").append(status);
+    setupHandLandmarker()
+      .then((real) => { handLandmarker = real; status.remove(); })
+      .catch((err) => { status.textContent = "Hand tracking failed to load. Reload the page."; console.error(err); });
   }
 
   let lastVideoTime = -1;
