@@ -126,3 +126,7 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
 - Layout contract: `clearArea()` from `src/ui/theme.js`; the master-volume track sits on the edge where the chord hand is displayed.
 - UI files: `src/ui/{theme.js, modes.css, edge-tracks.js, hand-overlays.js, readouts.js, badges.js, controls-panel.js, transport.js, guide.js}`;
   chip in `src/output/status-chip.js`. Colors: Chords amber #e8a13d (unchanged), Arp #4fb3ff, Lead #c08cff, warning coral #ff5a5f.
+- HandFrame (0.3): `voicingBeforePinch: number|null` — voicingCount from ~PINCH_LOOKBACK_MS (300 ms) before the pinch start,
+  latched for the pinch; null when not pinching. Use it instead of `voicingCount` while `pinch`. Pinch is decided before the
+  finger count. Thumb has hysteresis ±THUMB_BAND (0.08 hand sizes) when stateful. Thresholds: `setThresholds()/getThresholds()`.
+  New files: `src/input/camera.js`, `src/input/replay.js`, `labs/gesture-test.html`.
