@@ -13,15 +13,42 @@
 // a breath puff); a note step = setFreq() (+ excite(t, traits.hammerOn) when traits.legato is "hammer-on"); the
 // release = source.release(). An instrument change while a note sounds crossfades (SWAP_S) to a new source at the
 // same pitch: no gap, no click.
+//
+// Release (pinch opens): a smooth fade of the envelope over leadConfig.releaseMs (releaseCurve: cubic, slope 0 at the
+// end = exact, click-free silence; -60 dB at 90% of the time) for every instrument; the instrument's own
+// source.release() (palm mute, 8-12 ms key-up fades) runs only once that fade is silent, so it never cuts the tail.
+// releaseTime() is the one place that picks the length (a per-instrument trait can override it later). A new pinch
+// during the fade retriggers via cancelAndHold + the RETRIGGER_DIP_S dip (no click, no stuck note).
 
 import { createSource, createRack, instrumentFromTone, defaultInstrumentId, traitsOf } from "../instruments/index.js";
+import { leadConfig } from "./lead-config.js";
 
 // ---- Tunables ----
 export const LEAD_PEAK = 0.2;
 export const LEAD_SUSTAIN = 0.16;
 export const ATTACK_S = 0.01; // linear attack
 export const DECAY_TAU = 0.08; // peak -> sustain
-export const RELEASE_TAU = 0.03; // ~150 ms to silence
+export const RELEASE_TAU = 0.03; // (legacy; the release now uses releaseCurve over leadConfig.releaseMs)
+export const RELEASE_POINTS = 64;
+
+/**
+ * Release envelope: `points` gain values from `level` to exactly 0, shape (1 - x)^3 (gentle start like an
+ * exponential with tau = T/3, slope 0 at the end so the tail never clicks; -60 dB at x = 0.9).
+ */
+export function releaseCurve(level, points = RELEASE_POINTS) {
+  const c = new Float32Array(points);
+  for (let i = 0; i < points; i++) {
+    const x = i / (points - 1);
+    c[i] = level * (1 - x) * (1 - x) * (1 - x);
+  }
+  return c;
+}
+
+/** Release length in seconds (live: leadConfig.releaseMs; clamped 10 ms .. 1.5 s, the graph outlives it on stop). */
+export function releaseTime() {
+  const ms = Number(leadConfig.releaseMs);
+  return Math.max(0.01, Math.min(1.5, Number.isFinite(ms) ? ms / 1000 : 0.25));
+}
 export const RETRIGGER_DIP_S = 0.008; // a new pinch on a sounding voice dips to 0 first (audible onset, no click)
 // Moving to another note while pinched steps the pitch (lead decision after the real-camera session: the 70 ms
 // portamento sounded like a slide guitar). The step is a 3 ms exponential ramp, not a jump to the new value
@@ -70,6 +97,7 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
   let nodes = null; // built lazily once the AudioContext exists
   let soundingFreq = null; // freq of the current lead note (null = released)
   let soundingId = null; // note id of the current lead note
+  let releaseToken = 0; // pending deferred source.release() (noteOff); a noteOn invalidates it
   let pad = []; // [{ freq, gain, oscs, id }]
   let padKey = "";
 
@@ -151,6 +179,7 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
 
   /** Starts (or retriggers) the lead note. */
   function noteOn(freq, extra) {
+    releaseToken++; // a deferred source.release() from an earlier noteOff must not touch this note
     const n = ensure();
     if (!n) return;
     const t = n.ac.currentTime;
@@ -195,9 +224,24 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
     const n = nodes;
     if (!n || soundingFreq == null) return;
     const t = n.ac.currentTime;
-    hold(n.env.gain, t);
-    n.env.gain.setTargetAtTime(0, t, RELEASE_TAU);
-    n.src.release(t); // the instrument's own note end (palm mute, key-up fade; no-op for oscillators)
+    const g = n.env.gain;
+    hold(g, t);
+    const level = g.value;
+    const T = releaseTime();
+    try {
+      if (level > 1e-4) g.setValueCurveAtTime(releaseCurve(level), t, T);
+      else g.setValueAtTime(0, t);
+    } catch {
+      g.setTargetAtTime(0, t, T / 6.9); // overlapping automation (should not happen): exp. to -60 dB
+    }
+    // The instrument's own note end (palm mute, key-up fade) once our fade is silent: called later, not scheduled
+    // into the future (a re-pinch during the fade must not be muted by it). Skipped if a new note started.
+    const src = n.src;
+    const token = ++releaseToken;
+    setTimeout(() => {
+      if (token !== releaseToken || soundingFreq != null || !nodes || nodes.src !== src) return;
+      src.release(nodes.ac.currentTime);
+    }, T * 1000 + 20);
     emit("note/off", soundingFreq, t, soundingId);
     soundingFreq = null;
     soundingId = null;

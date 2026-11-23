@@ -396,6 +396,20 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
   `swap` variants (and the labs' `&swap`) are the mirrored case (chord hand on the screen right). Hand-internal geometry
   (thumb direction, tilt sign) is unchanged.
 
+- Lead edge feedback + release (ws/lead-proximity, real-camera feedback): the snapped note and its hysteresis are
+  unchanged; the ladder adds (display only) a faint sweet-spot band around the current note's line (+-`sweetBand` of the
+  gap to each neighbour), a small white pointer at the ladder's screen edge at the hand's exact (unsnapped) height
+  (display-smoothed, tau 35 ms), and past the sweet band the cursor ring leans toward the neighbour being approached
+  while that neighbour's line (glow) and label brighten with closeness to the switch point. Controller state:
+  `proximity` (-1..1, 0 = on the line, +-1 = at the switch point incl. hysteresis), `proximityTo`, `lean` (0..1),
+  pure `cellProximity()` in lead-notes.js; `lead._debug()` adds `proximity, proximityTo (midi), lean, handU, marker,
+  sweet, nearEdge`. Release: pinch open -> `releaseCurve` (cubic (1-x)^3 from the held level to exact 0 over
+  `releaseMs`, -60 dB at 90%); retrigger during it = cancelAndHold + the 8 ms dip. `releaseTime()` in lead-voice.js is
+  the single place picking the length (an instrument trait can override it later). Live tunables:
+  `src/modes/lead-config.js` (`leadConfig`, `setLeadConfig()`, `LEAD_TWEAKS` definitions for the Tweaks panel; defaults
+  releaseMs 250, sweetBand 0.35, snapHysteresis 0.3, showHandMarker true). Mouse/tap on an octave arrow (the `#leadPad`
+  strip) steps the octave at once; the 0.3 s hold is for the pinch only.
+
 - Radial menu auto-select + display smoothing (ws/menu-autoselect, user feedback after real-camera testing 2026-11-22):
   - **Auto-select:** the fist crossing an arc's select radius (`SELECT_R` 0.6) chooses it at once, no open hand: mode /
     layer -> `confirmed` + flash + countdown; setting -> `setting` + flash; the current item -> closes quietly (`cancelled`,

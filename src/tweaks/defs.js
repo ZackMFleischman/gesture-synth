@@ -7,6 +7,7 @@ import { VOICING_HOLD } from "../modes/arp.js";
 import { MOTION, CONFIRM } from "../ui/theme.js";
 import { MASTER_VOLUME } from "../router.js";
 import { CHORD_LEVEL, LIMITER, setChordLevel, setLimiterThreshold } from "../services/audio.js";
+import { DEFAULT_LEAD_CONFIG, LEAD_TWEAKS, setLeadConfig } from "../modes/lead-config.js";
 
 // Radial menu config (src/menu/menu-config.js, from ws/menu-autoselect). import.meta.glob resolves to {} while the
 // file is not merged, so this binds automatically once it lands, with no build error before.
@@ -169,6 +170,13 @@ function defineAudioTweaks(synth) {
   });
 }
 
+function defineLeadTweaks() {
+  const group = "Lead";
+  for (const t of LEAD_TWEAKS) {
+    defineTweak({ group, ...t, key: `lead.${t.key}`, default: DEFAULT_LEAD_CONFIG[t.key], apply: (v) => setLeadConfig({ [t.key]: v }) });
+  }
+}
+
 /** Define every app tweak. The menu group is async (its config module is a lazy import). */
 export async function defineAppTweaks({ synth = null } = {}) {
   const menu = defineMenuTweaks(); // first group in the panel (registered before the sync groups below)
@@ -177,4 +185,5 @@ export async function defineAppTweaks({ synth = null } = {}) {
   defineHandTweaks();
   defineDisplayTweaks();
   defineAudioTweaks(synth);
+  defineLeadTweaks();
 }

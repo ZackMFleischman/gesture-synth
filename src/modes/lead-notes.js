@@ -9,6 +9,7 @@
 // Values beyond [0, 1] are the arrow zones. lead.js converts screen y <-> u.
 
 import { MAJOR_SCALE } from "../services/harmony.js";
+import { leadConfig } from "./lead-config.js";
 
 // ---- Tunables ----
 
@@ -169,6 +170,33 @@ export function snapIndex(p, notes, prev = null, hyst = SNAP_HYSTERESIS) {
   return dPrev - bestD > 2 * hyst * gap ? best : prev;
 }
 
+/**
+ * Where the continuous pitch `p` sits inside the cell of ladder note `idx` (the cell = the range in which the
+ * snapped note stays `idx`, hysteresis included).
+ * proximity: -1..1, 0 = on the note's line, +-1 = at the switch point to the upper / lower neighbour
+ *   (gap * (0.5 + hyst) away). A side without a neighbour is scaled by the other side's gap and clamped.
+ * toward: ladder index of the neighbour on the hand's side (null = none / on the line).
+ * lean: 0..1, how far past the sweet band (+-sweet * gap) toward the switch point (0 inside the band, 1 at the switch).
+ */
+export function cellProximity(p, notes, idx, hyst = SNAP_HYSTERESIS, sweet = 0.35) {
+  const out = { proximity: 0, toward: null, lean: 0, sweetEdge: 1 };
+  if (idx == null || !notes || !notes[idx]) return out;
+  const x = p - notes[idx].midi;
+  const up = notes[idx + 1], dn = notes[idx - 1];
+  const gapUp = up ? up.midi - notes[idx].midi : null;
+  const gapDn = dn ? notes[idx].midi - dn.midi : null;
+  const side = x >= 0 ? 1 : -1;
+  const gap = (side > 0 ? gapUp : gapDn) ?? (side > 0 ? gapDn : gapUp) ?? 1;
+  const reach = gap * (0.5 + hyst);
+  const prox = Math.max(-1, Math.min(1, x / reach));
+  const sweetEdge = Math.min(1, (sweet * gap) / reach);
+  out.proximity = prox;
+  out.sweetEdge = sweetEdge;
+  out.toward = x === 0 ? null : side > 0 ? (up ? idx + 1 : null) : dn ? idx - 1 : null;
+  out.lean = sweetEdge >= 1 ? 0 : Math.max(0, Math.min(1, (Math.abs(prox) - sweetEdge) / (1 - sweetEdge)));
+  return out;
+}
+
 // ---- The right-hand controller (state machine) ----
 
 /**
@@ -205,6 +233,11 @@ export function createLeadController({ setId = 1, octave = OCTAVE_DEFAULT } = {}
     arrowDir: null,
     arrowSince: 0,
     arrowProgress: 0,
+    // Edge feedback (display only; cellProximity): where the hand is inside the current note's cell.
+    pitch: null, // continuous pitch under the hand (null = keyboard / arrow / no hand)
+    proximity: 0, // -1..1: 0 = centre, +-1 = at the switch point to the upper / lower neighbour
+    proximityTo: null, // ladder index of the neighbour being approached
+    lean: 0, // 0..1: how far past the sweet band toward the switch point
 
     setCandidate: null,
     setSince: 0,
@@ -304,7 +337,7 @@ export function createLeadController({ setId = 1, octave = OCTAVE_DEFAULT } = {}
       s.hover = null;
     }
     if (forced) s.preview = input.noteIdx;
-    else if (!s.hover) s.preview = snapIndex(pitchAt(input.u), notes, s.preview);
+    else if (!s.hover) s.preview = snapIndex(pitchAt(input.u), notes, s.preview, leadConfig.snapHysteresis);
 
     // ---- Pinch transitions ----
     if (input.pinch && s.pinchMode === "none") {
@@ -353,6 +386,21 @@ export function createLeadController({ setId = 1, octave = OCTAVE_DEFAULT } = {}
           s.pinchMode = "dead"; // one step per pinch
         }
       }
+    }
+
+    // ---- Edge feedback: position inside the current note's cell ----
+    const cur = s.pinchMode === "note" && s.playIdx != null ? s.playIdx : s.preview;
+    if (!forced && !s.hover && cur != null) {
+      s.pitch = pitchAt(input.u);
+      const cp = cellProximity(s.pitch, notes, cur, leadConfig.snapHysteresis, leadConfig.sweetBand);
+      s.proximity = cp.proximity;
+      s.proximityTo = cp.toward;
+      s.lean = cp.lean;
+    } else {
+      s.pitch = null;
+      s.proximity = 0;
+      s.proximityTo = null;
+      s.lean = 0;
     }
 
     // ---- Note-set toggle: valid count, stable SET_HOLD_MS, never while pinching ----
