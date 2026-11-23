@@ -33,7 +33,7 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
 
     // ---- Left hand: chord ----
     harmony.updateLeft(
-      left ? { chord: classifyChord(left.landmarks, "Left"), isMajorMode: left.tilt >= 0 } : null,
+      left ? { chord: classifyChord(left.landmarks, "Left", left.fingers), isMajorMode: left.tilt >= 0 } : null,
       now
     );
 

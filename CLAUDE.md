@@ -7,7 +7,10 @@ Hand tracking: MediaPipe HandLandmarker (wasm + model loaded from CDN at runtime
 - `main.js` — thin entry: builds services + `ctx`, registers modes, runs the camera/render loop.
 - `src/input/hand-input.js` — landmarks -> `HandFrame` (fingers, counts, fist, pinch w/ hysteresis, height,
   tilt, display-space pos, handSize). ALL gesture classification lives here; thresholds are exported
-  constants (`FIST_TIP_RATIO`, `PINCH_START`, `PINCH_END`). Pure (no DOM) — unit-testable in Node.
+  live bindings (`FIST_TIP_RATIO`, `PINCH_START`, `PINCH_END`, `THUMB_BAND`, `PINCH_LOOKBACK_MS`; change via
+  `setThresholds()`, defaults in `DEFAULT_THRESHOLDS`). Pinch is decided before the finger count; while
+  pinching use `voicingBeforePinch`, not `voicingCount`. Pure (no DOM) — unit-testable in Node.
+  `camera.js` = camera + MediaPipe setup; `replay.js` = record/replay of raw results (DEV).
 - `src/router.js` — left hand -> chord (via harmony); right hand -> radial menu hook (`router.setMenu`) ->
   active mode. Publishes `mode`.
 - `src/modes/*.js` — mode plugins (`chords.js` = the original right-hand behavior + energy wave).
@@ -32,6 +35,12 @@ Node lives at `~/.local/node/bin` on this machine (not on the default PATH):
   `rightHand(quality, {volume, tilt, thumb})`, `fist({...})`, `pinch({distance, ...})`; every builder
   also takes `pos` (display space), `view` and `scale`. `window.__gsTest` also exposes `synth`, `bus`,
   `router`, `ctx`, `handInput` (DEV only — never in the build).
+- **Gesture test page:** `/labs/gesture-test.html` (dev server; also `?mockHands`, `?replay=`). Live HandFrame
+  values per hand, threshold sliders (live-edit `setThresholds()` in hand-input.js), flicker counters, and a
+  **Record** button that downloads raw MediaPipe results as JSON (`src/input/replay.js` format).
+- **Replay real hand data:** put the JSON under `tests/fixtures/`, then `/?replay=/tests/fixtures/x.json`
+  (app or test page, DEV only, real time; `&replayLoop` repeats) or in Node
+  `replayThrough(loadRecordingFile(path))` from `tests/helpers/replay.js` -> per-frame HandFrames.
 - **Signals:** `window.__gsTest.bus.get(name)` / `.manifest()` shows what is published.
 - **Pure logic** (`tests/bus.spec.js`, `tests/hand-input.spec.js`) imports `src/` modules directly in Node.
 - **Sound:** `tests/helpers/audio.js` taps everything going to `AudioContext.destination`.
