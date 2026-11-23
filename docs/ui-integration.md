@@ -297,3 +297,6 @@ don't overlap each other; no persistent element (new or existing, except user-op
 - **Drive / Space experimental, off by default:** their switches moved to an "Experimental" group at the bottom of the
   Controls panel (note "Hand sideways controls"). While off: no tick scales at the hands, no "sideways" rows in the
   gesture guide, the help modal's Drive / Space lines (`#helpExperimental`) hidden, nothing on the wire.
+- **8-bar meter hidden (supersedes D5 / L1 for display):** `#volumeMeter` is not shown with the modes UI in any mode or
+  layout (still in the DOM, still updated). Its value is on the edge tracks (Arp gate = right track, Chords master =
+  master track). D12: the output chip now sits at the top-right gutter where the meter was.

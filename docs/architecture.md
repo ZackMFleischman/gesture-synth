@@ -297,6 +297,12 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
     `[data-group="experimental"]` "Experimental · Hand sideways controls". Help modal: the Drive / Space lines live in
     `#helpExperimental` (hidden unless an axis is on; each line `[data-axis]` shown only while its axis is on). On =
     today's behavior.
+- Top-right 8-bar meter hidden with the modes UI (ws/simplify; user: "The bars in the upper right I think represent the
+  gate, but I think we can nix that? The gate's already mid right on the screen."): `body.gs-modes #volumeMeter
+  {display:none}` in every mode, desktop and phones (same approach as `#distortionDisplay`). Eric's element stays in the
+  DOM and is still updated (readouts.js / indicators.js, mode field `meter` and `S.meter` kept: not dead). The edge
+  tracks carry the same values (Arp gate = right track, master = master track). The output chip moves to the top-right
+  gutter (it sat left of the meter).
 - Lead layer (ws/lead-layer; spec note "Decided after real-camera testing: Lead plays on top of the current mode"):
   - Modes split into BASE modes (Chords, Arp: accompaniment, left hand) and LAYERS (mode plugin `layer: true`: Lead). The
     router keeps `active` = the base and `layer` = Lead or null. Bus: `mode` = the base id (unchanged meaning for
