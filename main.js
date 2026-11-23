@@ -69,6 +69,7 @@ if (import.meta.env.DEV) {
   window.__gsTest.bus = bus;
   window.__gsTest.router = router;
   window.__gsTest.ctx = ctx;
+  window.__gsTest.handInput = handInput;
 }
 
 // ---- Camera setup ----
