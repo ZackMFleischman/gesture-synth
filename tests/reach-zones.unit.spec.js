@@ -127,12 +127,20 @@ test.describe("reach zones: horizontal", () => {
 });
 
 test.describe("reach zones: hand input", () => {
-  test("createHandInput publishes left|right/x and /zone (null when lost), honours ui/sides", () => {
+  test("createHandInput publishes left|right/x (only while its axis is on) and /zone (null when lost), honours ui/sides", () => {
     const bus = createBus();
     const hi = createHandInput({ bus });
     const seen = [];
     bus.subscribe({ onSet: (n, v) => seen.push([n, v]) }, ["left/x", "right/x", "left/zone", "right/zone"]);
+    // Drive / Space are experimental and off by default: no x on the bus (nor on the wire).
     hi.process(results(leftHand(1), rightHand(2)), 0);
+    expect(bus.get("left/x")).toBeUndefined();
+    expect(bus.get("right/x")).toBeUndefined();
+    expect(seen.filter(([n]) => n.endsWith("/x"))).toEqual([]);
+    expect(typeof hi.process(results(leftHand(1), rightHand(2)), 1).left.x).toBe("number"); // HandFrame.x still computed
+    bus.set("space/on", true);
+    bus.set("drive/on", true);
+    hi.process(results(leftHand(1), rightHand(2)), 2);
     expect(typeof bus.get("left/x")).toBe("number");
     expect(typeof bus.get("right/x")).toBe("number");
     // helper default: left palm displays at x 0.7 (right half), right palm at 0.3 (left half)
@@ -148,6 +156,13 @@ test.describe("reach zones: hand input", () => {
     hi.process(results(leftHand(1)), 99);
     expect(bus.get("right/x")).toBeNull();
     expect(bus.get("right/zone")).toBeNull();
+    // Switched off again: x goes null once, then nothing more is published.
+    bus.set("space/on", false);
+    hi.process(results(leftHand(1)), 132);
+    expect(bus.get("left/x")).toBeNull();
+    const n = seen.length;
+    for (let t = 165; t < 400; t += 33) hi.process(results(leftHand(1, { x: 1 })), t);
+    expect(seen.slice(n).filter(([name]) => name === "left/x")).toEqual([]);
   });
 });
 
@@ -169,8 +184,23 @@ test.describe("sideways axes (src/core/axes.js)", () => {
     expect(outward(null)).toBeNull();
   });
 
-  test("hand x drives the params (smoothed, first frame direct); switches on by default; off = 0, hand ignored", () => {
+  test("experimental: both switches OFF by default; off = no param published, audio untouched, hand ignored", () => {
     const { bus, calls, axes } = setup();
+    expect(bus.get("drive/on")).toBe(false);
+    expect(bus.get("space/on")).toBe(false);
+    expect(axes.isOn("drive")).toBe(false);
+    for (let t = 0; t < 600; t += 16) axes.update(f(1), f(1), { now: t });
+    expect(bus.get("drive")).toBeUndefined();
+    expect(bus.get("space")).toBeUndefined();
+    expect(calls.drive).toEqual([]);
+    expect(calls.space).toEqual([]);
+    expect(axes.values).toEqual({ drive: 0, space: 0 });
+  });
+
+  test("switched on: hand x drives the params (smoothed, first frame direct); off again = 0 once, hand ignored", () => {
+    const { bus, calls, axes } = setup();
+    axes.setOn("drive", true);
+    axes.setOn("space", true);
     expect(bus.get("drive/on")).toBe(true);
     axes.update(f(1), f(1), { now: 0 });
     expect(bus.get("drive")).toBe(1);
@@ -180,9 +210,13 @@ test.describe("sideways axes (src/core/axes.js)", () => {
     expect(bus.get("drive")).toBeGreaterThan(0.5); // smoothed (60 ms)
     for (let t = 32; t < 600; t += 16) axes.update(f(0.5), f(0.5), { now: t });
     expect(bus.get("drive")).toBe(0);
+    axes.update(f(1), f(1), { now: 650 });
+    expect(bus.get("drive")).toBeGreaterThan(0);
     bus.set("drive/on", false);
+    const n = calls.drive.length;
     for (let t = 700; t < 1300; t += 16) axes.update(f(1), f(1), { now: t });
     expect(bus.get("drive")).toBe(0);
+    expect(calls.drive.slice(n)).toEqual([0]); // neutral sound, once
     expect(bus.get("space")).toBe(1);
     axes.setOn("drive", true);
     for (let t = 1300; t < 1900; t += 16) axes.update(f(1), f(1), { now: t });
@@ -191,6 +225,8 @@ test.describe("sideways axes (src/core/axes.js)", () => {
 
   test("a lost hand and a held right hand (menu) hold the value", () => {
     const { bus, axes } = setup();
+    axes.setOn("drive", true);
+    axes.setOn("space", true);
     axes.update(f(0.9), f(0.9), { now: 0 });
     const d = bus.get("drive");
     axes.update(null, null, { now: 16 });

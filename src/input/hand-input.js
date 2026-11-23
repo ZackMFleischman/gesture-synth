@@ -6,6 +6,7 @@
 
 import { bus as sharedBus } from "../core/bus.js";
 import { heightIn, xIn, zoneFor } from "./reach-zones.js";
+import { AXES, isAxisOn } from "../core/axes.js";
 
 // ---- Tunable thresholds (live-tuned on labs/gesture-test.html) ----
 // `export let` = live bindings: setThresholds() changes what every importer sees.
@@ -345,6 +346,13 @@ const SIDE_SIGNALS = {
   Right: { height: "right/height", tilt: "right/tilt", pos: "right/pos", top: "right/top", pinchpt: "right/pinchpt", fist: "right/fist", pinch: "right/pinch", size: "right/size", x: "right/x", zone: "right/zone" },
 };
 
+// Sideways axes fed by each hand's `x` (src/core/axes.js; experimental, off by default): `left|right/x` is published
+// only while one of them is switched on.
+const X_AXES = {
+  Left: AXES.filter((a) => a.source === SIDE_SIGNALS.Left.x),
+  Right: AXES.filter((a) => a.source === SIDE_SIGNALS.Right.x),
+};
+
 const HISTORY_MS = 1000; // voicing history kept per hand (must exceed PINCH_LOOKBACK_MS)
 
 /** Per-hand state carried between frames. Reset when the hand is lost. */
@@ -378,7 +386,7 @@ export function createHandInput({ bus = sharedBus } = {}) {
     bus.declare(side.fist, { type: "state", owner: "hand-input" });
     bus.declare(side.pinch, { type: "state", owner: "hand-input" });
     bus.declare(side.size, { type: "continuous", owner: "hand-input" }); // handSize, display-height units
-    bus.declare(side.x, { type: "continuous", owner: "hand-input" }); // 0 inner .. 0.5 neutral .. 1 outer (reach zone)
+    bus.declare(side.x, { type: "continuous", owner: "hand-input" }); // 0 inner .. 0.5 neutral .. 1 outer; only while its axis is on
     bus.declare(side.zone, { type: "state", owner: "hand-input" }); // reach zone {top,bottom,inner,outer,side} (fixed band)
   }
   // `/gs/pinch` event: 1 when the right (mode) hand starts a pinch, 0 at release (or when the pinching
@@ -436,7 +444,8 @@ export function createHandInput({ bus = sharedBus } = {}) {
     bus.set(s.fist, f ? f.fist : false);
     bus.set(s.pinch, f ? f.pinch : false);
     bus.set(s.size, f ? f.handSize : null);
-    bus.set(s.x, f ? f.x : null);
+    if (X_AXES[side].some((a) => isAxisOn(bus, a))) bus.set(s.x, f ? f.x : null);
+    else if (bus.get(s.x) != null) bus.set(s.x, null); // switched off: once, then nothing
     if (!f) bus.set(s.zone, null);
     else {
       // The band is fixed: a new object only when the hand's display side changes (few updates for consumers).

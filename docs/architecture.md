@@ -284,6 +284,19 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
   - Edge tracks span exactly this band (also before any hand was seen); Lead's ladder spans it (arrows at the band ends,
     DOM chrome at that edge still wins). The router's MASTER_VOLUME map (LOW 0.1 .. HIGH 0.55 of height, dead zone,
     smoothing) is unchanged: it works on height.
+- Drive & Space = EXPERIMENTAL, OFF by default (ws/simplify; user: "the side-to-side for space and drive makes things too
+  complicated right now. Mark it as an experimental feature and disable it for the moment."):
+  - Code kept as is (`src/core/axes.js`, audio graph, at-hand scales). `<id>/on` defaults to `false` (on only when exactly
+    `true`; `isAxisOn(bus, axis)`); nothing is persisted, so every load starts off.
+  - Off: no audio effect (`setDrive` / `setSpace` never called, or called once with 0 when switched off: the waveshaper
+    has no curve until first used = bit-identical pass-through, no convolver until first used), the hand is ignored, no
+    at-hand tick scales, no gesture-guide rows, no help lines. Output: `drive` / `space` are not set on the bus (so not in
+    the state snapshot nor sent) until switched on; `left|right/x` are published by hand input only while an axis using
+    them is on (HandFrame.x is still computed). Switching off after on sets the param to 0 and the x to null once.
+  - Controls panel: the two switches sit in an "Experimental" group at the bottom (after Output), header
+    `[data-group="experimental"]` "Experimental · Hand sideways controls". Help modal: the Drive / Space lines live in
+    `#helpExperimental` (hidden unless an axis is on; each line `[data-axis]` shown only while its axis is on). On =
+    today's behavior.
 - Lead layer (ws/lead-layer; spec note "Decided after real-camera testing: Lead plays on top of the current mode"):
   - Modes split into BASE modes (Chords, Arp: accompaniment, left hand) and LAYERS (mode plugin `layer: true`: Lead). The
     router keeps `active` = the base and `layer` = Lead or null. Bus: `mode` = the base id (unchanged meaning for

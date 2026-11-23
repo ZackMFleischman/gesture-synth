@@ -142,6 +142,8 @@ body.gs-modes #outputPopover { top: 46px; right: var(--gs-gutter); }
 #controlsPanel .gs-v { display: flex; align-items: center; gap: 6px; min-width: 0; }
 #controlsPanel .gs-sep { grid-column: 1 / -1; height: 1px; background: #3a3428; margin: 1px 0; }
 #controlsPanel .gs-full { grid-column: 1 / -1; }
+/* "Experimental" group (Drive / Space switches, off by default) at the bottom of the panel. */
+#controlsPanel .gs-exp-head { display: flex; align-items: baseline; gap: 8px; color: var(--gs-quiet); font: 600 12px monospace; }
 .gs-hand {
   display: inline-flex; margin-left: auto; padding-left: 4px; color: var(--gs-quiet);
   visibility: hidden;

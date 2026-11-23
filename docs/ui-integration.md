@@ -294,3 +294,6 @@ don't overlap each other; no persistent element (new or existing, except user-op
 - **Fixed height band:** both edge tracks (master and the right track) span exactly the middle 75 % of the screen height
   (12.5 % .. 87.5 %, `BAND` in `src/input/reach-zones.js`), the band the palm height maps over; the marker is level with
   the palm and stops at the band ends. Lead's ladder spans the same band. The Controls "Range" row is gone.
+- **Drive / Space experimental, off by default:** their switches moved to an "Experimental" group at the bottom of the
+  Controls panel (note "Hand sideways controls"). While off: no tick scales at the hands, no "sideways" rows in the
+  gesture guide, the help modal's Drive / Space lines (`#helpExperimental`) hidden, nothing on the wire.

@@ -2,7 +2,9 @@
 // User feedback after real-camera testing: the up/down range "keeps changing. It should just be 75% of the size of the
 // screen." -> height = palm y over the FIXED middle 75 % of the display height (12.5 % = 1 .. 87.5 % = 0), both hands
 // (src/input/reach-zones.js BAND). Plus: right hand sideways = Drive, left hand sideways = Space (src/core/axes.js),
-// each with a neutral middle, a Controls switch and an at-hand tick scale.
+// each with a neutral middle, a Controls switch and an at-hand tick scale. Drive / Space are EXPERIMENTAL and OFF by
+// default (user: "Mark it as an experimental feature and disable it for the moment"): every ON test turns the switch
+// on first, through the Controls panel's "Experimental" group.
 import fs from "node:fs";
 import { test, expect, SCREENS_DIR } from "./fixtures.js";
 import { leftHand, rightHand, hand, DESKTOP_VIEW } from "./helpers/hands.js";
@@ -13,6 +15,20 @@ const WAV_DIR = "test-results/audio";
 const dB = (x) => 20 * Math.log10(x);
 const bus = (page, name) => page.evaluate((n) => window.__gsTest.bus.get(n), name);
 const shot = (page, state) => page.screenshot({ path: `${SCREENS_DIR}/reach-${state}.png` });
+
+/** Sets the Drive / Space switches through the Controls panel ("Experimental" group), then closes the panel. */
+async function setAxes(page, want) {
+  await page.locator("#controlsToggle").click();
+  for (const [id, on] of Object.entries(want)) {
+    const sw = page.locator(`[data-control="axis-${id}"]`);
+    if ((await sw.getAttribute("aria-pressed")) !== String(on)) await sw.click();
+    await expect(sw).toHaveAttribute("aria-pressed", String(on));
+    await expect.poll(() => bus(page, `${id}/on`)).toBe(on);
+  }
+  await page.locator("#controlsToggle").click();
+  await expect(page.locator("#controlsPanel")).toBeHidden();
+}
+const axesOn = (page) => setAxes(page, { drive: true, space: true });
 
 const BAND_TOP = 0.125; // display fractions, src/input/reach-zones.js BAND (spelled out: the user's numbers)
 const BAND_BOTTOM = 0.875;
@@ -149,7 +165,20 @@ test.describe("reach zones: vertical (the user's bug)", () => {
 });
 
 test.describe("reach zones: horizontal", () => {
-  test("left/x and right/x: 0 inner, 0.5 neutral (band middle), 1 outer; null when the hand is lost", async ({ synthPage: page, setHands }) => {
+  test("default OFF: hands sideways publish nothing (no left/x, right/x, drive, space) and change no sound", async ({ synthPage: page, setHands }) => {
+    expect(await bus(page, "drive/on")).toBe(false);
+    expect(await bus(page, "space/on")).toBe(false);
+    for (const x of [0, 1, 0.5, 1]) {
+      await setHands(leftHand(1, { x }), rightHand(2, { x }));
+      await page.waitForTimeout(150);
+    }
+    for (const n of ["left/x", "right/x", "drive", "space"]) expect(await bus(page, n), n).toBeUndefined();
+    const audio = await page.evaluate(() => ({ drive: window.__gsTest.synth.drive, space: window.__gsTest.synth.space, shaper: !!window.__gsTest.synth.waveShaper?.curve, send: !!window.__gsTest.synth.spaceSend }));
+    expect(audio).toEqual({ drive: 0, space: 0, shaper: false, send: false }); // Drive bypassed (no curve), no reverb running
+  });
+
+  test("left/x and right/x (switched on): 0 inner, 0.5 neutral (band middle), 1 outer; null when the hand is lost", async ({ synthPage: page, setHands }) => {
+    await axesOn(page);
     for (const x of [0, 0.5, 1]) {
       await setHands(leftHand(1, { x }), rightHand(2, { x }));
       await page.waitForTimeout(150);
@@ -210,6 +239,7 @@ async function settleLimiterMeter(page) {
 test.describe("Drive (right hand sideways)", () => {
   test("brightness rises with right x, loudness stays within ±2 dB (default tone, filter neutral)", async ({ synthPage: page, setHands }) => {
     test.setTimeout(60_000);
+    await setAxes(page, { drive: true });
     const L = leftHand(4, { volume: 0.7 });
     const levels = [];
     for (const x of [0.5, 0.75, 0.9, 1]) {
@@ -238,6 +268,7 @@ test.describe("Drive (right hand sideways)", () => {
   test("full Drive on loud Chords (sawtooth, filter open, master 1, right 1): no limiting, loudness ±2 dB, peak <= 1", async ({ synthPage: page, setHands }) => {
     test.setTimeout(60_000);
     const th = await threshold(page);
+    await setAxes(page, { drive: true });
     await page.locator("#toneSelect").selectOption("sawtooth");
     const L = leftHand(6, { minor: true, volume: 0.95 }); // master 1, a close voicing below
     const out = [];
@@ -259,6 +290,7 @@ test.describe("Drive (right hand sideways)", () => {
 
   test("full Drive on loud Arp (gate 1, x2, max settings): no limiting, peak <= 1", async ({ synthPage: page, setHands }) => {
     const th = await threshold(page);
+    await setAxes(page, { drive: true });
     await page.locator("#toneSelect").selectOption("sawtooth");
     await setHands(leftHand(1, { volume: 0.95 }));
     await page.evaluate(() => window.__gsTest.router.setMode("arp"));
@@ -274,26 +306,30 @@ test.describe("Drive (right hand sideways)", () => {
     expect(m.peak).toBeLessThanOrEqual(1);
   });
 
-  test("Drive switched off: right x has no effect (param 0, same brightness as neutral)", async ({ synthPage: page, setHands }) => {
+  test("Drive off (default, and switched off again): right x has no effect (same brightness as neutral)", async ({ synthPage: page, setHands }) => {
+    test.setTimeout(60_000);
     await page.locator("#toneSelect").selectOption("sawtooth");
     const L = leftHand(4, { volume: 0.95 });
     await setHands(L, rightHand(3, { volume: 0.8, x: 0.5 }));
     await page.waitForTimeout(900); // tone change + chord hold + ramps settle (steady state only)
     const neutral = await measure(page, 700);
-    await page.locator("#controlsToggle").click();
-    const sw = page.locator('[data-control="axis-drive"]');
-    await expect(sw).toHaveAttribute("aria-pressed", "true");
-    await sw.click();
-    await expect(sw).toHaveAttribute("aria-pressed", "false");
+    // Default: off. The hand all the way out changes nothing.
     await setHands(L, rightHand(3, { volume: 0.8, x: 1 }));
     await page.waitForTimeout(900);
-    expect(await bus(page, "drive")).toBe(0);
-    const off = await measure(page, 700);
-    console.log(`[drive-off] neutral ${dB(neutral.rms).toFixed(2)} dB ${neutral.centroid.toFixed(0)} Hz; off ${dB(off.rms).toFixed(2)} dB ${off.centroid.toFixed(0)} Hz`);
-    expect(Math.abs(off.centroid / neutral.centroid - 1)).toBeLessThan(0.03);
-    expect(Math.abs(dB(off.rms) - dB(neutral.rms))).toBeLessThan(0.5);
-    await sw.click();
+    expect(await bus(page, "drive")).toBeUndefined();
+    const dflt = await measure(page, 700);
+    // On: full Drive. Off again: back to neutral (param 0).
+    await setAxes(page, { drive: true });
     await expect.poll(() => bus(page, "drive")).toBe(1);
+    await setAxes(page, { drive: false });
+    await expect.poll(() => bus(page, "drive")).toBe(0);
+    await page.waitForTimeout(900);
+    const off = await measure(page, 700);
+    for (const [name, m] of [["default", dflt], ["off", off]]) {
+      console.log(`[drive-${name}] neutral ${dB(neutral.rms).toFixed(2)} dB ${neutral.centroid.toFixed(0)} Hz; ${name} ${dB(m.rms).toFixed(2)} dB ${m.centroid.toFixed(0)} Hz`);
+      expect(Math.abs(m.centroid / neutral.centroid - 1), name).toBeLessThan(0.03);
+      expect(Math.abs(dB(m.rms) - dB(neutral.rms)), name).toBeLessThan(0.5);
+    }
   });
 });
 
@@ -314,6 +350,7 @@ test.describe("Space (left hand sideways)", () => {
 
   test("wet tail after note-off with left x high; none at neutral; dry level kept at neutral", async ({ synthPage: page, setHands }) => {
     test.setTimeout(60_000);
+    await setAxes(page, { space: true });
     const dry = await tail(page, setHands, 0.5);
     expect(dry.space).toBe(0);
     const wet = await tail(page, setHands, 1);
@@ -328,6 +365,7 @@ test.describe("Space (left hand sideways)", () => {
 
   test("full Space on loud Chords: no limiting, peak <= 1", async ({ synthPage: page, setHands }) => {
     const th = await threshold(page);
+    await setAxes(page, { space: true });
     await page.locator("#toneSelect").selectOption("sawtooth");
     await setHands(leftHand(6, { minor: true, volume: 0.95, x: 1 }), rightHand(4, { volume: 1, tilt: 1 }));
     await page.waitForTimeout(1500); // reverb builds up to its steady level
@@ -339,24 +377,35 @@ test.describe("Space (left hand sideways)", () => {
     expect(m.peak).toBeLessThanOrEqual(1);
   });
 
-  test("Space switched off: no tail", async ({ synthPage: page, setHands }) => {
-    await page.locator("#controlsToggle").click();
-    await page.locator('[data-control="axis-space"]').click();
-    await expect(page.locator('[data-control="axis-space"]')).toHaveAttribute("aria-pressed", "false");
+  test("Space off (default, and switched off again): no tail", async ({ synthPage: page, setHands }) => {
+    test.setTimeout(60_000);
     const t = await tail(page, setHands, 1);
-    expect(t.space).toBe(0);
+    expect(t.space).toBeUndefined(); // default off: not published
     expect(dB(t.tail + 1e-9) - dB(t.playing)).toBeLessThan(-50);
+    await setAxes(page, { space: true });
+    await expect.poll(() => bus(page, "space")).toBe(1);
+    await setAxes(page, { space: false });
+    const t2 = await tail(page, setHands, 1);
+    expect(t2.space).toBe(0);
+    expect(dB(t2.tail + 1e-9) - dB(t2.playing)).toBeLessThan(-50);
   });
 });
 
 // ---------- UI ----------
 
 test.describe("at-hand indicators, guide, help", () => {
-  test("tick scales under each palm: neutral, active (dot at the hand), hidden when switched off", async ({ synthPage: page, setHands }) => {
+  test("tick scales under each palm: none by default; switched on: neutral, active (dot at the hand); hidden when switched off", async ({ synthPage: page, setHands }) => {
     const regions = () => page.evaluate(() => Object.fromEntries(window.__gsTest.ui.regions.filter((r) => r.name.startsWith("axis-")).map((r) => [r.name, r.rect])));
-    await setHands(leftHand(1, { x: 0.5 }), rightHand(2, { x: 0.5 }));
+    await setHands(leftHand(1, { x: 1 }), rightHand(2, { x: 1 }));
     await page.waitForTimeout(300);
     let r = await regions();
+    expect(Object.keys(r)).toEqual([]); // default off: no at-hand indicators
+    await shot(page, "axes-off");
+    await axesOn(page);
+    await setHands(leftHand(1, { x: 0.5 }), rightHand(2, { x: 0.5 }));
+    await expect.poll(() => bus(page, "drive")).toBe(0); // glides back from the x 1 it was switched on at
+    await page.waitForTimeout(100);
+    r = await regions();
     expect(Object.keys(r).sort()).toEqual(["axis-drive", "axis-space"]);
     expect(r["axis-drive"].active).toBe(false);
     const W = await page.evaluate(() => window.innerWidth);
@@ -376,28 +425,61 @@ test.describe("at-hand indicators, guide, help", () => {
     const zr = await bus(page, "right/zone");
     expect(zr.side === "left" ? r["axis-drive"].dot.x < rp.x * W : r["axis-drive"].dot.x > rp.x * W).toBe(true);
     await shot(page, "drive-space-active");
-    await page.locator("#controlsToggle").click();
-    await page.locator('[data-control="axis-drive"]').click();
-    await page.locator("#controlsToggle").click();
+    await setAxes(page, { drive: false });
     await page.waitForTimeout(200);
     r = await regions();
     expect(r["axis-drive"]).toBeUndefined();
     expect(r["axis-space"]).toBeDefined();
   });
 
-  test("Controls panel rows, gesture guide rows and help text", async ({ synthPage: page }) => {
-    await page.locator("#controlsToggle").click();
-    for (const c of ["axis-drive", "axis-space"]) await expect(page.locator(`[data-control="${c}"]`)).toBeVisible();
-    await shot(page, "controls");
-    await page.locator("#guideToggle").click();
+  test("Controls panel: Experimental group at the bottom, off; guide + help lines only while switched on", async ({ synthPage: page }) => {
     const guide = page.locator("#gestureGuide");
-    await expect(guide).toContainText("Right hand sideways → Drive");
-    await expect(guide).toContainText("Left hand sideways → Space");
+    const helpLine = (t) => page.locator("#helpModal p").filter({ hasText: t });
+    const LINES = ["Right hand sideways → Drive", "Left hand sideways → Space"];
+    // Default: off. No guide lines, no help lines.
+    await page.locator("#guideToggle").click();
+    await expect(guide).toBeVisible();
+    for (const t of LINES) await expect(guide).not.toContainText(t);
+    await shot(page, "guide-default");
+    await page.locator("#guideToggle").click();
+    await page.locator("#helpButton").click();
+    await expect(page.locator("#helpModal")).toBeVisible();
+    await expect(page.locator("#helpExperimental")).toBeHidden();
+    for (const t of LINES) await expect(helpLine(t)).toBeHidden();
+    await page.locator("#closeHelp").click();
+    // The panel: "Experimental" + note, then the two switches (off), after every other row.
+    await page.locator("#controlsToggle").click();
+    const head = page.locator('#controlsPanel [data-group="experimental"]');
+    await expect(head).toBeVisible();
+    await expect(head).toContainText("Experimental");
+    await expect(head).toContainText("Hand sideways controls");
+    const order = await page.evaluate(() => [...document.querySelectorAll("#controlsPanel > *")].map((e) => e.dataset.group || e.querySelector("[data-control]")?.dataset.control || e.dataset.hook || e.querySelector("[data-hook]")?.dataset.hook || ""));
+    const at = (k) => order.indexOf(k);
+    expect(at("experimental")).toBeGreaterThan(at("output"));
+    expect(at("experimental")).toBeGreaterThan(at("master"));
+    expect(at("axis-drive")).toBeGreaterThan(at("experimental"));
+    expect(at("axis-space")).toBeGreaterThan(at("experimental"));
+    for (const c of ["axis-drive", "axis-space"]) {
+      await expect(page.locator(`[data-control="${c}"]`)).toBeVisible();
+      await expect(page.locator(`[data-control="${c}"]`)).toHaveAttribute("aria-pressed", "false");
+    }
+    await shot(page, "controls");
+    await page.locator("#controlsToggle").click();
+    // Switched on: the guide and help show them (as today).
+    await axesOn(page);
+    await page.locator("#guideToggle").click();
+    for (const t of LINES) await expect(guide).toContainText(t);
     await shot(page, "guide");
     await page.locator("#guideToggle").click();
-    const help = await page.locator("#helpModal").textContent();
-    expect(help).toContain("Right hand sideways → Drive");
-    expect(help).toContain("Left hand sideways → Space");
+    await page.locator("#helpButton").click();
+    await expect(page.locator("#helpExperimental")).toBeVisible();
+    for (const t of LINES) await expect(helpLine(t)).toBeVisible();
+    await page.locator("#closeHelp").click();
+    // Only Drive on: only its lines.
+    await setAxes(page, { space: false });
+    await page.locator("#helpButton").click();
+    await expect(helpLine(LINES[0])).toBeVisible();
+    await expect(helpLine(LINES[1])).toBeHidden();
   });
 
   test("phone 390x844: tick scales are compact and on screen", async ({ page, setHands }) => {
@@ -408,6 +490,7 @@ test.describe("at-hand indicators, guide, help", () => {
     const { setPlacementView, viewFor } = await import("./helpers/hands.js");
     setPlacementView(viewFor(390, 844));
     const view = viewFor(390, 844);
+    await page.evaluate(() => { window.__gsTest.bus.set("drive/on", true); window.__gsTest.bus.set("space/on", true); });
     await setHands(leftHand(1, { pos: { x: 0.75, y: 0.5 }, view, scale: 0.5 }), rightHand(2, { pos: { x: 0.2, y: 0.45 }, view, scale: 0.5 }));
     await page.waitForTimeout(400);
     const r = await page.evaluate(() => window.__gsTest.ui.regions.filter((x) => x.name.startsWith("axis-")).map((x) => x.rect));
@@ -424,6 +507,7 @@ test.describe("at-hand indicators, guide, help", () => {
 test("video: reaching up/down and sideways (test-results/videos/reach-zones.webm)", async ({ synthPage: page, setHands, browser }) => {
   test.setTimeout(90_000);
   const OUT = "test-results/videos/reach-zones.webm";
+  await axesOn(page); // sideways = experimental Drive / Space, switched on for the video
   await setHands(leftHand(1), rightHand(2));
   await page.waitForTimeout(500);
   const rec = createScreencast();
