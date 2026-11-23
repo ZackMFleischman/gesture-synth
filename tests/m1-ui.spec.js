@@ -550,13 +550,14 @@ test.describe("modes UI behavior", () => {
     await expect.poll(() => page.evaluate(() => window.__gsTest.output.status.state)).toBe("off");
   });
 
-  test("Lead (layer on Chords): no right track (the ladder replaces it), meter = Chords' held volume dimmed, note-set badge in row 1", async ({ synthPage: page, setHands }) => {
+  test("Lead (layer on Chords): no right track (the ladder replaces it), meter = the master volume (live, not dimmed), note-set badge in row 1", async ({ synthPage: page, setHands }) => {
     await ensureLead(page);
     await setHands(...scene(DESKTOP));
     await page.evaluate(() => window.__gsTest.router.setMode("lead"));
     await expect(page.locator("#modeBadge")).toHaveText("Chords+Lead");
     await expect(page.locator("#volumeMeter")).toBeVisible();
-    await expect.poll(() => page.locator("#volumeMeter").evaluate((e) => Number(getComputedStyle(e).opacity))).toBeLessThan(0.6);
+    // Chords' meter is the master (left hand): it stays live under the layer, not dimmed like a held right-hand value.
+    await expect.poll(() => page.locator("#volumeMeter").evaluate((e) => Number(getComputedStyle(e).opacity))).toBeGreaterThan(0.9);
     await expect(page.locator("#noteSetBadge")).toBeVisible();
     await expect(page.locator("#noteSetBadge i.on")).toHaveCount(1);
     await frames(page, 4);

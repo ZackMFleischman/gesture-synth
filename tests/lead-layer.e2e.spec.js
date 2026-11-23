@@ -190,7 +190,7 @@ test("Chords -> Lead: the chord keeps sounding at the held voicing / volume, lef
       const L1 = SC.left(1);
       await setHands(page, L1, SC.open(3, HIGH.y, { x: HIGH.x }));
       await page.waitForTimeout(700);
-      const before = { vol: await bus(page, "chords/volume"), voicing: await bus(page, "voicing"), key: await page.evaluate(() => window.__gsTest.synth.currentKey) };
+      const before = { gain: await page.evaluate(() => window.__gsTest.synth.chordGain.gain.value), voicing: await bus(page, "voicing"), key: await page.evaluate(() => window.__gsTest.synth.currentKey) };
       expect(before.voicing).toBe(3);
       const ref1 = track(await recordAudio(page, 500)).samples;
       const stop = await startRec(page);
@@ -208,10 +208,11 @@ test("Chords -> Lead: the chord keeps sounding at the held voicing / volume, lef
       expect(gap).toBeLessThan(0.03);
       expect(d2).toBeLessThanOrEqual(ref * 1.25 + 1e-3);
 
-      // Right hand low + other finger count: Chords' volume / voicing stay held; the chord keeps sounding.
+      // Right hand low + other finger count: Chords' voicing stays held and its level is unchanged (Chords volume is
+      // the left hand only — the fixed chord-voice gain doesn't follow the right hand); the chord keeps sounding.
       await setHands(page, L1, SC.open(1, 0.8));
       await page.waitForTimeout(500);
-      expect(await bus(page, "chords/volume")).toBeCloseTo(before.vol, 5);
+      expect(await page.evaluate(() => window.__gsTest.synth.chordGain.gain.value)).toBeCloseTo(before.gain, 3);
       expect(await bus(page, "voicing")).toBe(3);
       expect(await page.evaluate(() => window.__gsTest.synth.currentKey)).toBe(before.key);
       const steady = track(await recordAudio(page, 500));
@@ -312,7 +313,7 @@ test("menu: Lead again = no change; the base underneath = layer off + Return cro
   expect(await state(page)).toEqual({ mode: "chords", layer: null, right: "chords" });
 });
 
-test("Controls panel while Lead is on: Mode row lights base + Lead; held Arp gate / tempo and Chords volume are settable", async ({ synthPage: page }) => {
+test("Controls panel while Lead is on: Mode row lights base + Lead; held Arp gate / tempo are settable; no Chords volume row", async ({ synthPage: page }) => {
   const L1 = SC.left(1);
   await setHands(page, L1, SC.open(2, 0.4));
   await page.evaluate(() => window.__gsTest.router.setMode("arp"));
@@ -346,16 +347,11 @@ test("Controls panel while Lead is on: Mode row lights base + Lead; held Arp gat
   await page.locator('#controlsPanel [data-control="bpm-up"]').click();
   await expect.poll(() => bus(page, "bpm")).toBe(bpm0 + 1);
   await page.screenshot({ path: `${SCREENS_DIR}/layer-controls.png` });
-  // Chords under Lead: a held Volume row.
+  // Chords under Lead: no Chords volume row (Chords volume = the left hand / "Master vol", even under the layer).
   await page.locator('#controlsPanel [data-control="mode"] button[data-value="chords"]').click();
   await page.locator('#controlsPanel [data-control="mode"] button[data-value="lead"]').click();
   expect(await state(page)).toEqual({ mode: "chords", layer: "lead", right: "lead" });
-  const vol = page.locator('#controlsPanel [data-control="chords-volume"]');
-  await expect(vol).toBeVisible();
-  await vol.fill("0.3");
-  await expect.poll(() => bus(page, "chords/volume")).toBeCloseTo(0.3, 2);
-  await page.waitForTimeout(200);
-  expect(await page.evaluate(() => window.__gsTest.synth.chordGain.gain.value)).toBeCloseTo(0.3, 1);
+  await expect(page.locator('#controlsPanel [data-control="chords-volume"]')).toHaveCount(0);
   await closeControls(page);
 });
 
