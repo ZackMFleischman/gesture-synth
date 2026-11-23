@@ -56,7 +56,13 @@ test("Lead layer chrome (Chords + Lead badge, note-set badge, chord, held meter)
     leftHand(4, { pos: { x: 0.72, y: 0.5 }, view }),
     pinch({ pos: { x: 0.3, y: 0.42 }, view, distance: 0.55, fingers: ["index", "middle", "ring", "pinky"] })
   );
-  await hands();
+  // Chords first plays root position (1 finger, thumb in): the voicing / volume it HOLDS under the Lead layer.
+  await setHands(
+    leftHand(4, { pos: { x: 0.72, y: 0.5 }, view }),
+    rightHand(1, { pos: { x: 0.3, y: 0.42 }, view, volume: 0.6 })
+  );
+  await expect(page.locator("#qualityDisplay")).toHaveText("Major");
+  await page.waitForTimeout(200);
   await page.locator("#controlsToggle").click();
   await page.locator('#controlsPanel [data-control="mode"] button[data-value="lead"]').click();
   await page.locator("#controlsToggle").click();
