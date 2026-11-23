@@ -2,7 +2,8 @@
 // proposed modes UI composited on top, over a synthetic camera scene. Static prototype, no tracking.
 //
 //   /labs/ui-lab.html?state=<name>[&swap][&bg=bright][&clean][&debug]
-//     swap   chord hand on the screen RIGHT (see docs/ui-integration.md, open question Q1)
+//     swap   chord hand on the screen RIGHT (the unusual case; default = real use: chord hand on the screen LEFT,
+//            docs/ui-integration.md Q1)
 //     bright bright wall behind the player (legibility check)
 //     clean  hide the lab's state switcher (used by tests/ui-lab.spec.js)
 //     debug  outline the clear area and the regions the layout test checks

@@ -376,9 +376,10 @@ async function composeSideBySide(files, labels, outName) {
 }
 
 // ---------------------------------------------------------------------------------------------- scenes
-// Display-space positions on 1280x800 (the video is mirrored: the right hand is on the screen LEFT).
-const R0 = { x: 0.3, y: 0.42 }; // right hand home for the menu (m1-integration)
-const L0 = { x: 0.72, y: 0.5 }; // left (chord) hand
+// Display-space positions on 1280x800. The video is mirrored (selfie view), so as in real use the chord ("Left")
+// hand is on the screen LEFT and the right hand on the screen RIGHT.
+const R0 = { x: 0.7, y: 0.42 }; // right hand home for the menu (m1-integration)
+const L0 = { x: 0.28, y: 0.5 }; // left (chord) hand
 const LEFT = (n = 1, o = {}) => ({ hand: "L", n, pos: L0, ...o });
 const OPEN = (n = 1, o = {}) => ({ hand: "R", shape: "open", n, pos: R0, ...o });
 const FIRST_USE_MS = 3300; // first-use labels (theme.js MOTION.firstUse = 3000) fade out
@@ -420,12 +421,12 @@ SCENES["mode-menu"] = async () => {
 
 SCENES.arp = async () => {
   const { context, page, stage } = await openApp();
-  const P = { x: 0.3, y: 0.62 };
+  const P = { x: 0.7, y: 0.62 };
   await stage.set({ L: LEFT(4), R: OPEN(3, { pos: P }) });
   await enterArp(page, stage);
   const finish = await startClip([["app", page]], { audioPage: page });
   await stage.hold(900);
-  await stage.move({ R: { pos: { x: 0.3, y: 0.38 } } }, 1500); // up = longer gate
+  await stage.move({ R: { pos: { x: 0.7, y: 0.38 } } }, 1500); // up = longer gate
   await stage.hold(500);
   await stage.move({ R: { tilt: -0.9 } }, 900); // lean -> filter arc dot follows
   await stage.move({ R: { tilt: 0.9 } }, 1500);
@@ -440,7 +441,7 @@ SCENES.arp = async () => {
 
 SCENES["pinch-tempo"] = async () => {
   const { context, page, stage } = await openApp();
-  const P = { x: 0.3, y: 0.55 };
+  const P = { x: 0.7, y: 0.55 };
   await stage.set({ L: LEFT(1), R: OPEN(2, { pos: P }) });
   await enterArp(page, stage, { bpm: 110 });
   stage.sway = 0; // the tempo follows every pixel of a pinch: keep it still
@@ -466,8 +467,8 @@ SCENES["pinch-tempo"] = async () => {
 
 SCENES.lead = async () => {
   const { context, page, stage } = await openApp();
-  const LL = { hand: "L", n: 1, pos: { x: 0.72, y: 0.5 } };
-  const claw = (y, o = {}) => ({ hand: "R", shape: "pinch", distance: 0.55, fingers: ["index", "middle", "ring", "pinky"], pos: { x: 0.3, y }, ...o });
+  const LL = { hand: "L", n: 1, pos: L0 };
+  const claw = (y, o = {}) => ({ hand: "R", shape: "pinch", distance: 0.55, fingers: ["index", "middle", "ring", "pinky"], pos: { x: R0.x, y }, ...o });
   const play = (y) => claw(y, { distance: 0.1 });
   await stage.set({ L: LL, R: OPEN(2) });
   await stage.hold(1500);
@@ -481,7 +482,7 @@ SCENES.lead = async () => {
   await stage.hold(300);
   await stage.set({ R: claw(R0.y, { pos: { x: R0.x - 0.15, y: R0.y } }) });
   await stage.holdUntil(() => window.__gsTest.bus.get("menu") == null && window.__gsTest.bus.get("mode") === "lead", null, 4000);
-  await stage.move({ R: { pos: { x: 0.3, y: R0.y } } }, 500);
+  await stage.move({ R: { pos: { x: R0.x, y: R0.y } } }, 500);
   const yFor = async (i) => page.evaluate((i) => {
     const lead = window.__gsTest.registry.getMode("lead");
     return lead._yForMidi(lead._controller.state.ladder.notes[i].midi);
@@ -508,7 +509,7 @@ SCENES.lead = async () => {
 
 SCENES["master-volume"] = async () => {
   const { context, page, stage } = await openApp();
-  await stage.set({ L: { hand: "L", n: 1, volume: 0.5 }, R: OPEN(2, { pos: { x: 0.3, y: 0.45 } }) });
+  await stage.set({ L: { hand: "L", n: 1, volume: 0.5 }, R: OPEN(2, { pos: { x: 0.7, y: 0.45 } }) });
   await stage.hold(1500);
   const finish = await startClip([["app", page]]);
   await stage.hold(600);
@@ -547,7 +548,7 @@ SCENES["drive-space"] = async () => {
 
 SCENES["controls-panel"] = async () => {
   const { context, page, stage } = await openApp();
-  await stage.set({ L: LEFT(4), R: OPEN(3, { pos: { x: 0.43, y: 0.55 }, tilt: 0.2 }) }); // clear of the panel
+  await stage.set({ L: LEFT(4), R: OPEN(3, { pos: { x: 0.7, y: 0.55 }, tilt: 0.2 }) }); // clear of the panel (left column)
   await enterArp(page, stage);
   await addPointer(page);
   await page.mouse.move(820, 520);
@@ -577,7 +578,7 @@ SCENES.mobile = async () => {
   const { context, page, stage } = await openApp({ viewport: PHONE, mobile: true });
   await page.evaluate(() => window.__gsTest.router.setMode("arp"));
   // Portrait cover-crops the 640x480 camera to its middle: place smaller hands inside the visible strip.
-  await stage.set({ L: { hand: "L", n: 4, pos: { x: 0.69, y: 0.5 }, scale: 0.5 }, R: { hand: "R", shape: "open", n: 3, pos: { x: 0.27, y: 0.42 }, tilt: 0.3, scale: 0.5 } });
+  await stage.set({ L: { hand: "L", n: 4, pos: { x: 0.31, y: 0.5 }, scale: 0.5 }, R: { hand: "R", shape: "open", n: 3, pos: { x: 0.73, y: 0.42 }, tilt: 0.3, scale: 0.5 } });
   await stage.holdUntil(() => document.body.classList.contains("gs-playing"));
   await addPointer(page, { dot: false });
   await stage.hold(FIRST_USE_MS);
@@ -604,7 +605,7 @@ SCENES.mobile = async () => {
 
 SCENES.visualizer = async () => {
   const s = await openApp({ query: `&signal=${encodeURIComponent(SIGNAL)}` });
-  await s.stage.set({ L: LEFT(1), R: OPEN(1, { pos: { x: 0.45, y: 0.55 } }) }); // clear of the panel while it is open
+  await s.stage.set({ L: LEFT(1), R: OPEN(1, { pos: { x: 0.62, y: 0.55 } }) }); // clear of the panel (left column) while it is open
   // Output on through Controls -> Output row.
   await s.page.locator("#controlsToggle").click();
   const row = s.page.locator('#controlsPanel [data-hook="output"]');
@@ -635,7 +636,7 @@ SCENES.visualizer = async () => {
   await s.stage.hold(300);
   await s.stage.set({ R: OPEN(3, { pos: stage2pos(s.stage) }) });
   await s.stage.holdUntil(() => window.__gsTest.bus.get("menu") == null, null, 4000);
-  await s.stage.move({ R: { pos: { x: 0.3, y: 0.45 } } }, 500);
+  await s.stage.move({ R: { pos: { x: 0.7, y: 0.45 } } }, 500);
   let png = null;
   for (const [deg, minor] of [[1, false], [4, false], [6, true], [5, false]]) {
     await s.stage.set({ L: LEFT(deg, { minor }) });
@@ -683,7 +684,7 @@ SCENES["gesture-test"] = async () => {
 
 SCENES["filter-arc"] = async () => {
   const { context, page, stage } = await openApp();
-  await stage.set({ L: LEFT(1), R: OPEN(4, { pos: { x: 0.3, y: 0.56 }, tilt: 0 }) });
+  await stage.set({ L: LEFT(1), R: OPEN(4, { pos: { x: 0.7, y: 0.56 }, tilt: 0 }) });
   await stage.hold(FIRST_USE_MS);
   const finish = await startClip([["app", page]]);
   await stage.hold(600);
@@ -701,7 +702,7 @@ SCENES["filter-arc"] = async () => {
 
 SCENES.overview = async () => {
   const { context, page, stage } = await openApp();
-  await stage.set({ L: LEFT(4), R: OPEN(3, { pos: { x: 0.3, y: 0.4 }, tilt: 0.45 }) });
+  await stage.set({ L: LEFT(4), R: OPEN(3, { pos: { x: 0.7, y: 0.4 }, tilt: 0.45 }) });
   await enterArp(page, stage, { bpm: 116 });
   await stage.move({ L: { n: 6, minor: true } }, 300);
   await stage.hold(1200);
