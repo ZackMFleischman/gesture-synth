@@ -1,7 +1,8 @@
 // Screen controls (docs/ui-integration.md D8): a `Controls` toggle next to "Open Guide" opens a panel in
 // the gesture guide's slot (the two are mutually exclusive). Rows:
 //   Mode (segmented; router.setMode) | the active mode's own rows (mode.controls(container, ctx)) |
-//   Master vol | Output (placeholder; milestone 3 fills it via setOutputRow()).
+//   Master vol | Output (on/off + room code through the M3 status chip's API when `output` is given;
+//   setOutputRow(render) replaces the row).
 // The mode rows live in main.js's #modeControls (the router mounts/unmounts them on mode change); the
 // panel adopts that node. Without it the panel calls mode.controls() itself.
 //
@@ -17,7 +18,7 @@ const HAND_SVG =
   'stroke-linecap="round" stroke-linejoin="round" d="M5.2 8.6V3.4a.9.9 0 0 1 1.8 0v4.4M7 7.4V2.4a.9.9 0 0 1 ' +
   '1.8 0v5M8.8 7.6V3a.9.9 0 0 1 1.8 0v5.2M10.6 8.2V4.6a.9.9 0 0 1 1.8 0V10c0 2.6-1.8 4.4-4.3 4.4-1.7 0-2.8-.8-3.7-2.1L2.6 9.6a.95.95 0 0 1 1.5-1.1l1.1 1.3"/></svg>';
 
-export function createControlsPanel({ S, bus, ctx, registry, router, doc }) {
+export function createControlsPanel({ S, bus, ctx, registry, router, doc, output = null }) {
   const guideToggle = doc.getElementById("guideToggle");
   const guideEl = doc.getElementById("gestureGuide");
 
@@ -82,15 +83,37 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc }) {
     }
   }
 
-  // ---- Output row (milestone 3 hook) ----
+  // ---- Output row (milestone 3): on/off + room code via the status chip's API ----
   let outputCleanup = null;
+  let outputRefresh = null;
   function defaultOutputRow(c) {
     c.innerHTML =
-      '<button type="button" class="gs-switch" aria-pressed="false" aria-label="Output" disabled></button>' +
-      '<span class="gs-note">Off · coming soon</span>';
+      '<button type="button" class="gs-switch" aria-pressed="false" aria-label="Visualizer output" data-control="output"></button>' +
+      '<span class="gs-note" data-hook="output-status">Off</span>';
+    const sw = c.querySelector(".gs-switch");
+    const note = c.querySelector(".gs-note");
+    if (!output) {
+      sw.disabled = true;
+      note.textContent = "Off · not available";
+      return null;
+    }
+    sw.addEventListener("click", () => output.setOutput(output.status?.state === "off"));
+    outputRefresh = () => {
+      const st = output.status || { state: "off" };
+      const on = st.state !== "off";
+      const text =
+        !on ? "Off" :
+        st.state === "connected" || st.state === "relayed" ? `${st.state === "connected" ? "Direct" : "Relayed"} · code ${st.room ?? "----"}` :
+        st.room ? `Code ${st.room}` : "Waiting…";
+      if (sw.getAttribute("aria-pressed") !== String(on)) sw.setAttribute("aria-pressed", String(on));
+      if (note.textContent !== text) note.textContent = text;
+    };
+    outputRefresh();
+    return () => (outputRefresh = null);
   }
   function setOutputRow(render) {
     outputCleanup?.();
+    outputRefresh = null;
     outputEl.innerHTML = "";
     outputCleanup = (render || defaultOutputRow)(outputEl) || null;
   }
@@ -209,6 +232,7 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc }) {
   function open({ focus = true } = {}) {
     if (guideOpen()) guideToggle.click(); // closes it through controls.js (keeps its label in sync)
     panel.classList.remove("hidden");
+    doc.body.classList.add("gs-panel-open");
     toggle.setAttribute("aria-pressed", "true");
     toggle.setAttribute("aria-expanded", "true");
     update();
@@ -217,6 +241,7 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc }) {
   function close({ restoreFocus = false } = {}) {
     const hadFocus = panel.contains(doc.activeElement);
     panel.classList.add("hidden");
+    doc.body.classList.remove("gs-panel-open");
     toggle.setAttribute("aria-pressed", "false");
     toggle.setAttribute("aria-expanded", "false");
     if (restoreFocus || hadFocus) toggle.focus({ preventScroll: true });
@@ -264,6 +289,7 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc }) {
       rowOf(el).classList.toggle("gs-owned", on);
     }
     lastMarks = marks;
+    outputRefresh?.();
   }
   ensureTap();
   ensureMarks();

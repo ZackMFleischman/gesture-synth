@@ -9,11 +9,18 @@
 //
 // Everything here augments the existing UI (index.html + indicators.js + controls.js): it adds
 // `body.gs-modes` + modes.css, new DOM nodes, and canvas layers drawn on top of the modes. State comes
-// from bus signals (subscribe), never from mode internals. Missing signals degrade gracefully:
-//   mode, menu (fallback: router.menu.snapshot()), volume, left|right/{pos,height,pinch,size},
-//   filter (fallback: right/tilt), arp/gate, arp/double, arp/rate, bpm, beat (event + playTime),
-//   chord, voicing, held (optional {right?:bool, [param]: heldValue}), lead/noteset.
-// Publishes: ui/override (state: names of screen controls currently winning over the hand).
+// from bus signals, never from mode internals: pushed (subscribe) for `mode`, `beat` (event + playTime),
+// `filter`, `volume` and the active right-track param; read once per frame (bus.get) for the rest, so
+// their producers stay free: left|right/{pos,height,size,pinch,tilt}, menu (fallback:
+// router.menu.snapshot()), held ({right?:bool, [param]: heldValue}), bpm, arp/rate, arp/double,
+// lead/noteset. Missing signals degrade gracefully.
+// Publishes: ui/override (state: names of screen controls currently winning over the hand);
+//   ui/sides (state: {chord, expr} = screen edge of the chord hand / of the right-hand control), so a mode
+//   that draws its own edge control (Lead's ladder) can put it on the expression side.
+//
+// Hooks for other layouts (e.g. a compact phone layout): every new DOM node has a stable id and hides
+// with the `gs-collapsed` class; canvas layers hide with body classes `gs-hide-edge-tracks`,
+// `gs-hide-hand-feedback`, `gs-hide-first-use` (or hide #modeOverlay altogether).
 
 import "./modes.css";
 import { MODE_COLORS, clearArea, rectsOverlap } from "./theme.js";
@@ -39,11 +46,12 @@ function newHand() {
 }
 
 /**
- * @param {{bus:object, ctx:object, registry:object, router?:object, canvas:HTMLCanvasElement, doc?:Document}} o
+ * @param {{bus:object, ctx:object, registry:object, router?:object, canvas:HTMLCanvasElement,
+ *          output?:object, doc?:Document}} o   output = the M3 status chip handle (Output row on/off + code)
  * @returns {{draw(g:CanvasRenderingContext2D):void, destroy():void, state:object,
  *            setOutputRow(render:(container:HTMLElement)=>(()=>void)|void):void, openControls():void}}
  */
-export function mountModeUI({ bus, ctx, registry, router = null, canvas, doc = document }) {
+export function mountModeUI({ bus, ctx, registry, router = null, canvas, output = null, doc = document }) {
   const body = doc.body;
   body.classList.add("gs-modes");
 
@@ -112,6 +120,7 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, doc = d
   function setHand(side, field, v) {
     const h = S.hands[side];
     if (field === "pos") {
+      if (v === h.pos || (v == null && h.pos == null)) return;
       if (v) {
         h.pos = v;
         h.lastPos = v;
@@ -162,28 +171,31 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, doc = d
     "right/pinch": ["right", "pinch"], "right/tilt": ["right", "tilt"],
   };
 
+  // Subscribe only to what needs a push (mode changes, beat events); everything else is read with
+  // bus.get() once per frame, so producers of hand values etc. stay free when nothing else listens.
   const unsubBus = bus.subscribe(
     {
       onSet(name, v) {
         if (name === "mode") applyMode(v);
-        else if (HAND_SIGNALS[name]) setHand(...HAND_SIGNALS[name], v);
         listeners.forEach((fn) => fn("set", name, v));
       },
       onEvent(name, data, playTime) {
         listeners.forEach((fn) => fn("event", name, data, playTime));
       },
     },
-    (name) => name !== "note/on" && name !== "note/off" && name !== "note/cancel"
+    ["mode", "beat"]
   );
+  function pollHands() {
+    for (const name in HAND_SIGNALS) setHand(...HAND_SIGNALS[name], bus.get(name) ?? null);
+  }
 
   // Initial values (signals published before we subscribed).
   applyMode(bus.get("mode") || router?.modeId || "chords");
-  for (const [name, [side, field]] of Object.entries(HAND_SIGNALS)) {
-    const v = bus.get(name);
-    if (v != null) setHand(side, field, v);
-  }
+  pollHands();
 
   bus.declare("ui/override", { type: "state", owner: "ui" });
+  bus.declare("ui/sides", { type: "state", owner: "ui" });
+  let publishedSide = null;
 
   // Own canvas for the modes UI layers (see the header), right above the video canvas, under all DOM.
   const layer = doc.createElement("canvas");
@@ -197,7 +209,7 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, doc = d
   const badges = createBadges(env);
   const readouts = createReadouts(env);
   const guide = createGuide(env);
-  const panel = createControlsPanel({ ...env, guide });
+  const panel = createControlsPanel({ ...env, output });
   badges.onClick(() => panel.open());
   const transport = createTransport(env);
   const tracks = createEdgeTracks(env);
@@ -229,6 +241,7 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, doc = d
   // One frame of non-drawing work (also runs while the start overlay dims the canvas).
   function tick() {
     S.now = performance.now();
+    pollHands();
     S.menu = readMenu();
     const sig = heldBySignal();
     S.heldValue = sig?.value ?? null;
@@ -246,6 +259,10 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, doc = d
       S.covers.push({ x: r.x - c.x, y: r.y - c.y, w: r.width, h: r.height });
     }
     body.classList.toggle("gs-right-held", S.rightHeld || S.rightReturn || S.lost("right"));
+    if (S.chordSide !== publishedSide) {
+      publishedSide = S.chordSide;
+      bus.set("ui/sides", { chord: S.chordSide, expr: S.chordSide === "left" ? "right" : "left" });
+    }
     for (const p of parts) p.update?.();
   }
 
@@ -275,9 +292,10 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, doc = d
       };
       lg.setTransform(dpr, 0, 0, dpr, 0, 0);
       // Z-order (§5): edge tracks, hand feedback, first-use labels (all above the mode/menu canvas).
-      tracks.draw(lg, G);
-      overlays.draw(lg, G);
-      guide.draw(lg, G);
+      const hide = body.classList;
+      if (!hide.contains("gs-hide-edge-tracks")) tracks.draw(lg, G);
+      if (!hide.contains("gs-hide-hand-feedback")) overlays.draw(lg, G);
+      if (!hide.contains("gs-hide-first-use")) guide.draw(lg, G);
     }
     if (import.meta.env?.DEV && window.__gsTest) {
       window.__gsTest.ui = {

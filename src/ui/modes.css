@@ -83,33 +83,9 @@ body.gs-modes.gs-no-right-track #volumeMeter { display: none; }
 }
 #noteSetBadge i.on { background: var(--gs-mode); border-color: var(--gs-mode); }
 
-/* ---- Connection chip (milestone 3, src/output/status-chip.js): top right, left of the meter ---- */
-#outputChip {
-  position: absolute;
-  top: 12px;
-  right: calc(var(--gs-gutter) + 70px + 12px); /* gutter + meter width + gap */
-  height: 26px;
-  box-sizing: border-box;
-  display: flex; align-items: center; gap: 7px;
-  padding: 0 11px 0 9px;
-  border-radius: 13px;
-  border: 1px solid var(--gs-quiet);
-  background: var(--gs-plate);
-  color: var(--gs-ink);
-  font: 13px monospace;
-  cursor: pointer;
-  z-index: 5;
-}
-#outputChip .gs-dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--gs-ink); box-sizing: border-box; }
-#outputChip.direct { border-color: var(--gs-good); background: color-mix(in srgb, var(--gs-good) 14%, rgba(20,20,20,0.85)); }
-#outputChip.direct .gs-dot { background: var(--gs-good); border-color: var(--gs-good); }
-#outputChip.relayed { border-color: var(--gs-warn); background: color-mix(in srgb, var(--gs-warn) 14%, rgba(20,20,20,0.85)); }
-#outputChip.relayed .gs-dot { background: var(--gs-warn); border-color: var(--gs-warn); }
-#outputChip.waiting { border-style: dashed; }
-@media (max-width: 519px) {
-  #outputChip { width: 26px; padding: 0; justify-content: center; }
-  #outputChip .gs-text { display: none; }
-}
+/* ---- Connection chip + popover (milestone 3, src/output/status-chip.js owns them): use the gutter ---- */
+body.gs-modes #outputChip,
+body.gs-modes #outputPopover { right: var(--gs-gutter); }
 
 /* ---- Third row: "Controls" toggle next to the existing "Open Guide" ---- */
 #controlsToggle {
@@ -210,14 +186,6 @@ body.gs-modes.gs-no-right-track #volumeMeter { display: none; }
 #controlsPanel .arp-bpm { font: 600 14px monospace; min-width: 3ch; }
 #controlsPanel .arp-controls input[type="range"] { width: 140px; min-width: 0; accent-color: var(--gs-mode); }
 
-/* Narrow screens: compact rows so the panel ends above the hands (hand overlays also hide while open). */
-@media (max-width: 519px) {
-  #controlsPanel { gap: 6px 8px; padding: 10px 12px; font-size: 12px; grid-template-columns: 74px minmax(0, 1fr); }
-  #controlsPanel .arp-controls { gap: 6px; }
-  #controlsPanel .arp-controls > .arp-row > .arp-label { min-width: 74px; width: 74px; }
-  #controlsPanel .arp-seg button, .gs-seg button { padding: 3px 6px; font-size: 11px; }
-  #controlsPanel .arp-controls input[type="range"], .gs-range { width: 120px; }
-}
 
 /* ---- Transport (clocked modes): centered above the chord display, clear of the energy wave ---- */
 #transport {
@@ -257,3 +225,19 @@ body.gs-modes.gs-no-right-track #volumeMeter { display: none; }
 .gs-guide-head::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--gs-mode); }
 .gs-guide-label { color: var(--gs-ink); font-size: 13px; opacity: 0.85; }
 .gesture-guide-row.gs-guide-mode .gesture-guide-gesture { width: 28px; text-align: center; font-size: 18px; color: var(--gs-ink); }
+
+/* ---- Hooks for other layouts (a compact phone layout can collapse any new element) ---- */
+body.gs-modes .gs-collapsed { display: none !important; }
+
+/* ---- Narrow screens (all phone-specific rules live here) ---- */
+/* Compact panel rows so the panel ends above the hands; hand feedback under an open panel is not drawn. */
+@media (max-width: 519px) {
+  #controlsPanel { gap: 6px 8px; padding: 10px 12px; font-size: 12px; grid-template-columns: 74px minmax(0, 1fr); }
+  #controlsPanel .arp-controls { gap: 6px; }
+  #controlsPanel .arp-controls > .arp-row > .arp-label { min-width: 74px; width: 74px; }
+  #controlsPanel .arp-seg button, .gs-seg button { padding: 3px 6px; font-size: 11px; }
+  #controlsPanel .arp-controls input[type="range"], .gs-range { width: 120px; }
+  /* The panel has the Output row; the chip (top right) would sit on top of it. */
+  body.gs-modes.gs-panel-open #outputChip,
+  body.gs-modes.gs-panel-open #outputPopover { display: none; }
+}

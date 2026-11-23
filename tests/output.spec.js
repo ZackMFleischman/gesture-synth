@@ -11,7 +11,9 @@ const VIDEOS = "test-results/videos";
 const SIGNAL = `ws://localhost:${process.env.PW_SIGNAL_PORT}`;
 const CODE_RE = /^[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{2}$/;
 // On-screen indicators (src/ui/indicators.js) are the one consumer that always exists.
-const INDICATOR_SIGNALS = ["chord", "chords/octave", "filter", "voicing", "volume"];
+// On-screen consumers: indicators.js (chord, chords/octave, filter, voicing, volume) and the modes UI
+// (src/ui/mode-ui.js: `mode`, plus the right-track param, = volume in Chords). Everything else is read with bus.get().
+const INDICATOR_SIGNALS = ["chord", "chords/octave", "filter", "mode", "voicing", "volume"];
 
 // Headless Chrome hides local IPs behind mDNS names; resolve them as plain host candidates.
 test.use({

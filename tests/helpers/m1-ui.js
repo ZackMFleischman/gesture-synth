@@ -63,3 +63,11 @@ export async function ensureMenu(page) {
     t.router.setMenu(createRadialMenu({ items: () => registry.menuItems(t.router.modeId), currentId: () => t.router.modeId }));
   });
 }
+
+/** Registers the real Lead mode if main.js does not yet (integration lands in parallel). */
+export async function ensureLead(page) {
+  await page.evaluate(async () => {
+    const { registry } = await import("/src/core/registry.js");
+    if (!registry.getMode("lead")) registry.registerMode((await import("/src/modes/lead.js")).default);
+  });
+}

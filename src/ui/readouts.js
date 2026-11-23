@@ -7,7 +7,7 @@
 // indicators.js keeps rendering `volume`/`filter` as before; this module renders after it, so in
 // Chords the result is identical and in other modes the mode's own value wins.
 
-export function createReadouts({ S, bus, doc, subscribe }) {
+export function createReadouts({ S, bus, doc }) {
   const bars = Array.from(doc.querySelectorAll(".vol-bar"));
   const filterEl = doc.getElementById("distortionDisplay");
   let modeSeen = null;
@@ -43,15 +43,24 @@ export function createReadouts({ S, bus, doc, subscribe }) {
     }
   }
 
-  const off = subscribe((kind, name) => {
-    if (kind !== "set") return;
-    if (name === "filter") filterSeenInMode = true;
-    if (name === S.rightTrack?.param || name === "volume") renderMeter();
-  });
+  // Own subscription: `filter` + `volume` (indicators.js consumes them anyway) and the active mode's
+  // right-track param, re-subscribed on mode change.
+  let off = null;
+  const consumer = {
+    onSet(name) {
+      if (name === "filter") filterSeenInMode = true;
+      if (name === S.rightTrack?.param || name === "volume") renderMeter();
+    },
+  };
+  function resubscribe() {
+    off?.();
+    off = bus.subscribe(consumer, ["filter", "volume", ...(S.rightTrack?.param ? [S.rightTrack.param] : [])]);
+  }
 
   function update() {
     if (S.modeId !== modeSeen) {
       modeSeen = S.modeId;
+      resubscribe();
       // Does this mode publish the shared `filter` signal? (Chords does; Arp, today, sets the filter directly.)
       filterSeenInMode = !!S.mode?.signals?.some((s) => s.name === "filter");
       renderMeter();
@@ -59,5 +68,5 @@ export function createReadouts({ S, bus, doc, subscribe }) {
     renderFilter();
   }
 
-  return { update, destroy: off };
+  return { update, destroy: () => off?.() };
 }

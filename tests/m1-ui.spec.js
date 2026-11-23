@@ -4,7 +4,7 @@
 import { test, expect, SCREENS_DIR } from "./fixtures.js";
 import { leftHand, rightHand, pinch, fist } from "./helpers/hands.js";
 import { makeView } from "../src/input/hand-input.js";
-import { ensureArp, ensureMenu, frames, collectLayout } from "./helpers/m1-ui.js";
+import { ensureArp, ensureLead, ensureMenu, frames, collectLayout } from "./helpers/m1-ui.js";
 
 const VIEWPORTS = {
   desktop: { width: 1280, height: 800 },
@@ -506,6 +506,39 @@ test.describe("modes UI behavior", () => {
     await expect(modal).toContainText("Arp mode");
     await expect(modal).toContainText("double time");
     await expect(modal).toContainText("Left Hand");
+  });
+
+  test("Output row turns the visualizer output on and off (M3 chip API)", async ({ synthPage: page }) => {
+    await page.locator("#controlsToggle").click();
+    const sw = page.locator('#controlsPanel [data-control="output"]');
+    const note = page.locator('#controlsPanel [data-hook="output-status"]');
+    await expect(note).toHaveText("Off");
+    await sw.click();
+    await expect(sw).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(() => page.evaluate(() => window.__gsTest.output.status.state)).not.toBe("off");
+    await expect(note).not.toHaveText("Off");
+    await sw.click();
+    await expect(note).toHaveText("Off");
+    await expect.poll(() => page.evaluate(() => window.__gsTest.output.status.state)).toBe("off");
+  });
+
+  test("Lead: no right track or meter (the ladder replaces them), note-set badge in row 1", async ({ synthPage: page, setHands }) => {
+    await ensureLead(page);
+    await setHands(...scene(DESKTOP));
+    await page.evaluate(() => window.__gsTest.router.setMode("lead"));
+    await expect(page.locator("#modeBadge")).toHaveText("Lead");
+    await expect(page.locator("#volumeMeter")).toBeHidden();
+    await expect(page.locator("#noteSetBadge")).toBeVisible();
+    await expect(page.locator("#noteSetBadge i.on")).toHaveCount(1);
+    await frames(page, 4);
+    const t = (await ui(page)).tracks;
+    expect(t["master-track"]).toBeTruthy();
+    expect(t["right-track"]).toBeUndefined();
+    await page.locator("#guideToggle").click();
+    await expect(page.locator("#gestureGuide .gs-guide-mode")).not.toHaveCount(0);
+    await page.locator("#guideToggle").click();
+    await shot(page, "lead-play", "desktop");
+    checkLayout(await collectLayout(page, EXISTING), DESKTOP);
   });
 
   test("bright room legibility (screenshot)", async ({ synthPage: page, setHands }) => {

@@ -74,7 +74,7 @@ const outputChip = mountStatusChip({ bus, ctx, parent: stageEl });
 // ---- Modes ----
 registerMode(chordsMode);
 router.setMode("chords");
-const modeUI = mountModeUI({ bus, ctx, registry, router, canvas: canvasEl });
+const modeUI = mountModeUI({ bus, ctx, registry, router, canvas: canvasEl, output: outputChip });
 
 if (import.meta.env.DEV) {
   window.__gsTest.synth = synth;
