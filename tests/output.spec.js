@@ -540,11 +540,11 @@ test.describe("mobile viewport", () => {
     const overlaps = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
     const ids = ["keySelect", "toneSelect", "guideToggle", "gestureGuide", "volumeMeter", "distortionDisplay",
       "chordDisplay", "qualityDisplay", "helpButton", "gsBar"];
-    // ...and the modes UI chrome (mode badge, Controls toggle, transport, ...: every visible [data-gs-kind] element).
-    const extra = await page.evaluate(() => [...document.querySelectorAll("[data-gs-kind]")]
+    // ...and the modes UI chrome (mode badge, Controls toggle, transport, ...: every visible [data-gs-kind] element;
+    // on phones most of it is folded into the mobile bar, #gsBar above) and the mobile bar's own parts.
+    const extra = await page.evaluate(() => [...document.querySelectorAll("[data-gs-kind], #gsBar [id]")]
       .filter((e) => e.id && e.id !== "outputChip" && e.getClientRects().length && getComputedStyle(e).display !== "none")
       .map((e) => e.id));
-    expect(extra.length).toBeGreaterThan(0);
     for (const id of [...ids, ...extra]) {
       const box = await page.locator(`#${id}`).boundingBox();
       if (!box) continue; // folded into the collapsed mobile bar (checked as #gsBar)
