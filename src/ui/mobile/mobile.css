@@ -189,7 +189,7 @@ html body.gs-mobile #transport { gap: 9px; padding: 0 10px; font-size: 12px; }
 /* ------------------------------------------------------------------ gesture guide: compact strip under the pill */
 html body.gs-mobile #gestureGuide {
   top: calc(var(--gs-m-top) + 64px); /* below the filter readout */
-  left: var(--gs-m-left);
+  left: calc(var(--gs-m-left) + 12px); /* clears the speaker icon above the master track */
   right: var(--gs-m-right);
   flex-direction: row;
   flex-wrap: wrap;

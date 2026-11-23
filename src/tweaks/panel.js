@@ -93,7 +93,7 @@ export function mountTweaksPanel({ tweaks, doc = document, parent = doc.body, st
   const closeBtn = el("button", { type: "button", class: "gs-tw-close", "aria-label": "Close tweaks", text: "✕" });
   const head = el("header", { class: "gs-tw-head" }, [
     el("h2", { text: "Tweaks" }),
-    el("span", { class: "gs-tw-sub", text: "saved in this browser · only with ?tweaks" }),
+    el("span", { class: "gs-tw-sub", text: "saved in this browser" }),
     closeBtn,
   ]);
   const resetAllBtn = el("button", { type: "button", class: "gs-tw-btn", "data-action": "reset-all", text: "Reset all" });

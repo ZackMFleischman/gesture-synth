@@ -141,7 +141,6 @@ for (const [vpName, vp] of Object.entries(VIEWPORTS)) {
       // Known app bug (found by the test-fix batch, 2026-11-22): on phones the master track's speaker icon
       // (edge-tracks.js, x 3..23 px at y ~80-100) overlaps the opened guide strip (mobile.css: left = --gs-m-left = 20 px)
       // by 3 px; desktop was cleared with --gs-left-col (e7a2f9f), the mobile strip was not. Remove when fixed.
-      test.fail(vpName === "mobile", "speaker icon overlaps the mobile guide strip");
       await toArp(page);
       await setHands(...scene(vp));
       await tapControl(page, "#guideToggle");
