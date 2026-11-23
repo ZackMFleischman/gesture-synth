@@ -71,6 +71,7 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `arp.spec.js` | integration | Right place for engine timing (±3 ms) on recorded audio. Lab-only: **app-level timing owed** (M1). Includes a WAV demo (not a gate-worthy assert; keep, it's cheap). |
 | `gesture-test.int.spec.js` | integration | From `gesture-reliability.spec.js`. |
 | `lead.spec.js` | integration | Right place for Lead UX checks 2.1–2.5 in the lab (engine-level measurements: discrete note steps, retrigger, clicks). App journeys: `m2-lead.spec.js`. |
+| `lead-proximity.int.spec.js` | integration | Lead edge feedback in the lab: proximity rises from a note's centre to its edge with the snapped note held until the switch point, neighbour highlight, screens `lead-proximity-{center,near-edge,after-switch}.png`; release fade length/monotonic decay + click metric, re-pinch during the fade; mouse click on an octave arrow steps at once. First pass (more coverage to follow). |
 | `lead-demo.spec.js` | integration | Demo artifact (melody WAV + screenshots), 1 assert. Keep; candidate for a non-gating demo tag later. |
 | `mobile-ui.int.spec.js` | integration | Mobile system prototype in `labs/mobile-lab.html` (+ planned chrome as the before): budgets, clear area, 2-tap reach, sheets, 44 px targets, auto-collapse. |
 | `menu-lab.int.spec.js` | integration | From `radial-menu.spec.js` (lab visuals). |
