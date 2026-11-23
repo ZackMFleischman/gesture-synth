@@ -36,6 +36,8 @@ import { drawEnergy } from "./chords.js";
 import { MODE_COLORS, COLORS, FONT as THEME_FONT, MOTION, withAlpha, easeOut, confirmPhase, drawLabel, rectsOverlap } from "../ui/theme.js";
 import { createSafeArea } from "../ui/mobile/safe-area.js";
 import { lostAlpha } from "../ui/edge-tracks.js";
+import { BAND } from "../input/reach-zones.js";
+import { createSmoothers } from "../ui/smooth.js";
 
 // ---- Look: shared tokens from src/ui/theme.js; Lead-specific geometry below ----
 export const LEAD_COLOR = MODE_COLORS.lead;
@@ -195,10 +197,12 @@ const virt = {
 };
 
 // What draw() renders.
+const handSmooth = createSmoothers();
 const view = {
   held: false, // the radial menu holds the right hand (router calls hold() instead of update())
   resumeGuard: false, // after a hold: a pinch still closed from before must open once before it plays
-  hand: null, // {x,y} canvas px of the right palm (null = none / screen control)
+  hand: null, // {x,y} canvas px of the right palm as DRAWN (display-smoothed in draw(); null = none / screen control)
+  handRaw: null, // the same, raw (set by update())
   handSize: 0,
   usingVirtual: false,
   lines: [], // [{midi, isChord, u, alpha}] displayed ladder lines (animated)
@@ -745,7 +749,7 @@ const lead = {
     if (!voice) lead.enter(ctx);
     view.held = true;
     view.resumeGuard = true;
-    view.hand = null;
+    view.handRaw = null;
     if (S.pinchMode !== "none") handleEvents(ctrl.release(), ctx);
     ctrl.setContext(ctx.harmony.keyName, ctx.harmony.chord, now);
     updatePad(ctx);
@@ -775,10 +779,10 @@ const lead = {
         count: null,
         noteIdx: keyNote,
       };
-      view.hand = null;
+      view.handRaw = null;
     } else if (right) {
       const p = ctx.toCanvas(right.pos);
-      view.hand = p;
+      view.handRaw = p;
       view.handSize = right.handSize * geo.H;
       input = { present: true, u: yToU(geo, p.y), pinch: right.pinch, count: validCount(right), noteIdx: null };
       if (filterParam) filterParam.value = right.tilt;
@@ -802,14 +806,17 @@ const lead = {
 
   draw(g, ctx) {
     const now = ctx ? ctx.now : view.now;
+    // Display-only smoothing of the hand anchor (guide line to the cursor, set badge); notes use the raw hand.
+    view.hand = view.handRaw ? handSmooth.get("hand", view.handRaw, now, "px") : handSmooth.get("hand", null, now);
     const W = g.canvas.width;
     const H = g.canvas.height;
     const sides = ctx?.bus?.get?.("ui/sides");
     const side = sides && sides.expr === "left" ? "left" : "right";
-    // Reach zone of the right hand (kept while the hand is lost, so the ladder does not jump).
+    // Reach zone of the right hand (the fixed height band, src/input/reach-zones.js; BAND before a hand was seen).
     const z = ctx?.bus?.get?.("right/zone");
     if (z && typeof z.top === "number") view.band = z;
-    const band = view.band ? { top: view.band.top * H, bottom: view.band.bottom * H } : null;
+    const zb = view.band || { top: BAND.TOP, bottom: BAND.BOTTOM };
+    const band = { top: zb.top * H, bottom: zb.bottom * H };
     const geo = (lastGeo = ladderGeometry(W, H, side, safeInsets()[side], edgeClearance(W, H, side, now), band));
     const sz = geo.sz;
     const dir = geo.dir;

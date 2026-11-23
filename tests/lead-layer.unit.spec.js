@@ -122,7 +122,7 @@ test.describe("Lead layer: menu items + menu rules", () => {
     const on = registry.menuItems("arp", { layerId: "lead" });
     const arp = on.find((i) => i.id === "arp");
     expect(arp.secondary).toBe(true);
-    expect(arp.confirmHint).toBe("Open hand: Lead off");
+    expect(arp.confirmHint).toBe("Lead off");
     expect(on.find((i) => i.id === "chords").secondary).toBeUndefined();
   });
 
@@ -134,7 +134,8 @@ test.describe("Lead layer: menu items + menu rules", () => {
     for (let i = 0; i < 10; i++) m.update(hand(true, 0.5, 0.5), (t += 16));
     const v = { left: [-1, 0], right: [1, 0], up: [0, -1] }[dir];
     const d = G.SELECT_R * 0.1 * 1.3;
-    for (let i = 0; i < 5; i++) m.update(hand(true, 0.5 + v[0] * d, 0.5 + v[1] * d), (t += 16));
+    // Auto-select: holding past the select radius chooses (once the ring has grown in); the hand opens afterwards.
+    for (let i = 0; i < 15; i++) m.update(hand(true, 0.5 + v[0] * d, 0.5 + v[1] * d), (t += 16));
     let r;
     for (let i = 0; i < 5; i++) r = m.update(hand(false, 0.5 + v[0] * d, 0.5 + v[1] * d), (t += 16)) || r;
     return { r, snap: m.snapshot() };

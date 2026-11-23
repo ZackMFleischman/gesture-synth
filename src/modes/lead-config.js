@@ -22,16 +22,13 @@ export function setLeadConfig(patch) {
   return leadConfig;
 }
 
-/**
- * Tweak definitions for the Tweaks panel (bind with defineTweak in src/tweaks/ when it lands).
- * {key, label, type, min, max, step, info}
- */
+/** Tweak definitions for the Tweaks panel ("Lead" group, registered in src/tweaks/defs.js). */
 export const LEAD_TWEAKS = Object.freeze([
-  { key: "releaseMs", label: "Release time (ms)", type: "range", min: 20, max: 1500, step: 10,
+  { key: "releaseMs", label: "Release time", type: "slider", min: 20, max: 1500, step: 10, unit: "ms",
     info: "How long the lead note takes to fade out after the pinch opens. Smooth fade to exact silence; a new pinch during the fade retriggers cleanly." },
-  { key: "sweetBand", label: "Sweet-spot band width (%)", type: "range", min: 0.1, max: 0.5, step: 0.01,
+  { key: "sweetBand", label: "Sweet-spot band width", type: "slider", min: 0.1, max: 0.5, step: 0.01, unit: "× gap",
     info: "Faint band around the current note line: +-this fraction of the gap to the neighbour. Outside it the cursor leans toward the neighbour you are approaching." },
-  { key: "snapHysteresis", label: "Snap hysteresis (fraction of gap)", type: "range", min: 0, max: 0.45, step: 0.01,
+  { key: "snapHysteresis", label: "Snap hysteresis", type: "slider", min: 0, max: 0.45, step: 0.01, unit: "× gap",
     info: "To leave a note the hand must pass the midpoint to the neighbour by this fraction of the gap. Higher = less waffling between two notes, more travel to switch." },
   { key: "showHandMarker", label: "Show hand marker", type: "toggle",
     info: "A small tick at the hand's exact (unsnapped) height on the ladder, so you can see how close you are to the next note." },

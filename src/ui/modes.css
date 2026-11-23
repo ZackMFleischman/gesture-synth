@@ -38,6 +38,11 @@ body.gs-modes #distortionDisplay { right: var(--gs-gutter); }
    The original top-right readout stays in the DOM (index.html, still updated) but is not shown with the modes UI,
    on desktop and phones alike. */
 body.gs-modes #distortionDisplay { display: none; }
+/* The top-right 8-bar meter duplicates the edge tracks (Arp: gate = the right track; Chords: master = the master track;
+   user: "The bars in the upper right I think represent the gate, but I think we can nix that?"). Same approach as the
+   filter readout: Eric's element stays in the DOM and is still updated (readouts.js), but is not shown with the modes
+   UI, in every mode, on desktop and phones alike. */
+body.gs-modes #volumeMeter { display: none; }
 
 /* "Open Guide" / "Close Guide" keep one width so the Controls toggle never crowds it. */
 body.gs-modes #guideToggle { min-width: 112px; }
@@ -94,9 +99,10 @@ body.gs-modes.gs-no-meter #volumeMeter { display: none; }
 #noteSetBadge i.on { background: var(--gs-mode); border-color: var(--gs-mode); }
 
 /* ---- Connection chip (milestone 3, src/output/status-chip.js owns it) ----
-   D12: row 1, left of the meter (gutter + 70px meter + 12px gap = 102px). Hidden while the output is off (Q4);
-   a press opens the Controls panel, so the chip's own popover is not used in the app. */
-body.gs-modes #outputChip { top: 12px; right: calc(var(--gs-gutter) + 82px); }
+   D12: row 1, top right. It sat left of the 8-bar meter; the meter is hidden with the modes UI (ws/simplify), so the
+   chip takes the meter's place at the gutter. Hidden while the output is off (Q4); a press opens the Controls panel,
+   so the chip's own popover is not used in the app. */
+body.gs-modes #outputChip { top: 12px; right: var(--gs-gutter); }
 body.gs-modes #outputPopover { top: 46px; right: var(--gs-gutter); }
 
 /* ---- Third row: "Controls" toggle next to the existing "Open Guide" ---- */
@@ -142,6 +148,14 @@ body.gs-modes #outputPopover { top: 46px; right: var(--gs-gutter); }
 #controlsPanel .gs-v { display: flex; align-items: center; gap: 6px; min-width: 0; }
 #controlsPanel .gs-sep { grid-column: 1 / -1; height: 1px; background: #3a3428; margin: 1px 0; }
 #controlsPanel .gs-full { grid-column: 1 / -1; }
+#controlsPanel [data-row][hidden] { display: none; }
+.gs-select {
+  background: #1a1a1a; color: #e8a13d; border: 1px solid #3a3428; border-radius: 4px;
+  font: 12px monospace; padding: 3px 4px; min-width: 0; max-width: 100%;
+}
+.gs-select:focus-visible { outline: 2px solid #e8a13d; outline-offset: 1px; }
+/* "Experimental" group (Drive / Space switches, off by default) at the bottom of the panel. */
+#controlsPanel .gs-exp-head { display: flex; align-items: baseline; gap: 8px; color: var(--gs-quiet); font: 600 12px monospace; }
 .gs-hand {
   display: inline-flex; margin-left: auto; padding-left: 4px; color: var(--gs-quiet);
   visibility: hidden;

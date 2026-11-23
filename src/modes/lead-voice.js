@@ -6,11 +6,21 @@
 //
 // Levels leave headroom for the resonant filter: lead peak 0.2, pad <= ~0.16 total.
 //
-// Release (pinch opens): a smooth fade over leadConfig.releaseMs (releaseCurve: cubic, slope 0 at the end = exact,
-// click-free silence; -60 dB at 90% of the time). releaseTime() is the one place that picks the length, so an
-// instrument trait (e.g. traits.releaseTailS) can override it later. A new pinch during the fade retriggers via
-// cancelAndHold + the RETRIGGER_DIP_S dip (no click, no stuck note).
+// Instruments (plugins, src/instruments): the lead plays the LEAD instrument (ctx.audio.instrument("lead"); it follows
+// the base until one is picked in the Sound menu). Chain: source (mono: one long-lived source) -> tone low-pass
+// (traits.leadToneHz) -> envelope -> the instrument's POST (this voice's rack) -> layerOut. Only the plugin interface
+// and traits are used: a pinch = source.excite() (a new attack: a re-pluck that adds to a ringing string, a key click,
+// a breath puff); a note step = setFreq() (+ excite(t, traits.hammerOn) when traits.legato is "hammer-on"); the
+// release = source.release(). An instrument change while a note sounds crossfades (SWAP_S) to a new source at the
+// same pitch: no gap, no click.
+//
+// Release (pinch opens): a smooth fade of the envelope over leadConfig.releaseMs (releaseCurve: cubic, slope 0 at the
+// end = exact, click-free silence; -60 dB at 90% of the time) for every instrument; the instrument's own
+// source.release() (palm mute, 8-12 ms key-up fades) runs only once that fade is silent, so it never cuts the tail.
+// releaseTime() is the one place that picks the length (a per-instrument trait can override it later). A new pinch
+// during the fade retriggers via cancelAndHold + the RETRIGGER_DIP_S dip (no click, no stuck note).
 
+import { createSource, createRack, instrumentFromTone, defaultInstrumentId, traitsOf } from "../instruments/index.js";
 import { leadConfig } from "./lead-config.js";
 
 // ---- Tunables ----
@@ -47,6 +57,17 @@ export const RETRIGGER_DIP_S = 0.008; // a new pinch on a sounding voice dips to
 // 85 ms FFT window (tests/lead.spec.js "audio quality").
 export const PITCH_STEP_S = 0.003;
 export const LEAD_TONE_HZ = 3200; // fixed lowpass that takes the edge off bright waveforms
+export const SWAP_S = 0.06; // instrument change while sounding: equal-power crossfade
+
+/** Equal-power fade curve (64 points) from a to b on the quarter circle: "out" = cos, "in" = sin. */
+function fadeCurve(kind, level) {
+  const c = new Float32Array(64);
+  for (let i = 0; i < 64; i++) {
+    const u = (i / 63) * (Math.PI / 2);
+    c[i] = level * (kind === "out" ? Math.cos(u) : Math.sin(u));
+  }
+  return c;
+}
 
 export const PAD_LEVEL = 0.03; // per pad note (4 notes, 2 oscillators each)
 export const PAD_ATTACK_TAU = 0.12;
@@ -76,11 +97,29 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
   let nodes = null; // built lazily once the AudioContext exists
   let soundingFreq = null; // freq of the current lead note (null = released)
   let soundingId = null; // note id of the current lead note
+  let releaseToken = 0; // pending deferred source.release() (noteOff); a noteOn invalidates it
   let pad = []; // [{ freq, gain, oscs, id }]
   let padKey = "";
 
-  function waveform() {
-    return (audio.synth && audio.synth.waveform) || "triangle";
+  /** The lead's instrument id (Sound menu); labs without instruments: from the tone select value. */
+  function instrument() {
+    if (typeof audio.instrument === "function") return audio.instrument("lead");
+    return instrumentFromTone((audio.synth && audio.synth.waveform) || audio.waveform) || defaultInstrumentId();
+  }
+
+  /** source -> tone -> env -> rack[inst]. */
+  function buildChain(ac, rack, inst, freq) {
+    const src = createSource(ac, inst, freq, ac.currentTime, { voice: "lead", mono: true });
+    const tone = ac.createBiquadFilter();
+    tone.type = "lowpass";
+    tone.frequency.value = traitsOf(inst).leadToneHz ?? LEAD_TONE_HZ;
+    tone.Q.value = 0.5;
+    const env = ac.createGain();
+    env.gain.value = 0;
+    src.connect(tone);
+    tone.connect(env);
+    env.connect(rack.input(inst));
+    return { inst, src, osc: src, tone, env };
   }
 
   function ensure() {
@@ -88,21 +127,10 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
     const out = audio.out;
     if (!ac || !out) return null;
     if (nodes && nodes.ac === ac) return nodes;
-    const osc = ac.createOscillator();
-    osc.type = waveform();
-    osc.frequency.value = 440;
-    const tone = ac.createBiquadFilter();
-    tone.type = "lowpass";
-    tone.frequency.value = LEAD_TONE_HZ;
-    tone.Q.value = 0.5;
-    const env = ac.createGain();
-    env.gain.value = 0;
-    osc.connect(tone);
-    tone.connect(env);
     // Lead layer: the lead goes through its own tilt filter (ctx.audio.layerOut -> layerFilter -> master), so the
     // base mode underneath keeps the shared filter at its held value. The pad stays on the shared bus.
-    env.connect(audio.layerOut || out);
-    osc.start();
+    const rack = createRack(ac, audio.layerOut || out);
+    const ch = buildChain(ac, rack, instrument(), 440);
 
     const padTone = ac.createBiquadFilter();
     padTone.type = "lowpass";
@@ -110,8 +138,37 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
     padTone.Q.value = 0.4;
     padTone.connect(out);
 
-    nodes = { ac, osc, tone, env, padTone };
+    nodes = { ac, rack, ...ch, padTone, unsub: null };
+    if (typeof audio.onInstrument === "function") {
+      nodes.unsub = audio.onInstrument((target, id) => {
+        if (target === "lead") swapInstrument(id);
+      });
+    }
     return nodes;
+  }
+
+  /** Instrument change: a new chain at the same pitch; a sounding note crossfades over SWAP_S. */
+  function swapInstrument(id) {
+    const n = nodes;
+    if (!n || !id || id === n.inst) return;
+    const ac = n.ac;
+    const t = ac.currentTime;
+    const old = { src: n.src, env: n.env, tone: n.tone };
+    const freq = soundingFreq ?? n.src.frequency.value ?? 440;
+    const ch = buildChain(ac, n.rack, id, freq);
+    Object.assign(n, ch);
+    const lvl = old.env.gain.value;
+    old.env.gain.cancelScheduledValues(0);
+    old.env.gain.setValueCurveAtTime(fadeCurve("out", lvl), t, SWAP_S);
+    try { old.src.stop(t + SWAP_S + 0.05); } catch {}
+    old.src.onended = () => { try { old.env.disconnect(); } catch {} };
+    if (soundingFreq != null && lvl > 0.002) {
+      const g = n.env.gain;
+      g.cancelScheduledValues(0);
+      g.setValueCurveAtTime(fadeCurve("in", Math.max(lvl, LEAD_SUSTAIN * 0.9)), t, SWAP_S);
+      g.setTargetAtTime(LEAD_SUSTAIN, t + SWAP_S, DECAY_TAU);
+      ch.src.excite(t, 1);
+    }
   }
 
   function emit(name, freq, t, id, extra) {
@@ -122,6 +179,7 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
 
   /** Starts (or retriggers) the lead note. */
   function noteOn(freq, extra) {
+    releaseToken++; // a deferred source.release() from an earlier noteOff must not touch this note
     const n = ensure();
     if (!n) return;
     const t = n.ac.currentTime;
@@ -133,10 +191,13 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
       g.linearRampToValueAtTime(0, t + RETRIGGER_DIP_S);
       ts = t + RETRIGGER_DIP_S;
     }
-    const wf = waveform();
-    if (n.osc.type !== wf) n.osc.type = wf;
-    hold(n.osc.frequency, t);
-    n.osc.frequency.setValueAtTime(freq, ts);
+    const inst = instrument();
+    if (inst !== n.inst) {
+      swapInstrument(inst); // silent swap (not sounding) or a crossfade
+      return noteOn(freq, extra);
+    }
+    n.src.setFreq(freq, ts, 0);
+    n.src.excite(ts, 1);
     g.linearRampToValueAtTime(LEAD_PEAK, ts + ATTACK_S);
     g.setTargetAtTime(LEAD_SUSTAIN, ts + ATTACK_S, DECAY_TAU);
     if (soundingFreq != null) emit("note/off", soundingFreq, t, soundingId);
@@ -150,8 +211,9 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
     const n = ensure();
     if (!n || soundingFreq == null) return;
     const t = n.ac.currentTime;
-    hold(n.osc.frequency, t);
-    n.osc.frequency.exponentialRampToValueAtTime(freq, t + PITCH_STEP_S);
+    n.src.setFreq(freq, t, PITCH_STEP_S);
+    const tr = traitsOf(n.inst);
+    if (tr.legato === "hammer-on") n.src.excite(t, tr.hammerOn);
     emit("note/off", soundingFreq, t, soundingId);
     soundingFreq = freq;
     soundingId = newId();
@@ -165,12 +227,21 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
     const g = n.env.gain;
     hold(g, t);
     const level = g.value;
+    const T = releaseTime();
     try {
-      if (level > 1e-4) g.setValueCurveAtTime(releaseCurve(level), t, releaseTime());
+      if (level > 1e-4) g.setValueCurveAtTime(releaseCurve(level), t, T);
       else g.setValueAtTime(0, t);
     } catch {
-      g.setTargetAtTime(0, t, releaseTime() / 6.9); // overlapping automation (should not happen): exp. to -60 dB
+      g.setTargetAtTime(0, t, T / 6.9); // overlapping automation (should not happen): exp. to -60 dB
     }
+    // The instrument's own note end (palm mute, key-up fade) once our fade is silent: called later, not scheduled
+    // into the future (a re-pinch during the fade must not be muted by it). Skipped if a new note started.
+    const src = n.src;
+    const token = ++releaseToken;
+    setTimeout(() => {
+      if (token !== releaseToken || soundingFreq != null || !nodes || nodes.src !== src) return;
+      src.release(nodes.ac.currentTime);
+    }, T * 1000 + 20);
     emit("note/off", soundingFreq, t, soundingId);
     soundingFreq = null;
     soundingId = null;
@@ -231,10 +302,11 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
     const n = nodes;
     if (!n) return;
     nodes = null;
+    n.unsub?.();
     const t = n.ac.currentTime;
     // Keep the graph until the pad has rung out (disconnecting padTone earlier would cut it: a click).
-    n.osc.stop(t + PAD_RELEASE_TAU * 8);
-    n.osc.onended = () => {
+    n.src.stop(t + PAD_RELEASE_TAU * 8);
+    n.src.onended = () => {
       try { n.env.disconnect(); n.padTone.disconnect(); } catch {}
     };
   }

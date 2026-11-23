@@ -84,3 +84,8 @@ Node lives at `~/.local/node/bin` on this machine (not on the default PATH):
 - When trying out variations, any constant, threshold or behavior switch someone may want to adjust goes into the Tweaks panel
   (`defineTweak` in `src/tweaks/`, shown with `?tweaks=true`), with an `info` explanation for the ⓘ tooltip. Defaults stay in code;
   tweaks only apply when `?tweaks` is in the URL.
+- How: `src/tweaks/tweaks.js` is pure and import-safe — any module may call `defineTweak` at load time; the shared store
+  stays disabled (no apply, no localStorage) until `?tweaks` loads the panel chunk (`src/tweaks/index.js`), then stored
+  values (`localStorage["gs.tweaks.v1"]`) apply and later definitions appear at once. App groups live in
+  `src/tweaks/defs.js`; bind `apply` to a live config the code reads every frame/note (unfreeze the constant object or
+  add a small `set*`), reading the default from the code, never copying it.

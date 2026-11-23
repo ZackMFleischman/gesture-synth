@@ -2,7 +2,9 @@
 // the gesture guide's slot (the two are mutually exclusive). Rows:
 //   Mode (segmented; router.setMode) | the active mode's own rows (mode.controls(container, ctx)) |
 //   Master vol | Output (on/off switch + room code + connection state + "New code", through the M3 status
-//   chip's API when `output` is given; setOutputRow(render) replaces the row).
+//   chip's API when `output` is given; setOutputRow(render) replaces the row) |
+//   Experimental (bottom group, user request after real-camera testing): Drive / Space switches (src/core/axes.js),
+//   off by default, nothing persisted.
 // Lead decision Q4 (docs/ui-integration.md): this row is THE output setting. The chip (top right) is
 // hidden while the output is off and, once on, a press on it opens this panel (output.setPressHandler).
 // The mode rows live in main.js's #modeControls (the router mounts/unmounts them on mode change); the
@@ -17,11 +19,7 @@
 // held values: gate, tempo, …) stay usable and never show the hand mark (the right hand plays Lead).
 
 import { MIN_BPM, MAX_BPM } from "../services/clock.js";
-import { AXES } from "../core/axes.js";
-import { RANGE_PRESETS, DEFAULT_RANGE } from "../input/reach-zones.js";
-
-/** Range (reach-zone preset) labels, in display order. */
-const RANGE_LABELS = { comfort: "Comfort", wide: "Wide", compact: "Compact" };
+import { AXES, isAxisOn } from "../core/axes.js";
 
 const MOVE = 0.05; // hand height change (0..1) that hands control back to the gesture
 const HAND_SVG =
@@ -51,13 +49,16 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc, output
   panel.setAttribute("aria-label", "Screen controls");
   panel.innerHTML = `
     <span class="gs-k">Mode</span><span class="gs-v"><div class="gs-seg" data-control="mode" role="group" aria-label="Mode"></div></span>
+    <span class="gs-k" data-row="sound-base">Sound</span><span class="gs-v" data-row="sound-base"><select class="gs-select" data-control="sound-base" aria-label="Instrument"></select></span>
+    <span class="gs-k" data-row="sound-lead" hidden>Lead sound</span><span class="gs-v" data-row="sound-lead" hidden><select class="gs-select" data-control="sound-lead" aria-label="Lead instrument"></select></span>
     <div class="gs-sep"></div>
     <div class="gs-mode-host"></div>
     <div class="gs-sep"></div>
     <span class="gs-k">Master vol</span><span class="gs-v gs-master-row"><input class="gs-range master" type="range" min="0" max="1" step="0.01" aria-label="Master volume" data-control="master"></span>
-    <span class="gs-k">Range</span><span class="gs-v"><div class="gs-seg" data-control="range" role="group" aria-label="Hand range"></div></span>
-    ${AXES.map((a) => `<span class="gs-k">${a.label}</span><span class="gs-v gs-axis-row"><button type="button" class="gs-switch" aria-pressed="true" aria-label="${a.guide}" data-control="axis-${a.id}"></button><span class="gs-note">${a.guide.split(" → ")[0]}</span></span>`).join("")}
-    <span class="gs-k">Output</span><span class="gs-v" data-hook="output"></span>`;
+    <span class="gs-k">Output</span><span class="gs-v" data-hook="output"></span>
+    <div class="gs-sep"></div>
+    <div class="gs-full gs-exp-head" data-group="experimental">Experimental <span class="gs-note">Hand sideways controls</span></div>
+    ${AXES.map((a) => `<span class="gs-k">${a.label}</span><span class="gs-v gs-axis-row"><button type="button" class="gs-switch" aria-pressed="false" aria-label="${a.guide}" data-control="axis-${a.id}"></button><span class="gs-note">${a.guide.split(" → ")[0]}</span></span>`).join("")}`;
   (guideEl || toggle).after(panel);
 
   const seg = panel.querySelector('[data-control="mode"]');
@@ -65,32 +66,58 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc, output
   const master = panel.querySelector('[data-control="master"]');
   const outputEl = panel.querySelector('[data-hook="output"]');
 
-  // ---- Range (reach zone preset, bus `reach/range`) + sideways axes on/off (bus `<id>/on`, src/core/axes.js) ----
-  const rangeSeg = panel.querySelector('[data-control="range"]');
-  for (const id of Object.keys(RANGE_PRESETS)) {
-    const b = doc.createElement("button");
-    b.type = "button";
-    b.dataset.value = id;
-    b.textContent = RANGE_LABELS[id] || id;
-    b.addEventListener("click", () => bus.set("reach/range", id));
-    rangeSeg.append(b);
+  // ---- Sound: the base instrument (Chords / Arp) and, while the Lead layer is on, the lead's (instrument plugins:
+  // options from ctx.instruments(), the registry; same setting as the Sound menu and the tone select) ----
+  const soundSel = {
+    base: panel.querySelector('[data-control="sound-base"]'),
+    lead: panel.querySelector('[data-control="sound-lead"]'),
+  };
+  const leadRows = panel.querySelectorAll('[data-row="sound-lead"]');
+  let soundFor = "";
+  for (const [target, sel] of Object.entries(soundSel)) {
+    sel.addEventListener("change", () => ctx.audio?.setInstrument?.(target, sel.value));
   }
-  const axisSwitches = AXES.map((a) => {
-    const sw = panel.querySelector(`[data-control="axis-${a.id}"]`);
-    sw.addEventListener("click", () => bus.set(`${a.id}/on`, bus.get(`${a.id}/on`) === false));
-    return { a, sw };
-  });
-  function syncSettings() {
-    const range = bus.get("reach/range") || DEFAULT_RANGE;
-    for (const b of rangeSeg.children) {
-      const on = b.dataset.value === range;
-      if (b.classList.contains("on") !== on) {
-        b.classList.toggle("on", on);
-        b.setAttribute("aria-pressed", String(on));
+  function syncSound() {
+    const list = typeof ctx.instruments === "function" ? ctx.instruments() : [];
+    const key = list.map((d) => `${d.id}:${d.label}`).join(",");
+    if (key !== soundFor) {
+      soundFor = key;
+      for (const sel of Object.values(soundSel)) {
+        sel.innerHTML = "";
+        for (const d of list) {
+          const o = doc.createElement("option");
+          o.value = d.id;
+          o.textContent = d.label;
+          sel.append(o);
+        }
       }
     }
+    for (const [target, sel] of Object.entries(soundSel)) {
+      const v = ctx.audio?.instrument?.(target) ?? bus.get(`sound/${target}`);
+      if (v && sel.value !== v && doc.activeElement !== sel) sel.value = v;
+    }
+    const layer = !!S.layerId;
+    for (const r of leadRows) if (r.hidden === layer) r.hidden = !layer;
+  }
+
+  // ---- Experimental group: sideways axes on/off (bus `<id>/on`, src/core/axes.js; off by default, not persisted) ----
+  const axisSwitches = AXES.map((a) => {
+    const sw = panel.querySelector(`[data-control="axis-${a.id}"]`);
+    sw.addEventListener("click", () => bus.set(`${a.id}/on`, !isAxisOn(bus, a)));
+    return { a, sw };
+  });
+  // Help modal: the Drive / Space lines (index.html #helpExperimental) show only for the axes that are switched on.
+  const helpExp = doc.getElementById("helpExperimental");
+  const helpAxis = AXES.map((a) => ({ a, p: helpExp?.querySelector(`[data-axis="${a.id}"]`) }));
+  function syncHelp() {
+    if (!helpExp) return;
+    const anyOn = AXES.some((a) => isAxisOn(bus, a));
+    if (helpExp.hidden === anyOn) helpExp.hidden = !anyOn;
+    for (const { a, p } of helpAxis) if (p && p.hidden === isAxisOn(bus, a)) p.hidden = !isAxisOn(bus, a);
+  }
+  function syncSettings() {
     for (const { a, sw } of axisSwitches) {
-      const on = String(bus.get(`${a.id}/on`) !== false);
+      const on = String(isAxisOn(bus, a));
       if (sw.getAttribute("aria-pressed") !== on) sw.setAttribute("aria-pressed", on);
     }
   }
@@ -220,7 +247,7 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc, output
     { sel: '[data-control="double"]', owned: () => !S.layerId && !!S.hands.right.pos && !S.rightHeld },
     { sel: '[data-control="bpm"]', owned: () => !S.layerId && !!S.hands.right.pos && !!S.hands.right.pinch },
     { sel: '[data-control="master"]', owned: () => !!S.hands.left.pos && !S.overrides.has("master") },
-    ...AXES.map((a) => ({ sel: `[data-control="axis-${a.id}"]`, owned: () => !!S.hands[a.hand].pos && bus.get(`${a.id}/on`) !== false })),
+    ...AXES.map((a) => ({ sel: `[data-control="axis-${a.id}"]`, owned: () => !!S.hands[a.hand].pos && isAxisOn(bus, a) })),
     // Lead: finger count = note set, pinch on an arrow = octave.
     { sel: '[data-control="noteset"]', owned: () => !!S.hands.right.pos && !S.rightHeld },
     { sel: '[data-control="octave"]', owned: () => !!S.hands.right.pos && !S.rightHeld },
@@ -335,8 +362,10 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc, output
   function update() {
     syncOwnControls();
     enforceOverrides();
+    syncHelp();
     if (!isOpen()) return;
     buildSeg();
+    syncSound();
     for (const b of seg.children) {
       const on = b.dataset.value === (S.baseId ?? S.modeId) || b.dataset.value === S.layerId;
       if (b.classList.contains("on") !== on) {

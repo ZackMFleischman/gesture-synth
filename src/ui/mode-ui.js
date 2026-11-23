@@ -36,6 +36,7 @@ import { createReadouts } from "./readouts.js";
 import { createControlsPanel } from "./controls-panel.js";
 import { createTransport } from "./transport.js";
 import { createGuide } from "./guide.js";
+import { createSmoothers } from "./smooth.js";
 
 /** What the right edge track shows when a mode does not say (`mode.rightTrack`). Chords: none (right height is free). */
 export const DEFAULT_RIGHT_TRACK = {
@@ -110,13 +111,34 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
       const h = this.hands[side];
       return !h.pos && h.seen && h.goneAt != null && this.now - h.goneAt > LOST_GRACE_MS;
     },
-    /** Position to draw at: live, or the last one during the lost grace (tracking dropouts don't blink). */
-    drawPos(side) {
+    /** Raw position: live, or the last one during the lost grace (tracking dropouts don't blink). */
+    rawDrawPos(side) {
       const h = this.hands[side];
       if (h.pos) return h.pos;
       return h.lastPos && h.goneAt != null && this.now - h.goneAt <= LOST_GRACE_MS ? h.lastPos : null;
     },
+    /**
+     * Position to DRAW hand-attached visuals at (filter arc, axis scales, edge-track markers + guide lines, first-use
+     * labels): rawDrawPos, display-smoothed per hand (src/ui/smooth.js; computed once per frame in tick()).
+     * Never use it for control values.
+     */
+    drawPos(side) {
+      return this.smoothPos[side] ?? null;
+    },
+    smoothPos: { left: null, right: null },
+    /** Display-smoothed hand size (display-height units) per hand, for sizes of hand-attached visuals. */
+    smoothSize: { left: null, right: null },
   };
+  const smoothers = createSmoothers();
+  /** Once per frame: the display-smoothed positions / sizes the canvas layers draw with. */
+  function smoothHands() {
+    for (const side of ["left", "right"]) {
+      const raw = S.rawDrawPos(side);
+      S.smoothPos[side] = raw ? smoothers.get(`${side}/pos`, raw, S.now) : smoothers.get(`${side}/pos`, null, S.now);
+      const size = S.hands[side].size;
+      S.smoothSize[side] = typeof size === "number" && size > 0 ? smoothers.get(`${side}/size`, size, S.now, "size") : size;
+    }
+  }
 
   const listeners = new Set(); // sub-module hooks: fn(kind: "set"|"event", name, value, playTime)
 
@@ -288,6 +310,7 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
   function tick() {
     S.now = performance.now();
     pollHands();
+    smoothHands();
     S.menu = readMenu();
     const sig = heldBySignal();
     S.heldValue = sig?.value ?? null;
@@ -365,7 +388,7 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
   // Hand span (wrist -> fingertips) in px. HandFrame.handSize (wrist -> middle MCP) is in display-height
   // units; it is used when hand input publishes it as `left|right/size`, else a typical arm's-length span.
   function handSpan(W, H) {
-    const size = S.hands.right.size || S.hands.left.size;
+    const size = S.smoothSize.right || S.smoothSize.left;
     const span = typeof size === "number" && size > 0 ? size * H * 1.9 : H * 0.2;
     return Math.max(50, Math.min(span, W * 0.32, 280));
   }

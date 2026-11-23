@@ -360,7 +360,7 @@ function drawMenu(now) {
 
 function renderState() {
   renderMode();
-  const keys = ["/gs/mode", "/gs/layer", "/gs/chord", "/gs/voicing", "/gs/bpm", "/gs/noteset", "/gs/octave"];
+  const keys = ["/gs/mode", "/gs/layer", "/gs/sound/base", "/gs/sound/lead", "/gs/chord", "/gs/voicing", "/gs/bpm", "/gs/noteset", "/gs/octave"];
   const rest = Object.keys(viz.state).filter((k) => !keys.includes(k)).sort();
   $("state").innerHTML = [...keys, ...rest]
     .map((k) => `<tr><td>${esc(k.replace("/gs/", ""))}</td><td>${esc(fmt(viz.state[k]))}</td></tr>`)
@@ -523,6 +523,10 @@ function drawHands() {
   g.font = "13px monospace";
   g.fillStyle = "#8a8f98";
   if (mode) g.fillText(`mode: ${mode}${viz.state["/gs/layer"] ? ` + ${viz.state["/gs/layer"]}` : ""}${viz.state["/gs/voicing"] ? ` · voicing ${viz.state["/gs/voicing"]}` : ""}`, 16, 62);
+  // instruments (Sound menu): base, and the lead's while Lead plays on top
+  const sb = viz.state["/gs/sound/base"];
+  const sl = viz.state["/gs/sound/lead"];
+  if (sb) g.fillText(`sound: ${sb}${viz.state["/gs/layer"] && sl ? ` · lead: ${sl}` : ""}`, 16, 80);
 }
 
 renderState();

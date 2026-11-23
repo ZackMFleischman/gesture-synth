@@ -139,11 +139,9 @@ html body.gs-mobile #distortionDisplay {
   border-radius: 4px;
   background: rgba(20, 20, 20, 0.72); /* legible over a bright window */
 }
-@media (max-width: 599px), (max-height: 499px) {
-  /* Phones, modes UI present: the 8-bar meter duplicates the right edge track (same value, D5), so it shows
-     only while the bar is expanded (lead decision L1). */
-  html body.gs-mobile.gs-modes:not(.gs-bar-open) #volumeMeter { display: none; }
-}
+/* Modes UI present: the 8-bar meter duplicates the edge tracks, so it is never shown (src/ui/modes.css; ws/simplify
+   replaced lead decision L1 "only while the bar is expanded"). */
+html body.gs-mobile.gs-modes #volumeMeter { display: none; }
 /* Output chip (src/output/status-chip.js; the lab's copy uses .gs-dot/.gs-text): left of the meter, collapsed to
    its dot on phones (state = color + border style); 44 px hit area. Its popover opens under it, inside the screen. */
 html body.gs-mobile #outputChip { top: calc(var(--gs-m-top) + 4px); right: calc(var(--gs-m-right) + 34px + 10px); }
@@ -396,8 +394,6 @@ html body.gs-mobile.gs-hud-min #outputChip:not(.relayed):not([data-state="relaye
   body.gs-mobile #gsPill { transition: opacity 150ms, height 150ms; }
 }
 
-/* Chip moves to the edge when the meter is not shown (minimal HUD; smallest phones with the modes UI). */
+/* Chip moves to the edge when the meter is not shown (minimal HUD; always with the modes UI). */
 html body.gs-mobile.gs-hud-min #outputChip { right: var(--gs-m-right); }
-@media (max-width: 599px), (max-height: 499px) {
-  html body.gs-mobile.gs-modes:not(.gs-bar-open) #outputChip { right: var(--gs-m-right); }
-}
+html body.gs-mobile.gs-modes #outputChip { right: var(--gs-m-right); }

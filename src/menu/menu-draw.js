@@ -1,5 +1,14 @@
 // Radial menu: canvas renderer. Reads a menu-state snapshot, keeps only cosmetic animation state.
 // All colors / sizes live in MENU_THEME so integration can swap them for shared UI tokens.
+//
+// Auto-select (user feedback 2026-11-22): the chosen arc gives a scale bump (1 -> bumpScale -> 1 over bumpMs) with a
+// selection indicator (its rim sweeps out from the middle + one flash ring expanding off the arc), then — for a mode —
+// fades out over the countdown time (COUNTDOWN_MS, live config `countdownMs`) while the right hand stays held. No ring
+// at the hand ("the little loading circle" was too busy). With `holdMs` the rim fills while the fist holds.
+// The tracked fist dot / dashed line and the setting pill's hand anchor are display-smoothed (src/ui/smooth.js);
+// the selection itself (menu-state.js) uses the raw position.
+
+import { createSmoothers } from "../ui/smooth.js";
 
 export const MENU_THEME = Object.freeze({
   font: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
@@ -28,8 +37,7 @@ export const MENU_THEME = Object.freeze({
   markerR: 3, // current-mode dot, sits on the arc's outer edge
   entryR: 2.5,
   fistR: 6,
-  countdownR: 0.33, // x handSize
-  countdownW: 3,
+  anchorPad: 24, // setting value pill: kept this far inside the frame around the hand
   growFrom: 0.55, // ring scale at the start of the grow animation
   tauMs: 40, // easing time constant for highlight changes (~120 ms to settle)
   fillTauMs: 25,
@@ -40,10 +48,21 @@ export const MENU_THEME = Object.freeze({
   breadcrumbAlpha: 0.85,
   backPx: 11, // "Back" caption next to the breadcrumb
   settingDoneMs: 420, // value pill lingers (fading) after a setting confirm
+  // selection feedback (auto-select)
+  bumpMs: 180, // chosen arc: scale 1 -> bumpScale -> 1 (sine), about the arc's own middle
+  bumpScale: 1.12,
+  sweepMs: 140, // selection indicator: the rim sweeps out from the arc's middle to both ends
+  ringMs: 260, // selection indicator: one outline ring expands off the chosen arc and fades
+  ringGrow: 0.28, // ... to this much larger
+  settingFadeMs: 220, // a chosen setting's arc fades over this after the flash (the value pill stays at the hand)
 });
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 const easeOut = (t) => 1 - Math.pow(1 - clamp01(t), 3);
+const easeInOut = (t) => {
+  const u = clamp01(t);
+  return u * u * (3 - 2 * u);
+};
 const rgba = (rgb, a) => `rgba(${rgb},${a})`;
 const DEG = Math.PI / 180;
 const vec = (deg) => [Math.cos(deg * DEG), Math.sin(deg * DEG)];
@@ -145,6 +164,8 @@ export function createMenuRenderer(themeOverrides = {}) {
   const TH = { ...MENU_THEME, ...themeOverrides };
   const anim = new Map(); // `${level}:${id}` -> { fill, sel, hov, dim, vis, lab, push }
   let last = null;
+  const smooth = createSmoothers(); // display-only smoothing of the tracked hand (fist dot, line, pill anchor)
+  let smoothFor = null; // openedAt the smoother belongs to (reset on every new open)
 
   function step(cur, target, dt, tau) {
     return cur + (target - cur) * (1 - Math.exp(-dt / tau));
@@ -159,6 +180,8 @@ export function createMenuRenderer(themeOverrides = {}) {
     const dt = last === null ? 16 : Math.max(0, Math.min(100, now - last));
     last = now;
     const isSettingConfirm = snap.confirmKind === "setting";
+    // How long the chosen arc takes to fade after the flash: the countdown (mode) / a short fade (setting).
+    const fadeMs = Math.max(1, isSettingConfirm ? TH.settingFadeMs : T.COUNTDOWN_MS);
 
     // ---- Which visual phase are we in? -------------------------------------------------
     let ringAlpha = 1;
@@ -172,9 +195,22 @@ export function createMenuRenderer(themeOverrides = {}) {
       else mode = null;
       if (!mode) {
         anim.clear();
+        smooth.reset();
+        smoothFor = null;
         return;
       }
     }
+    // Display-smoothed hand position (normalized display coords). Fresh for every open: no slide from the last menu.
+    if (smoothFor !== snap.openedAt) {
+      smooth.reset();
+      smoothFor = snap.openedAt;
+    }
+    const handPos = snap.handPos ? smooth.get("hand", snap.handPos, now) : null;
+    // Fist offset from the active ring's center in width units (= snap.offset, but from the smoothed position).
+    const offset =
+      handPos && snap.center
+        ? { x: handPos.x - snap.center.x, y: (handPos.y - snap.center.y) / (snap.aspect || view.aspect || 1) }
+        : snap.offset;
     // Grow animation of the active ring (main ring at open / after "back", sub-ring at sub-open).
     const growU = phase === "open" ? easeOut((now - Math.max(snap.openedAt, snap.levelAt ?? 0)) / T.GROW_MS) : 1;
     let ringScale = 1;
@@ -201,17 +237,16 @@ export function createMenuRenderer(themeOverrides = {}) {
     g.lineCap = "round";
     g.lineJoin = "round";
 
-    // ---- Countdown / done: drawn at the hand ---------------------------------------------
+    // ---- Chosen: bump + selection indicator, then the arc fades (mode: over the countdown) ----------
     if (mode === "confirm" || mode === "done") {
       const item = snap.confirmedItem || items.find((i) => i.id === snap.confirmedId);
       const t = now - snap.confirmedAt;
       const ctr = clampedCenter();
-      if (mode === "confirm" && t < T.FLASH_MS + 120) {
+      if (t < T.FLASH_MS + fadeMs) {
         if (level === 1 && snap.parent) drawBreadcrumb(ctr, 1, Math.max(0, 1 - t / T.FLASH_MS));
         drawRing(ctr, t);
       }
       if (isSettingConfirm) drawSettingDone(item, t);
-      else drawCountdown(item, t);
       g.restore();
       return;
     }
@@ -284,13 +319,17 @@ export function createMenuRenderer(themeOverrides = {}) {
     // ---- Ring (open / fading / flashing) --------------------------------------------------
     function drawRing(ctr, confirmT) {
       const { x: cx, y: cy } = ctr;
-      const offPx = { x: snap.offset.x * view.scale, y: snap.offset.y * view.scale };
+      const offPx = { x: offset.x * view.scale, y: offset.y * view.scale };
       const fist = { x: cx + offPx.x, y: cy + offPx.y };
       const distPx = Math.hypot(offPx.x, offPx.y);
       const flashing = confirmT !== null;
-      // After the flash the confirmed arc fades out while the countdown ring takes over.
-      const postFlash = flashing ? clamp01((confirmT - T.FLASH_MS) / 120) : 0;
+      // After the flash the chosen arc fades out: over the countdown for a mode (the right hand stays held meanwhile).
+      const postFlash = flashing ? easeInOut((confirmT - T.FLASH_MS) / fadeMs) : 0;
       const flash = flashing ? Math.sin(Math.PI * clamp01(confirmT / T.FLASH_MS)) : 0;
+      // Selection feedback on the chosen arc: scale bump + rim sweep + one expanding flash ring.
+      const bump = flashing ? 1 + (TH.bumpScale - 1) * Math.sin(Math.PI * clamp01(confirmT / TH.bumpMs)) : 1;
+      const sweep = flashing ? easeOut(confirmT / TH.sweepMs) : 1;
+      const holding = !flashing && T.HOLD_MS > 0 && snap.holdId != null;
       const key = (id) => `${level}:${id}`;
 
       for (const it of items) {
@@ -303,7 +342,7 @@ export function createMenuRenderer(themeOverrides = {}) {
         const labT = isSel ? 1 : isHov ? TH.labelQuiet + (1 - TH.labelQuiet) * snap.progress : TH.labelQuiet;
         if (mode === "open" || flashing) {
           a.fill = step(a.fill, fillT, dt, TH.fillTauMs);
-          a.sel = step(a.sel, isSel ? 1 : 0, dt, TH.tauMs);
+          a.sel = flashing && isSel ? 1 : step(a.sel, isSel ? 1 : 0, dt, TH.tauMs); // chosen: rim at once (it sweeps)
           a.hov = step(a.hov, isHov || isSel ? 1 : 0, dt, TH.tauMs);
           a.dim = step(a.dim, dimT, dt, TH.tauMs);
           a.vis = flashing ? (isSel ? 1 : Math.min(a.vis, clamp01(1 - confirmT / 60))) : 1;
@@ -332,6 +371,16 @@ export function createMenuRenderer(themeOverrides = {}) {
         const alpha = base * dimF;
         if (base <= 0.002) continue;
         const isCur = it.id === snap.currentId;
+        const chosen = flashing && it.id === snap.selectedId;
+        const [mx, my] = vec(it.angle);
+        const arcMid = { x: cx + (mx * (ri + R)) / 2, y: cy + (my * (ri + R)) / 2 }; // the arc's own middle
+        if (chosen) {
+          // scale bump about the arc's middle (label included)
+          g.save();
+          g.translate(arcMid.x, arcMid.y);
+          g.scale(bump, bump);
+          g.translate(-arcMid.x, -arcMid.y);
+        }
 
         // plate
         sectorPath(g, cx, cy, ri, R, a0, a1, TH.cornerPx);
@@ -359,15 +408,18 @@ export function createMenuRenderer(themeOverrides = {}) {
         g.strokeStyle = a.hov > 0.5 ? rgba(col, alpha * (1 - 0.75 * a.sel)) : rgba(TH.ink, TH.outlineAlpha * alpha);
         g.stroke();
 
-        // selected rim with a soft glow
-        if (a.sel > 0.01) {
+        // selected rim with a soft glow. Chosen: it sweeps out from the arc's middle (selection indicator);
+        // holdMs: it fills from the middle as the hold progresses.
+        const rimFrac = chosen ? sweep : holding && it.id === snap.holdId ? snap.holdProgress : 1;
+        if (a.sel > 0.01 && rimFrac > 0.01) {
           const rr = R + TH.rimGap + TH.rimW / 2;
+          const half = (span / 2 - 2 / rr) * rimFrac;
           g.save();
           const rimCol = isCur ? TH.ink : col; // selecting the current item = neutral rim, no glow
           g.shadowColor = rgba(rimCol, (isCur ? 0 : 0.7) * a.sel * alpha);
           g.shadowBlur = 10 + 10 * flash;
           g.beginPath();
-          g.arc(cx, cy, rr, a0 + 2 / rr, a1 - 2 / rr);
+          g.arc(cx, cy, rr, mid - half, mid + half);
           g.lineWidth = TH.rimW;
           g.strokeStyle = rgba(flash > 0.3 ? TH.ink : rimCol, (isCur ? 0.8 : 1) * a.sel * alpha);
           g.stroke();
@@ -405,6 +457,24 @@ export function createMenuRenderer(themeOverrides = {}) {
 
         // label outside the ring, in the direction of movement
         drawLabel(it, cx, cy, a, base, col);
+
+        if (chosen) {
+          g.restore();
+          // selection indicator: one outline ring expands off the chosen arc and fades
+          const u = confirmT / TH.ringMs;
+          if (u < 1) {
+            const k = 1 + TH.ringGrow * easeOut(u);
+            g.save();
+            g.translate(arcMid.x, arcMid.y);
+            g.scale(k, k);
+            g.translate(-arcMid.x, -arcMid.y);
+            sectorPath(g, cx, cy, ri, R, a0, a1, TH.cornerPx);
+            g.lineWidth = 2 / k;
+            g.strokeStyle = rgba(isCur ? TH.ink : col, 0.9 * (1 - u) * ringAlpha);
+            g.stroke();
+            g.restore();
+          }
+        }
       }
 
       if (flashing) return;
@@ -454,14 +524,18 @@ export function createMenuRenderer(themeOverrides = {}) {
       // hint under the ring (not while fading out)
       if (mode !== "open") return;
       const sel = items.find((i) => i.id === snap.selectedId);
+      const hovIt = items.find((i) => i.id === snap.hoverId);
+      const release = !!snap.requireRelease; // live config: the earlier open-hand flow
       let hint = "Move to choose";
       if (level === 1 && snap.back) hint = `Move to choose · ${backWord(snap.back.angle)} = back`;
       if (!snap.tracking) hint = "Hand lost";
       else if (sel && sel.type === "submenu") hint = "Keep going to open";
-      else if (sel) {
+      else if (sel && release) {
         if (sel.id === snap.currentId) hint = level === 1 ? "Already set" : "Already active";
-        else hint = sel.confirmHint || (sel.type === "setting" ? "Open hand to set" : "Open hand to confirm");
-      } else if (snap.hoverBack) hint = "Back";
+        else hint = sel.confirmHint ? `Open hand: ${sel.confirmHint}` : sel.type === "setting" ? "Open hand to set" : "Open hand to confirm";
+      } else if (sel) hint = sel.confirmHint || "Hold to choose"; // holdMs > 0: the rim fills
+      else if (hovIt && hovIt.confirmHint && snap.progress > 0.3) hint = hovIt.confirmHint; // what crossing it will do
+      else if (snap.hoverBack) hint = "Back";
       let low = Rf + 24;
       for (const it of items) {
         const o = labelOffset(it, Rf);
@@ -617,12 +691,11 @@ export function createMenuRenderer(themeOverrides = {}) {
       });
     }
 
+    /** The (display-smoothed) hand in canvas px, kept TH.anchorPad inside the frame. */
     function handAnchor(extraBelow) {
-      const rc = TH.countdownR * s;
-      const hp = view.toCanvas(snap.handPos || snap.center);
-      const m = rc * 1.3 + 8;
+      const hp = view.toCanvas(handPos || snap.center);
+      const m = TH.anchorPad;
       return {
-        rc,
         x: Math.max(b.x0 + m, Math.min(b.x1 - m, hp.x)),
         y: Math.max(b.y0 + m, Math.min(b.y1 - m - extraBelow, hp.y)),
       };
@@ -643,60 +716,6 @@ export function createMenuRenderer(themeOverrides = {}) {
       } else alpha = clamp01((t - 40) / 80);
       if (alpha <= 0.002) return;
       drawPill(item, x, y + TH.fistR + 12 + h / 2 - rise, {
-        textA: alpha,
-        plateA: 0.6 * alpha,
-        strokeCol: rgba(col, alpha),
-        bold: true,
-      });
-    }
-
-    function drawCountdown(item, t) {
-      if (!item) return;
-      const col = hexToRgb(item.color);
-      const { rc, x: hx, y: hy } = handAnchor(TH.labelPx + 22);
-      let u, alpha, r;
-      if (mode === "done") {
-        const d = clamp01((now - snap.closedAt) / 160);
-        u = 1;
-        alpha = 1 - d;
-        r = rc * (1 + 0.15 * easeOut(d));
-      } else {
-        const tc = t - T.FLASH_MS;
-        if (tc < -60) return; // countdown fades in at the tail of the flash
-        u = clamp01(tc / T.COUNTDOWN_MS);
-        alpha = clamp01((tc + 60) / 100);
-        r = rc * (1 + 0.3 * (1 - easeOut(u)));
-      }
-      // single quiet track on a soft dark band, so it reads over any video
-      g.beginPath();
-      g.arc(hx, hy, r, 0, Math.PI * 2);
-      g.lineWidth = TH.countdownW + 3;
-      g.strokeStyle = rgba(TH.plate, 0.5 * alpha);
-      g.stroke();
-      // closing arc
-      if (u > 0.001) {
-        g.save();
-        g.shadowColor = rgba(col, 0.6 * alpha);
-        g.shadowBlur = mode === "done" ? 18 : 8;
-        g.beginPath();
-        g.arc(hx, hy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * u);
-        g.lineWidth = TH.countdownW;
-        g.strokeStyle = rgba(col, alpha);
-        g.stroke();
-        g.restore();
-      }
-      // hand: hollow circle
-      g.beginPath();
-      g.arc(hx, hy, TH.fistR, 0, Math.PI * 2);
-      g.lineWidth = 3.5;
-      g.strokeStyle = rgba(TH.shadow, 0.4 * alpha);
-      g.stroke();
-      g.lineWidth = 2;
-      g.strokeStyle = rgba(TH.ink, 0.95 * alpha);
-      g.stroke();
-      // mode name under the ring, on the same pill as the arc labels
-      const { h } = labelBox(item);
-      drawPill(item, hx, hy + rc * 1.3 + 10 + h / 2, {
         textA: alpha,
         plateA: 0.6 * alpha,
         strokeCol: rgba(col, alpha),

@@ -20,12 +20,15 @@
 // Choosing a base mode (menu or Controls) turns the layer off; choosing the base that was underneath gives the right
 // hand back to it with the Return crossfade from the values it held. `mode` stays the base id; `layer` = "lead"|null.
 //
+// Menu settings (setting items in a sub-ring, e.g. the Sound menu): the menu reports {key, value} when the hand opens
+// on one; the router applies it through ctx.settings[key](value) (src/core/app-context.js). No mode change, no countdown.
+//
 // Publishes: mode (state), layer (state), volume (master volume, continuous), menu (state), right/held (state).
 
 import { classifyChord } from "./input/hand-input.js";
 
 /** Left-height master volume tuning (pure; see createMasterVolume). */
-export const MASTER_VOLUME = Object.freeze({
+export const MASTER_VOLUME = { // mutable: Tweaks may change LOW / HIGH at runtime (createMasterVolume reads them live)
   DEAD_ZONE: 0.04, // height units: movements smaller than this (backlash) never change the volume
   TAU_MS: 140, // one-pole smoothing time constant (right height uses ~30-50 ms in the audio graph)
   LOW: 0.1, // height at/below which the master is 0 (low left hand = rest)
@@ -33,7 +36,7 @@ export const MASTER_VOLUME = Object.freeze({
   // keeps about today's loudness after the gain re-staging that keeps voices out of the limiter (src/services/audio.js).
   HIGH: 0.55,
   INITIAL: 1, // before a left hand was ever seen (e.g. a right-hand-only Lead melody); the first left frame sets it directly
-});
+};
 
 /** Crossfade from locked right-hand values to the live hand after the menu releases it. */
 export const RESUME_MS = 200;
@@ -43,11 +46,12 @@ export const RESUME_MS = 200;
  * update(height|null, nowMs) -> volume 0..1. A null height (hand not visible) holds the volume.
  */
 export function createMasterVolume(opts = {}) {
-  const o = { ...MASTER_VOLUME, ...opts };
+  // Read live (not copied): the Tweaks panel may change MASTER_VOLUME fields while playing; `opts` still override.
+  const o = new Proxy(opts, { get: (t, k) => (k in t ? t[k] : MASTER_VOLUME[k]) });
   let anchor = null; // dead-zoned height
   let value = o.INITIAL;
   let lastT = null;
-  const map = (h) => Math.max(0, Math.min(1, (h - o.LOW) / (o.HIGH - o.LOW)));
+  const map = (h) => Math.max(0, Math.min(1, (h - o.LOW) / Math.max(1e-6, o.HIGH - o.LOW)));
   return {
     update(height, now) {
       if (height == null || !Number.isFinite(height)) {
@@ -98,6 +102,7 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
   let resumePending = false;
   let resumeStart = null;
   let lastMenuKey = "";
+  let lastSetting = null;
   let masterOverride = null; // screen control value (Controls panel) while `ui/override` lists "master"
   let heldPhase = null; // null | "held" | "return" (what the `held` signal currently says)
   let heldFor = null; // mode id the `held` object was built for
@@ -245,7 +250,8 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
     return true;
   }
 
-  // `menu` signal: { state, hoverId, selectedId, progress } while open/countdown, else null.
+  // `menu` signal: { state, level, path, hoverId, selectedId, progress } while open/countdown/flash, else null.
+  // state "flash" = a setting was picked (`setting: {key, value}`); level 1 = inside a sub-ring (path = [submenu id]).
   // Rebuilt only when something visible changes (progress in 1% steps), so consumers get few updates.
   function publishMenu(r) {
     if (!r || r.state === "closed") {
@@ -253,16 +259,22 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
       return;
     }
     const p = Math.round(r.progress * 100) / 100;
-    const key = `${r.state}|${r.hoverId}|${r.selectedId}|${p}`;
+    const level = r.level || 0;
+    const key = `${r.state}|${level}|${r.hoverId}|${r.selectedId}|${p}`;
     if (key === lastMenuKey) return;
     lastMenuKey = key;
-    bus.set("menu", {
+    const m = {
       state: r.state,
+      level,
+      path: r.path || [],
       hoverId: r.hoverId,
       selectedId: r.selectedId,
       confirmedId: r.state === "countdown" ? r.selectedId : null,
       progress: p,
-    });
+    };
+    if (r.setting) lastSetting = { key: r.setting.key, value: r.setting.value };
+    if (r.state === "flash") m.setting = lastSetting;
+    bus.set("menu", m);
   }
 
   /**
@@ -298,6 +310,10 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
       const r = menu.update(menuHand, now);
       if (r.opened) ctx.rightLocked = lastOpenRight;
       if (r.confirmed) setMode(r.confirmed);
+      if (r.setting) {
+        const apply = ctx.settings?.[r.setting.key];
+        if (apply) apply(r.setting.value);
+      }
       if (r.finished || r.cancelled) {
         resumePending = true;
         resumeStart = null;

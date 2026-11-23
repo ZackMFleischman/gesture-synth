@@ -6,7 +6,7 @@
 
 import { makeView, toDisplay, displayDistance } from "../../src/input/hand-input.js";
 import { MASTER_VOLUME } from "../../src/router.js";
-import { DEFAULT_RANGE, handExtents, zoneFor, yForHeight, xForValue } from "../../src/input/reach-zones.js";
+import { zoneFor, yForHeight, xForValue } from "../../src/input/reach-zones.js";
 
 /** Master volume the router maps a left hand at `volume` (= height) to; the default leftHand() is at 0.5. */
 export const masterAt = (volume = 0.5) =>
@@ -44,15 +44,14 @@ export const viewFor = (w, h) => makeView(640, 480, w, h);
  * Display-space geometry of landmarks under a view: palm, handSize, reach zone (same math as hand-input.js).
  * side = screen half for the horizontal band (default: guessed from the palm).
  */
-export function handGeometry(lm, view = placeView, { side, range = DEFAULT_RANGE } = {}) {
+export function handGeometry(lm, view = placeView, { side } = {}) {
   const pts = lm.map((p) => toDisplay(p, view));
   let x = 0, y = 0;
   for (const i of PALM) { x += pts[i].x; y += pts[i].y; }
   const pos = { x: x / PALM.length, y: y / PALM.length };
   const handSize = displayDistance(lm[0], lm[9], view);
-  const ext = handExtents(pts, pos, handSize, view.dstW / view.dstH);
-  const zone = zoneFor(ext, side || (pos.x < 0.5 ? "left" : "right"), range);
-  return { pts, pos, handSize, ext, zone };
+  const zone = zoneFor(side || (pos.x < 0.5 ? "left" : "right"));
+  return { pts, pos, handSize, zone };
 }
 
 /**
@@ -66,7 +65,6 @@ export function handGeometry(lm, view = placeView, { side, range = DEFAULT_RANGE
  * @param {number} opts.x  desired HandFrame.x (0 inner .. 0.5 neutral .. 1 outer of the horizontal band; `side`
  *   = screen half, default guessed from the palm). Omitted = the default x (raw image 0.7 for "Left" / 0.3 for
  *   "Right" = display 0.3 / 0.7: chord hand on the screen left). Ignored with `pos`.
- * @param {string} opts.range  reach-zone preset for `volume` / `x` (default comfort)
  * @param {boolean} opts.fist  tightly closed hand (index..pinky curled into the palm); thumb still follows `thumb`
  * @param {boolean|number} opts.pinch  thumb tip on the index tip; a number = desired pinchDistance
  *   (thumb-index distance / hand size), `true` = 0.1. Fingers default to middle+ring+pinky (an "OK" sign).
@@ -87,7 +85,6 @@ export function hand({
   scale = 1,
   x,
   side,
-  range = DEFAULT_RANGE,
 } = {}) {
   const pv = view || placeView; // placement view for volume / x
   view = view || IDENTITY_VIEW;
@@ -147,7 +144,7 @@ export function hand({
       const shift = (wristX - cx) / PALM.length;
       for (const p of lm) p.x -= shift;
     }
-    const geo = handGeometry(lm, pv, { side, range });
+    const geo = handGeometry(lm, pv, { side });
     const dy = (yForHeight(geo.zone, volume) - geo.pos.y) * pv.sHeight / pv.srcH;
     const dx = x == null ? 0 : -(xForValue(geo.zone, x) - geo.pos.x) * pv.sWidth / pv.srcW; // display x is mirrored
     for (const p of lm) { p.x += dx; p.y += dy; }

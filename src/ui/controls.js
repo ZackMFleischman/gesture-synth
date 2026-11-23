@@ -3,6 +3,7 @@
 
 import { GESTURE_GUIDE, MAJOR_SCALE } from "../services/harmony.js";
 import { trackClarityEvent } from "../services/analytics.js";
+import { listInstruments, onInstrumentsChanged } from "../instruments/index.js";
 
 export function mountControls({ harmony, audio, synth, canvasEl, doc = document }) {
   const gestureGuideEl = doc.getElementById("gestureGuide");
@@ -43,10 +44,27 @@ export function mountControls({ harmony, audio, synth, canvasEl, doc = document 
     updateGestureGuide();
   });
 
-  // ---- Tone ----
+  // ---- Tone = the base instrument (Chords / Arp). Options come from the instrument registry (values: the tone
+  // ids, "triangle" / "sawtooth" / "square" for the original three); kept in sync with the Sound menu. ----
+  function buildToneOptions() {
+    const cur = synth.waveform;
+    toneSelectEl.innerHTML = "";
+    for (const d of listInstruments()) {
+      const o = doc.createElement("option");
+      o.value = d.tone ?? d.id;
+      o.textContent = d.toneLabel ?? d.label;
+      toneSelectEl.append(o);
+    }
+    toneSelectEl.value = cur;
+  }
+  if (listInstruments().length) buildToneOptions();
+  onInstrumentsChanged(buildToneOptions);
   synth.waveform = toneSelectEl.value;
   toneSelectEl.addEventListener("change", () => {
     audio.setWaveform(toneSelectEl.value); // forces sound refresh
+  });
+  synth.onInstrument?.((target) => {
+    if (target === "base" && toneSelectEl.value !== synth.waveform) toneSelectEl.value = synth.waveform;
   });
 
   // ---- Start overlay ----

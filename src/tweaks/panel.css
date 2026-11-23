@@ -1,0 +1,148 @@
+/* Tweaks panel (src/tweaks/panel.js). Loaded only with ?tweaks. Dark plate, readable over video; amber accents like
+   the rest of the chrome. Desktop: button bottom-right (inside the right gutter, below the Lead ladder's down arrow),
+   panel card above it. Phones (body.gs-mobile or narrow/short viewports): bottom sheet. */
+:root {
+  --gs-tw-ink: #e9e4da;
+  --gs-tw-quiet: #a49c8c;
+  --gs-tw-line: #3a3428;
+  --gs-tw-plate: rgba(16, 16, 16, 0.94);
+  --gs-tw-accent: #e8a13d;
+  --gs-tw-warn: #ff5a5f;
+}
+
+.gs-tweaks-toggle {
+  position: fixed;
+  right: calc(28px + env(safe-area-inset-right, 0px));
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  z-index: 11; /* above the start overlay (10): tweak before starting */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px 0 8px;
+  border: 1px solid var(--gs-tw-line);
+  border-radius: 16px;
+  background: rgba(26, 26, 26, 0.88);
+  color: var(--gs-tw-quiet);
+  font: 12px monospace;
+  cursor: pointer;
+}
+.gs-tweaks-toggle:hover, .gs-tweaks-toggle.on { color: var(--gs-tw-accent); border-color: var(--gs-tw-accent); }
+.gs-tweaks-toggle:focus-visible, .gs-tweaks-panel :focus-visible { outline: 2px solid var(--gs-tw-accent); outline-offset: 2px; }
+.gs-tweaks-toggle svg { display: block; }
+
+.gs-tweaks-panel {
+  position: fixed;
+  right: calc(20px + env(safe-area-inset-right, 0px));
+  bottom: calc(52px + env(safe-area-inset-bottom, 0px));
+  z-index: 25; /* above the help modal (20) */
+  width: min(380px, calc(100vw - 40px));
+  max-height: calc(100dvh - 52px - 24px);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  border: 1px solid var(--gs-tw-line);
+  border-radius: 10px;
+  background: var(--gs-tw-plate);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  color: var(--gs-tw-ink);
+  font: 13px/1.35 monospace;
+}
+.gs-tweaks-panel[hidden] { display: none; }
+.gs-tw-head { display: flex; align-items: baseline; gap: 8px; padding: 10px 10px 4px 14px; }
+.gs-tw-head h2 { margin: 0; font-size: 15px; color: var(--gs-tw-accent); }
+.gs-tw-sub { flex: 1; min-width: 0; color: var(--gs-tw-quiet); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gs-tw-close {
+  width: 32px; height: 32px; flex: none; border: 0; border-radius: 6px; background: transparent;
+  color: var(--gs-tw-ink); font: 16px monospace; cursor: pointer;
+}
+.gs-tw-close:hover { background: #2a2620; }
+.gs-tw-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 14px 6px; }
+.gs-tw-btn {
+  border: 1px solid var(--gs-tw-line); border-radius: 4px; background: #1a1a1a; color: var(--gs-tw-accent);
+  font: 12px monospace; padding: 4px 8px; cursor: pointer;
+}
+.gs-tw-btn:hover { border-color: var(--gs-tw-accent); }
+.gs-tw-btn.gs-tw-quiet { color: var(--gs-tw-quiet); }
+.gs-tw-btn[hidden] { display: none; }
+.gs-tw-status { min-height: 0; padding: 0 14px; font-size: 11px; color: #5ad17a; }
+.gs-tw-status:not(:empty) { padding-bottom: 4px; }
+.gs-tw-status[data-kind="warn"] { color: var(--gs-tw-warn); }
+.gs-tw-jsonwrap { padding: 0 14px 6px; }
+.gs-tw-jsonwrap[hidden] { display: none; }
+.gs-tw-json {
+  width: 100%; box-sizing: border-box; resize: vertical; min-height: 90px; border: 1px solid var(--gs-tw-line);
+  border-radius: 4px; background: #0d0d0d; color: var(--gs-tw-ink); font: 11px/1.3 monospace; padding: 6px;
+}
+.gs-tw-jsonwrap .gs-tw-actions { padding: 6px 0 0; }
+
+.gs-tw-body { overflow-y: auto; overscroll-behavior: contain; padding: 0 0 8px; border-top: 1px solid var(--gs-tw-line); }
+.gs-tw-group { border-bottom: 1px solid #26231d; }
+.gs-tw-group-head { display: flex; align-items: center; gap: 6px; margin: 0; padding: 6px 14px 4px 8px; font-size: 13px; }
+.gs-tw-group-toggle {
+  flex: 1; display: flex; align-items: center; gap: 6px; min-height: 28px; border: 0; background: transparent;
+  color: var(--gs-tw-accent); font: 600 13px monospace; text-align: left; cursor: pointer; padding: 0 6px;
+}
+.gs-tw-caret { display: inline-block; transition: transform 120ms; color: var(--gs-tw-quiet); }
+.gs-tw-group.collapsed .gs-tw-caret { transform: rotate(-90deg); }
+.gs-tw-rows { padding: 0 14px 8px; display: flex; flex-direction: column; gap: 6px; }
+.gs-tw-rows[hidden] { display: none; }
+.gs-tw-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); align-items: center; gap: 8px; }
+.gs-tw-labelwrap { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.gs-tw-label { color: var(--gs-tw-ink); overflow-wrap: anywhere; }
+.gs-tw-row.changed .gs-tw-label { color: var(--gs-tw-accent); }
+.gs-tw-row.changed .gs-tw-label::after { content: " •"; }
+.gs-tw-info {
+  flex: none; width: 18px; height: 18px; padding: 0; border: 1px solid var(--gs-tw-quiet); border-radius: 50%;
+  background: transparent; color: var(--gs-tw-quiet); font: italic 600 11px/16px Georgia, serif; cursor: help;
+}
+.gs-tw-info:hover, .gs-tw-info:focus-visible { color: var(--gs-tw-accent); border-color: var(--gs-tw-accent); }
+.gs-tw-control { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.gs-tw-value { flex: none; min-width: 58px; text-align: right; color: var(--gs-tw-quiet); font-size: 12px; white-space: nowrap; }
+.gs-tw-range { flex: 1; min-width: 0; accent-color: var(--gs-tw-accent); }
+.gs-tw-number, .gs-tw-select {
+  flex: 1; min-width: 0; border: 1px solid var(--gs-tw-line); border-radius: 4px; background: #1a1a1a;
+  color: var(--gs-tw-ink); font: 12px monospace; padding: 3px 6px;
+}
+.gs-tw-toggle .gs-tw-control { justify-content: space-between; }
+.gs-tw-switch {
+  appearance: none; -webkit-appearance: none; position: relative; width: 34px; height: 18px; margin: 0; flex: none;
+  border-radius: 9px; background: #3a3428; cursor: pointer; transition: background 120ms;
+}
+.gs-tw-switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: #cfc8bb; transition: transform 120ms;
+}
+.gs-tw-switch:checked { background: var(--gs-tw-accent); }
+.gs-tw-switch:checked::after { transform: translateX(16px); background: #1a1a1a; }
+.gs-tw-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.gs-tw-tooltip {
+  position: fixed; z-index: 26; max-width: 280px; padding: 7px 9px; border: 1px solid var(--gs-tw-line);
+  border-radius: 6px; background: #0d0d0d; color: var(--gs-tw-ink); font: 12px/1.4 monospace;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6); pointer-events: none;
+}
+.gs-tw-tooltip[hidden] { display: none; }
+
+/* Phones (same scope as the mobile system, plus small viewports when it isn't mounted): bottom sheet, 44 px targets. */
+@media (max-width: 599px), (max-height: 499px) {
+  .gs-tweaks-toggle { right: calc(24px + env(safe-area-inset-right, 0px)); width: 36px; height: 36px; padding: 0; justify-content: center; border-radius: 50%; }
+  .gs-tw-toggle-label { display: none; }
+  .gs-tweaks-panel {
+    left: 0; right: 0; bottom: 0; width: 100%; max-height: 72dvh; border-radius: 14px 14px 0 0;
+    border-left: 0; border-right: 0; border-bottom: 0; padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .gs-tw-close { width: 44px; height: 44px; }
+  .gs-tw-btn { min-height: 36px; }
+  .gs-tw-group-toggle { min-height: 40px; }
+  .gs-tw-row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .gs-tw-info { width: 26px; height: 26px; line-height: 24px; }
+}
+/* Landscape phones: the Arp transport sits bottom-right (docs/mobile-ui.md M7), so the button goes above it. */
+@media (max-height: 499px) {
+  .gs-tweaks-toggle { bottom: calc(46px + env(safe-area-inset-bottom, 0px)); }
+  .gs-tweaks-panel { left: auto; width: min(420px, 60vw); max-height: 100dvh; top: 0; border-radius: 14px 0 0 14px; border-left: 1px solid var(--gs-tw-line); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gs-tw-caret, .gs-tw-switch, .gs-tw-switch::after { transition: none; }
+}

@@ -66,7 +66,7 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `lead-layer.unit.spec.js` | unit | Lead layer rules: router (layer on top of the base, base held via hold(), same-base Return crossfade, other base = switch, layer alone without a base), registry `layer`/`secondary` items, menu same-item vs change. |
 | `recordings.unit.spec.js` | unit | New: every `tests/fixtures/**/*.expect.json` is a test. |
 | `suite-layout.unit.spec.js` | unit | New: convention guard. |
-| `reach-zones.unit.spec.js` | unit | Reach-zone math (whole hand in frame at both ends, scales 0.5–2, three views), dead zone, clamping, smoothing/hysteresis, hand-input zone/x publishing, axes table + switches, Drive gain math. |
+| `reach-zones.unit.spec.js` | unit | Fixed band (palm y 12.5 % = 1 .. 87.5 % = 0, both sides; height from the palm alone at scales 0.5–2, four shapes, three views; a still palm keeps its exact height through size jitter / a closer hand / shape changes), clamping, horizontal band + dead zone, hand-input zone/x publishing (x only while its axis is on), axes table + switches (default off: nothing published, audio untouched), Drive gain math. |
 | `pinch-tempo.unit.spec.js` | unit | Pinch -> tempo mapping, the `pinch` bus event, `matchToScheduleAnyOffset` (helpers/schedule-match.js). |
 | `arp.spec.js` | integration | Right place for engine timing (±3 ms) on recorded audio. Lab-only: **app-level timing owed** (M1). Includes a WAV demo (not a gate-worthy assert; keep, it's cheap). |
 | `gesture-test.int.spec.js` | integration | From `gesture-reliability.spec.js`. |
@@ -92,7 +92,7 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `camera-feedback.e2e.spec.js` | e2e | Lead after the first real-camera session: set shapes (open hand never selects; 1/2/3 fingers + 🤘), confirm pop/linger/fade, ladder labels (both sides, 1280×800 + 390×844), discrete pitch steps (cycles + FFT per 85 ms, click metric), one filter visual per mode, screens `feedback-*.png` + `videos/camera-feedback-lead.webm`. Analysis: `helpers/lead-pitch.js` (pure). |
 | `m3-output.spec.js` | e2e | M3 3.3: output hooked into the modes app (beat grid, menu/mode, Arp notes, manifest, pinch, screens + video). |
 | `output-m3.unit.spec.js` | unit | M3 3.3 pure mapping + clock transport notifications. |
-| `reach-zones.e2e.spec.js` | e2e | The user's reach bug (height 1/0 at the top/bottom whole-hand positions), markers level with the palm across the band, Arp gate + Lead cursor/arrows at the band ends, Range, x bands, Drive (FFT brightness, ±2 dB, no limiting), Space (tail / none), switches, at-hand scales, phone, screens `reach-*.png` + `videos/reach-zones.webm`. |
+| `reach-zones.e2e.spec.js` | e2e | The fixed 75 % band (palm at 12.5 / 50 / 87.5 % of the screen = 1 / 0.5 / 0, both hands, any size; band never changes), markers level with the palm on the band, Arp gate + Lead cursor/arrows at the band ends, no Range row, Drive / Space default OFF (nothing published, no sound change, no scales / guide / help lines) and every ON test switching them on first through the "Experimental" group, x bands, Drive (FFT brightness, ±2 dB, no limiting), Space (tail / none), switches, at-hand scales, phone, screens `reach-*.png` + `videos/reach-zones.webm`. |
 | `pages.e2e.spec.js` | e2e | New: every served page (auto-discovers `labs/*.html`). |
 | `smoke.spec.js` | e2e | Real MediaPipe from the CDN: **needs network**. The only test of the real tracker. |
 | `ui.spec.js` | e2e | Right place. Overlaps `visual.e2e` (structure vs pixels) — intended. |
@@ -199,3 +199,14 @@ integration level, and **one e2e journey in the real app**. Status:
 `PW_PORT=52xx npm run verify` is green (all four layers). New behavior has tests at the layers above; new
 pages are smoke-tested automatically (add a `PAGES` entry in `pages.e2e.spec.js` for their core interaction);
 intended visual changes come with updated baselines; no assert was loosened without a measurement.
+
+## Radial menu auto-select (ws/menu-autoselect)
+- Unit: `radial-menu.unit.spec.js` / `submenu.unit.spec.js` cover auto-select, the 2 s re-arm cooldown, no tick,
+  same-item quiet close, open-hand cancel, LEVEL_ARM_MS, hysteresis (no double-fire) and the live `menuConfig`
+  (`requireRelease`, `holdMs`, runtime changes next frame); reset it in `afterEach` (`resetMenuConfig()`).
+- In-app / lab menu helpers that "select, then open the hand" still pass for a change of mode (the selection is the
+  confirm, `selectedId` stays set during the countdown), but a step that waits to SEE a selected arc without choosing it
+  (current item, screenshots of the selected state, tracking loss with the fist past the radius) must either stay inside
+  the radius or set `requireRelease: true` (`window.__gsTest`/lab: `import("/src/menu/menu-config.js")`).
+- Quick lab check + screenshots: dev server on a port, then `node scripts/menu-shots.mjs http://localhost:<port>` ->
+  `test-results/screens/menu-autoselect-{approach,bump,countdown,setting-bump}.png`.

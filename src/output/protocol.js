@@ -62,6 +62,8 @@ export const ADDRESS_TABLE = {
   "lead/noteset": { address: "/gs/noteset" },
   "lead/octave": { address: "/gs/octave" },
   bpm: { address: "/gs/bpm" },
+  "sound/base": { address: "/gs/sound/base" }, // instrument id of the base mode (Chords / Arp): Sound menu
+  "sound/lead": { address: "/gs/sound/lead" }, // instrument id of the Lead layer (follows the base until picked)
   // events (once, with the play time)
   "note/on": { address: "/gs/note/on", encode: encodeNote },
   "note/off": { address: "/gs/note/off", encode: encodeNote },
@@ -96,7 +98,9 @@ export function wireTypeOf(name, busType) {
  *   {phase:"open",      state:"open", arc, selected, progress}          first frame the menu is open
  *   {phase:"update",    state:"open", arc, selected, progress}          arc under the fist / progress moved
  *   {phase:"countdown", state:"countdown", arc, selected, confirmed, progress}   hand opened on an item
- *   {phase:"close",     state:"closed", confirmed: id|null, cancelled: bool}
+ *   {phase:"flash",     state:"flash", arc, selected, setting: {key, value}}       hand opened on a setting
+ *   {phase:"close",     state:"closed", confirmed: id|null, setting?: {key, value}, cancelled: bool}
+ * `level` (1 inside a sub-ring) and `path` ([submenu id]) ride along while open.
  * `arc` = the item under the fist (hoverId), `selected` = the item whose fill completed.
  * encode(value) returns the event value, or null when nothing changed.
  */
@@ -108,13 +112,22 @@ export function createMenuEncoder() {
       if (!open) {
         if (!prev) return null;
         const confirmed = prev.state === "countdown" ? prev.confirmedId ?? prev.selectedId ?? null : null;
+        const setting = prev.state === "flash" ? prev.setting ?? null : null;
         prev = null;
-        return { phase: "close", state: "closed", confirmed, cancelled: !confirmed };
+        const out = { phase: "close", state: "closed", confirmed, cancelled: !confirmed && !setting };
+        if (setting) out.setting = setting;
+        return out;
       }
-      const phase = !prev ? "open" : m.state === "countdown" && prev.state !== "countdown" ? "countdown" : "update";
+      const entered = (s) => m.state === s && (!prev || prev.state !== s);
+      const phase = !prev ? "open" : entered("countdown") ? "countdown" : entered("flash") ? "flash" : "update";
       prev = m;
       const out = { phase, state: m.state, arc: m.hoverId ?? null, selected: m.selectedId ?? null, progress: num(m.progress ?? 0) };
+      if (m.level) {
+        out.level = m.level;
+        out.path = m.path || [];
+      }
       if (m.state === "countdown") out.confirmed = m.confirmedId ?? m.selectedId ?? null;
+      if (m.state === "flash") out.setting = m.setting ?? null;
       return out;
     },
     get open() { return !!prev; },
