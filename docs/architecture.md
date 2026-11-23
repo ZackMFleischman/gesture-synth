@@ -203,3 +203,9 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
     `[data-control=octave-up|down|octave]`); its mouse strip `#leadPad` is mounted on `#stage` over the ladder band.
   - `#noteSetBadge` is placed with the CSS variable `--gs-noteset-left` on `body` (no inline position on the badge);
     flashes (`.gs-flash`) on a change. Lead first-use labels: "Height: note", "Fingers: notes", "Pinch: play".
+- M3 hookups: `clock.onTransport(cb)` (start/stop/bpm/rate/double). Wire: `menu` goes out as a `/gs/menu` event
+  (open → update{arc, progress} → countdown → close{confirmed|cancelled}); every note event carries `id`; `/gs/note/cancel`;
+  `/gs/pinch` 1/0 from the shared `pinch` bus event (derived from `right/pinch` if absent, marked `derivedFrom`);
+  beat grid carries `rate`/`double` and is re-sent on every scheduled beat. Chip: hidden while output is off, pressing it
+  opens Controls (`setPressHandler`, `newRoom`, `onStatus`), `data-gs-kind="status"`.
+- Hand input publishes `left|right/top`: the highest fingertip in display space (the filter arc anchors above it).
