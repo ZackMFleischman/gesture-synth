@@ -3,7 +3,7 @@
 // The app journey is tests/m1-pinch.spec.js.
 import { test, expect } from "@playwright/test";
 import { leftHand, rightHand, pinch, results } from "./helpers/hands.js";
-import { pinchTempo, PINCH_TEMPO } from "../src/modes/arp.js";
+import { pinchTempo, PINCH_TEMPO, VOICING_HOLD, voicingHoldMs, isPinchApproach } from "../src/modes/arp.js";
 import { MIN_BPM, MAX_BPM } from "../src/services/clock.js";
 import { createHandInput } from "../src/input/hand-input.js";
 import { createBus } from "../src/core/bus.js";
@@ -94,4 +94,19 @@ test("helper: matchToScheduleAnyOffset finds the capture offset across a tempo c
   const late = onsets.slice();
   late[6] += d110 - d126;
   expect(Math.max(...matchToScheduleAnyOffset(late, sched, recStart).errors.map(Math.abs))).toBeGreaterThan(0.01);
+});
+
+test("voicing hold: 100 ms for a normal count change, 300 ms for a pinch forming", async () => {
+  const { buildHandFrame } = await import("../src/input/hand-input.js");
+  const frame = (h) => buildHandFrame(h.landmarks, h.handedness, {});
+  expect(VOICING_HOLD.MS).toBe(100);
+  // Deliberate 3 (index, middle, ring) and a 3 with the index curled but the thumb away: normal hold.
+  expect(voicingHoldMs(frame(rightHand(3)))).toBe(100);
+  expect(voicingHoldMs(frame(pinch({ distance: 1.2 })))).toBe(100);
+  // Thumb closing on the curled index (not a pinch yet): the pinch lookback.
+  const approach = frame(pinch({ distance: 0.5 }));
+  expect(approach.pinch).toBe(false);
+  expect(approach.voicingCount).toBe(3);
+  expect(isPinchApproach(approach)).toBe(true);
+  expect(voicingHoldMs(approach)).toBe(300);
 });
