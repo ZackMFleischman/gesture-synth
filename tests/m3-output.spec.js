@@ -11,6 +11,7 @@ import { test, expect } from "@playwright/test";
 import { results, leftHand, rightHand, fist, pinch, DESKTOP_VIEW, setPlacementView } from "./helpers/hands.js";
 import { createScreencast } from "./helpers/screencast.js";
 import { installSynthLog, checkRender } from "./helpers/output-timing.js";
+import { menuChosen } from "./helpers/m2-lead.js";
 
 const SCREENS = "test-results/screens";
 const VIDEOS = "test-results/videos";
@@ -112,8 +113,10 @@ async function fistSelect(page, setHands, { from = R0, dir = "right", steps = 10
     await setHands(LEFT, fistAt(p));
     await page.waitForTimeout(35);
   }
-  await expect.poll(async () => (await page.evaluate(() => window.__gsTest.bus.get("menu")))?.selectedId ?? null,
-    { timeout: 2000 }).toBe(expectId ?? null);
+  // Auto-select: crossing the select radius chooses the item at once (polled via the menu snapshot: the countdown
+  // can be over before a bus poll sees it); expectId null = stayed in the centre zone, nothing selected.
+  if (expectId) await expect.poll(() => menuChosen(page), { timeout: 2000 }).toBe(expectId);
+  else await expect.poll(async () => (await page.evaluate(() => window.__gsTest.bus.get("menu")))?.selectedId ?? null, { timeout: 2000 }).toBe(null);
   return p;
 }
 
@@ -143,7 +146,7 @@ test("fist menu: /gs/menu (open → arc + progress → countdown → close) and 
   expect(await v.page.evaluate(() => window.__viz.modeLog.length)).toBe(0);
   await expect(v.page.locator("#menuInfo")).toHaveText("closed · cancelled");
 
-  // 2. Fist, move right onto Arp, open the hand: Arp.
+  // 2. Fist, move right across Arp's select radius: Arp (the open hand afterwards changes nothing).
   await v.page.evaluate(() => { window.__viz.menuEvents.length = 0; });
   await switchMode(s.page, s.setHands, { dir: "right", expectId: "arp" });
   await expect.poll(() => v.page.evaluate(() => window.__viz.menuEvents.at(-1)?.phase)).toBe("close");
@@ -153,12 +156,13 @@ test("fist menu: /gs/menu (open → arc + progress → countdown → close) and 
   expect(phases.at(-1)).toBe("close");
   expect(phases.filter((p) => p === "open").length).toBe(1);
   expect(phases.filter((p) => p === "countdown").length).toBe(1);
-  // The arc under the fist moves to Arp, its progress fills to 1 (selected), then the countdown confirms it.
+  // The arc under the fist moves to Arp and its progress fills; crossing the select radius chooses it at once
+  // (auto-select: no separate "selected" update before the choice — the next event is the countdown).
   const updates = seq.menu.filter((e) => e.phase === "update" || e.phase === "open");
   expect(updates.some((e) => e.arc === "arp")).toBe(true);
   const arpProgress = updates.filter((e) => e.arc === "arp").map((e) => e.progress);
   for (let i = 1; i < arpProgress.length; i++) expect(arpProgress[i]).toBeGreaterThanOrEqual(arpProgress[i - 1]);
-  expect(updates.some((e) => e.selected === "arp")).toBe(true);
+  expect(updates.some((e) => e.selected === "arp")).toBe(false);
   const iCountdown = phases.indexOf("countdown");
   expect(seq.menu[iCountdown]).toMatchObject({ state: "countdown", confirmed: "arp" });
   expect(phases.slice(iCountdown + 1, -1).every((p) => p === "update")).toBe(true);

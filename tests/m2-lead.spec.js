@@ -485,8 +485,8 @@ for (const [vpName, vp] of [["desktop", DESKTOP], ["mobile", MOBILE]]) {
         }, CONTROLS);
         expect(info.chordSide).toBe(sc.chordSide);
         expect(d.side).toBe(sc.exprSide);
-        // Under the Lead layer the meter shows the base's held value (desktop); the phone layout hides the meter.
-        expect(info.meterVisible, "meter = the base's held value under the Lead layer").toBe(vp.width >= 600);
+        // The top-right 8-bar meter is hidden in the modes UI on every layout (body.gs-modes; still in the DOM).
+        expect(info.meterVisible, "8-bar meter hidden in the modes UI").toBe(false);
         const lad = d.regions.find((r) => r.name === "lead-ladder").rect;
         const master = info.regions.find((r) => r.name === "master-track")?.rect;
         expect(master, "master track drawn").toBeTruthy();

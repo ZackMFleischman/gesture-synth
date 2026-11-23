@@ -2,6 +2,7 @@
 // clamping, persistence with storage available, corrupted, throwing and absent, apply on load + change.
 import { test, expect } from "@playwright/test";
 import { createTweaks, validateTweakValue, STORAGE_KEY, TWEAKS_VERSION, tweaksRequested } from "../src/tweaks/tweaks.js";
+import { TWEAKS_ALWAYS_ON } from "../src/tweaks/flag.js";
 
 function memStorage(init = {}) {
   const m = new Map(Object.entries(init));
@@ -244,12 +245,15 @@ test.describe("tweaks: disabled store (shared store without ?tweaks)", () => {
   });
 });
 
-test("tweaksRequested:?tweaks, ?tweaks=true, not =false / absent", () => {
+test("tweaksRequested: on by default (TWEAKS_ALWAYS_ON); ?tweaks=false / 0 / off / no turns it off", () => {
+  expect(TWEAKS_ALWAYS_ON).toBe(true); // temporary (user, 2026-11-22); flip this test with the flag
   expect(tweaksRequested("?tweaks")).toBe(true);
   expect(tweaksRequested("?tweaks=true")).toBe(true);
   expect(tweaksRequested("?mockHands&tweaks=1")).toBe(true);
+  expect(tweaksRequested("?mockHands")).toBe(true);
+  expect(tweaksRequested("")).toBe(true);
   expect(tweaksRequested("?tweaks=false")).toBe(false);
-  expect(tweaksRequested("?tweaks=0")).toBe(false);
-  expect(tweaksRequested("?mockHands")).toBe(false);
-  expect(tweaksRequested("")).toBe(false);
+  expect(tweaksRequested("?mockHands&tweaks=0")).toBe(false);
+  expect(tweaksRequested("?tweaks=OFF")).toBe(false);
+  expect(tweaksRequested("?tweaks=no")).toBe(false);
 });

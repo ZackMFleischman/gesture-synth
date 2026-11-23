@@ -65,6 +65,7 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `radial-menu.unit.spec.js` | unit | Split out of `radial-menu.spec.js`. |
 | `lead-layer.unit.spec.js` | unit | Lead layer rules: router (layer on top of the base, base held via hold(), same-base Return crossfade, other base = switch, layer alone without a base), registry `layer`/`secondary` items, menu same-item vs change. |
 | `recordings.unit.spec.js` | unit | New: every `tests/fixtures/**/*.expect.json` is a test. |
+| `smooth.unit.spec.js` | unit | Display smoothing (One-Euro): still-hand jitter >= 3x lower, fast step 90 % within ~120 ms, gap restart, shared vector cutoff, smoother bank. |
 | `suite-layout.unit.spec.js` | unit | New: convention guard. |
 | `reach-zones.unit.spec.js` | unit | Fixed band (palm y 12.5 % = 1 .. 87.5 % = 0, both sides; height from the palm alone at scales 0.5–2, four shapes, three views; a still palm keeps its exact height through size jitter / a closer hand / shape changes), clamping, horizontal band + dead zone, hand-input zone/x publishing (x only while its axis is on), axes table + switches (default off: nothing published, audio untouched), Drive gain math. |
 | `pinch-tempo.unit.spec.js` | unit | Pinch -> tempo mapping, the `pinch` bus event, `matchToScheduleAnyOffset` (helpers/schedule-match.js). |
@@ -94,6 +95,7 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `output-m3.unit.spec.js` | unit | M3 3.3 pure mapping + clock transport notifications. |
 | `reach-zones.e2e.spec.js` | e2e | The fixed 75 % band (palm at 12.5 / 50 / 87.5 % of the screen = 1 / 0.5 / 0, both hands, any size; band never changes), markers level with the palm on the band, Arp gate + Lead cursor/arrows at the band ends, no Range row, Drive / Space default OFF (nothing published, no sound change, no scales / guide / help lines) and every ON test switching them on first through the "Experimental" group, x bands, Drive (FFT brightness, ±2 dB, no limiting), Space (tail / none), switches, at-hand scales, phone, screens `reach-*.png` + `videos/reach-zones.webm`. |
 | `pages.e2e.spec.js` | e2e | New: every served page (auto-discovers `labs/*.html`). |
+| `tweaks.e2e.spec.js` | e2e | Tweaks panel smoke (TWEAKS_ALWAYS_ON): present by default, the menu select-radius slider changes the live menu geometry, persists over a reload, Reset all; `?tweaks=false` = no panel. |
 | `smoke.spec.js` | e2e | Real MediaPipe from the CDN: **needs network**. The only test of the real tracker. |
 | `ui.spec.js` | e2e | Right place. Overlaps `visual.e2e` (structure vs pixels) — intended. |
 | `visual.e2e.spec.js` | e2e | New: pixel baselines of stable chrome. |
@@ -204,9 +206,12 @@ intended visual changes come with updated baselines; no assert was loosened with
 - Unit: `radial-menu.unit.spec.js` / `submenu.unit.spec.js` cover auto-select, the 2 s re-arm cooldown, no tick,
   same-item quiet close, open-hand cancel, LEVEL_ARM_MS, hysteresis (no double-fire) and the live `menuConfig`
   (`requireRelease`, `holdMs`, runtime changes next frame); reset it in `afterEach` (`resetMenuConfig()`).
-- In-app / lab menu helpers that "select, then open the hand" still pass for a change of mode (the selection is the
-  confirm, `selectedId` stays set during the countdown), but a step that waits to SEE a selected arc without choosing it
-  (current item, screenshots of the selected state, tracking loss with the fist past the radius) must either stay inside
-  the radius or set `requireRelease: true` (`window.__gsTest`/lab: `import("/src/menu/menu-config.js")`).
+- In-app menu helpers wait for the CHOICE, not a selected arc: `menuChosen(page)` (`helpers/m2-lead.js`) reads the menu
+  snapshot (`confirmedId`, or the current item on a `same-item` close) — a setting's 150 ms flash and a same-item close
+  are over before a bus poll of `menu.selectedId` sees them. A step that must SEE the menu without choosing (approach
+  screenshots, tracking loss, cancel) stays inside the select radius (stop on `progress >= 0.6`), or sets
+  `requireRelease: true` (`window.__gsTest`/lab: `import("/src/menu/menu-config.js")`).
+- Hand-attached visuals are display-smoothed (`src/ui/smooth.js`, `smooth.unit.spec.js`): "marker level with the hand"
+  checks poll until the marker settles (`expect.poll`), never a fixed frame count.
 - Quick lab check + screenshots: dev server on a port, then `node scripts/menu-shots.mjs http://localhost:<port>` ->
   `test-results/screens/menu-autoselect-{approach,bump,countdown,setting-bump}.png`.

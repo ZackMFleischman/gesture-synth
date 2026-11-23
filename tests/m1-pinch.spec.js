@@ -432,12 +432,12 @@ test.describe("1.6 right pinch = tempo (Arp)", () => {
     const k = 6;
     await setHands(LEFT, pinchAt({ x: R0.x, y: await yFor(page, k) }));
     await expect.poll(() => bpmNow(page)).toBe(116);
-    await page.waitForTimeout(100);
-    d = await drawnTempo(page);
-    // Anchored to the pinch point (thumb tip + index tip midpoint, bus right/pinchpt), not the palm.
+    // Anchored to the pinch point (thumb tip + index tip midpoint, bus right/pinchpt), not the palm. The drawing is
+    // display-smoothed (src/ui/smooth.js: a jump settles in ~120 ms): wait for it to settle on the pinch point.
     const pp = await bus(page, "right/pinchpt");
     const handY = pp.y * 800;
-    expect(Math.abs(d.currentTickY - handY), "current tick level with the pinch point").toBeLessThan(2);
+    await expect.poll(async () => Math.abs((await drawnTempo(page)).currentTickY - handY), { message: "current tick level with the pinch point", timeout: 2000 }).toBeLessThan(2);
+    d = await drawnTempo(page);
     expect(d.startTickY - d.currentTickY).toBeCloseTo(k * d.tickStep, 5); // 1 tick = 1 BPM
     expect(d.plate.h).toBeGreaterThan(40); // the one large number
     expect(d.alpha).toBe(1);

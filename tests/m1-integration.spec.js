@@ -6,6 +6,7 @@ import { hand, leftHand, rightHand, fist, DESKTOP_VIEW, masterAt } from "./helpe
 import { MASTER_VOLUME } from "../src/router.js";
 import { recordAudio, rms, writeWav } from "./helpers/audio.js";
 import { detectOnsets, noteLengths, peakAbs } from "./helpers/arp-analysis.js";
+import { menuChosen } from "./helpers/m2-lead.js";
 
 const WAV_DIR = "test-results/audio";
 // The switch tests measure audio continuity; keep them off each other's CPU.
@@ -43,7 +44,7 @@ async function installLog(page) {
 const log = (page) => page.evaluate(() => window.__log);
 
 /**
- * Fist at `from` -> menu opens -> move toward `dir` until `expectId` is selected (null: stay in the
+ * Fist at `from` -> menu opens -> move toward `dir` until `expectId` is chosen (auto-select; null: stay in the
  * center zone). Leaves the fist at the final point; returns that point.
  */
 async function fistSelect(page, setHands, { left = LEFT, from = R0, dir = "right", steps = 10, expectId, shot } = {}) {
@@ -56,7 +57,10 @@ async function fistSelect(page, setHands, { left = LEFT, from = R0, dir = "right
     await setHands(left, fistAt(p));
     await page.waitForTimeout(35);
   }
-  await expect.poll(async () => (await menu(page))?.selectedId ?? null, { timeout: 2000 }).toBe(expectId ?? null);
+  // Auto-select: crossing the select radius chooses the item at once (polled via the menu snapshot: the countdown
+  // can be over before a bus poll sees it); expectId null = stayed in the centre zone, nothing selected.
+  if (expectId) await expect.poll(() => menuChosen(page), { timeout: 2000 }).toBe(expectId);
+  else await expect.poll(async () => (await menu(page))?.selectedId ?? null, { timeout: 2000 }).toBe(null);
   return p;
 }
 
@@ -199,8 +203,10 @@ test.describe("mode switching with the fist menu", () => {
     await installLog(page);
     await setHands(LEFT, openRight(1));
     await page.waitForTimeout(300);
-    await fistSelect(page, setHands, { dir: "right", expectId: "arp" });
-    await setHands(LEFT); // right hand gone with Arp selected
+    // Toward Arp but short of the select radius (crossing it would choose Arp at once: auto-select).
+    await fistSelect(page, setHands, { dir: "right", steps: 4, expectId: null });
+    expect((await menu(page))?.hoverId).toBe("arp");
+    await setHands(LEFT); // right hand gone while approaching Arp
     await page.waitForTimeout(150);
     expect((await menu(page))?.state, "kept during the grace period").toBe("open");
     await expect.poll(async () => (await menu(page)) ?? null, { timeout: 1000 }).toBe(null);

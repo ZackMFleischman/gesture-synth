@@ -249,11 +249,15 @@ test("visualizer gets manifest, full state, fast frames, timed events, periodic 
     .toBeGreaterThanOrEqual(expectedMidi.length);
   const evs = await v.page.evaluate((n) => window.__viz.events.filter((e) => e.a === "/gs/note/on").slice(-n), expectedMidi.length);
   expect(evs.map((e) => e.v.note).sort()).toEqual([...expectedMidi].sort());
+  // `t` is when the note is HEARD (audioToShared adds the output latency: getOutputTimestamp / outputLatency), `at`
+  // when it was sent. Measured here: headless Chrome's output latency 160 ms (t - at 240 ms), so compare t - at
+  // minus that latency with "now" (live chords play at once).
+  const outLatMs = await s.page.evaluate(() => (window.__gsTest.synth.ctx.outputLatency || 0) * 1000);
   for (const e of evs) {
     expect(e.ch).toBe("reliable");
     expect(e.v.voice).toBe("chords");
     expect(typeof e.t).toBe("number");
-    expect(Math.abs(e.t - e.at)).toBeLessThan(200); // playTime on the shared clock, near "now" for live chords
+    expect(Math.abs(e.t - e.at - outLatMs)).toBeLessThan(200); // playTime on the shared clock, near "now" (+ output latency) for live chords
   }
 
   // Scheduled note (like the Arp: sent ~100 ms before it plays) is shown at its play time.

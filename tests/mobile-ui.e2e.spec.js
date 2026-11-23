@@ -182,8 +182,8 @@ for (const [size, vp] of Object.entries(APP_SIZES)) {
     test("states: playing-collapsed, tray-open, controls-sheet, guide-strip, minimal-hud", async ({ synthPage: page, setHands }) => {
       await appArp(page, setHands);
       await expect(page.locator("#gsPill")).toContainText("Arp");
-      // L1: the meter (same value as the right edge track) shows only while the tray is open; L5: the pill
-      // replaces the mode badge on phones.
+      // The 8-bar meter is hidden in the modes UI (body.gs-modes; collapsed or not); L5: the pill replaces the
+      // mode badge on phones.
       await expect(page.locator("#volumeMeter")).toBeHidden();
       await expect(page.locator("#modeBadge")).toBeHidden();
       await page.waitForTimeout(3300); // first-use labels gone
@@ -194,7 +194,7 @@ for (const [size, vp] of Object.entries(APP_SIZES)) {
 
       await page.locator("#gsPill").click();
       await expect(page.locator("#gsBar")).toHaveClass(/open/);
-      await expect(page.locator("#volumeMeter")).toBeVisible();
+      await expect(page.locator("#volumeMeter")).toBeHidden(); // also with the tray open
       await appShot(page, "tray-open", size);
 
       await page.locator("#controlsToggle").click();

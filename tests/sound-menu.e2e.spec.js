@@ -1,6 +1,6 @@
 // Sound menu in the real app (?mockHands): the radial menu's DOWN arc opens a sub-ring of the registered instrument
 // plugins (src/instruments). It sets the base instrument (Chords / Arp) or, with the Lead layer on, the lead's.
-//   - gesture: fist -> down through Sound -> sub-ring -> an instrument -> open hand (flash, no countdown)
+//   - gesture: fist -> down through Sound -> sub-ring -> crossing an instrument picks it (auto-select: flash, no countdown)
 //   - Lead on: "Lead sound" sets only the lead; the base keeps its instrument
 //   - tone select + Controls rows stay in sync; a 7th instrument registered at runtime shows up everywhere
 //   - sound: Arp + Warm under Lead + Bright (two timbres in one FFT); switching while a chord sounds: no gap / click
@@ -10,7 +10,7 @@ import fs from "node:fs";
 import { test, expect, SCREENS_DIR } from "./fixtures.js";
 import { spectrum, writeWav, retryOnCaptureGlitch } from "./helpers/audio.js";
 import { createScreencast } from "./helpers/screencast.js";
-import { scene, setHands, openApp, bus, startRec, longestSilence, maxD2 } from "./helpers/m2-lead.js";
+import { scene, setHands, openApp, bus, startRec, longestSilence, maxD2, menuChosen } from "./helpers/m2-lead.js";
 
 const WAV_DIR = "test-results/audio";
 const DESKTOP = { width: 1280, height: 800 };
@@ -26,7 +26,8 @@ const snap = (page) => page.evaluate(() => {
 const sounds = (page) => page.evaluate(() => ({ base: window.__gsTest.bus.get("sound/base"), lead: window.__gsTest.bus.get("sound/lead") }));
 
 /**
- * Fist at `from`, down through the Sound arc until the sub-ring opens, then to instrument `id` and open the hand.
+ * Fist at `from`, down through the Sound arc until the sub-ring opens, then across instrument `id` (auto-select),
+ * then open the hand.
  * `onRing(page)` / `onSelected(page)` hooks for screenshots. Resolves when the menu has closed.
  */
 async function pickSound(page, id, { left = SC.left(1), from = TOP, open = true, onRing, onSelected } = {}) {
@@ -53,7 +54,8 @@ async function pickSound(page, id, { left = SC.left(1), from = TOP, open = true,
     await setHands(page, left, SC.fistAt(p));
     await page.waitForTimeout(40);
   }
-  await expect.poll(async () => (await bus(page, "menu"))?.selectedId ?? null, { timeout: 2000 }).toBe(id);
+  // Auto-select: crossing the instrument's select radius picks it (flash), or closes quietly on the current one.
+  await expect.poll(() => menuChosen(page), { timeout: 2000 }).toBe(id);
   if (onSelected) await onSelected(page, p);
   if (!open) return p;
   await setHands(page, left, SC.open(2, p.y, { x: p.x }));
