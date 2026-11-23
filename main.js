@@ -101,7 +101,7 @@ router.setMenu(
 );
 
 // ---- Tweaks panel (developer settings, src/tweaks/) ----
-// Only with ?tweaks / ?tweaks=true: a lazy chunk (nothing loaded otherwise). Without it every tweakable value stays
+// On while TWEAKS_ALWAYS_ON (src/tweaks/flag.js); otherwise only with ?tweaks / ?tweaks=true: a lazy chunk (nothing loaded otherwise). Without it every tweakable value stays
 // at its code default, even if tweaks were saved in this browser before.
 if (tweaksRequested(location.search)) {
   import("./src/tweaks/index.js")
