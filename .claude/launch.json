@@ -45,6 +45,15 @@
         "cd /home/zack/repos/gesture-synth/.claude/worktrees/snapshot-m3 && PATH=$HOME/.local/node/bin:$PATH npx vite --port 5183 --strictPort"
       ],
       "port": 5183
+    },
+    {
+      "name": "signal",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "PATH=$HOME/.local/node/bin:$PATH SIGNAL_PORT=5417 node server/signal.js"
+      ],
+      "port": 5417
     }
   ]
 }
