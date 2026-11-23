@@ -13,11 +13,39 @@ const ICONS = {
     "M16 4v14M9 18a3 2.3 0 1 0 6 0a3 2.3 0 1 0-6 0M9 12.5a3 2.3 0 1 0 6 0a3 2.3 0 1 0-6 0M9 7a3 2.3 0 1 0 6 0a3 2.3 0 1 0-6 0",
   arp: "M4 18h4v-4h4v-4h4V6h4",
   lead: "M10 18V5l8 3M10 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0",
+  sound: "M4 10v4h3l5 4V6L7 10H4M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11",
 };
-const ITEMS = [
-  { id: "chords", type: "mode", label: "Chords", icon: ICONS.chords, color: "#f2b14c", direction: "up" },
+const MODES = [
+  { id: "chords", type: "mode", label: "Chords", icon: ICONS.chords, color: "#e8a13d", direction: "up" },
   { id: "arp", type: "mode", label: "Arp", icon: ICONS.arp, color: "#4fb3ff", direction: "right" },
-  { id: "lead", type: "mode", label: "Lead", icon: ICONS.lead, color: "#5fd08a", direction: "left" },
+  { id: "lead", type: "mode", label: "Lead", icon: ICONS.lead, color: "#c08cff", direction: "left" },
+];
+// Sub-ring children, in fan order: next to the back sector (up-left), around the bottom, to up-right.
+const INSTRUMENTS = [
+  { id: "warm", label: "Warm", icon: "M3 15l4.5-6 4.5 6 4.5-6 4.5 6" },
+  { id: "bright", label: "Bright", icon: "M3 16l6-8v8l6-8v8l6-8" },
+  { id: "retro", label: "Retro", icon: "M3 16V8h4.5v8H12V8h4.5v8H21" },
+  { id: "organ", label: "Organ", icon: "M5 20V10M9.5 20V6M14 20V4M18.5 20V8M3 20h18" },
+  { id: "electric", label: "Electric", icon: "M13 3L6 13h5l-1 8 7-10h-5l1-8" },
+  { id: "sax", label: "Sax", icon: "M9 3v11a4 4 0 0 0 8 0v-2M9 6.5h3M9 10h3" },
+];
+// Which instrument the Sound arc sets: the base mode's, or the lead's while Lead is on (Phase 2 semantics).
+const sounds = { chords: "warm", arp: "warm", lead: "bright" };
+const soundTarget = () => currentId;
+const modeOf = (id) => MODES.find((m) => m.id === id);
+const ITEMS_FN = () => [
+  ...MODES,
+  {
+    id: "sound",
+    type: "submenu",
+    label: currentId === "lead" ? "Lead sound" : "Sound",
+    icon: ICONS.sound,
+    color: modeOf(currentId).color, // the mode color stays the accent; instruments are color-neutral
+    direction: "down",
+    setting: `sound/${currentId === "lead" ? "lead" : "base"}`,
+    items: INSTRUMENTS,
+    current: () => sounds[soundTarget()],
+  },
 ];
 
 const canvas = document.getElementById("canvas");
@@ -38,7 +66,7 @@ let handSize = Number(sizeEl.value);
 let dropped = false;
 
 const menu = createRadialMenu({
-  items: () => ITEMS,
+  items: ITEMS_FN,
   currentId: () => currentId,
   onTick: () => {
     log("tick");
@@ -124,8 +152,10 @@ function fakeRight(now) {
 
 // ---- UI ------------------------------------------------------------------------------
 function setBadge(id) {
-  const it = ITEMS.find((i) => i.id === id);
-  badge.textContent = it.label;
+  const it = MODES.find((i) => i.id === id);
+  const inst = INSTRUMENTS.find((i) => i.id === sounds[soundTarget()]);
+  badge.textContent = `${it.label} · ${inst ? inst.label : "?"}`;
+  badge.dataset.sound = sounds[soundTarget()];
   badge.style.background = hexA(it.color, 0.15);
   badge.style.borderColor = it.color;
   badge.dataset.mode = id;
@@ -155,11 +185,19 @@ function frame(now) {
     setBadge(currentId); // badge switches at the start of the countdown
     log(`confirmed: ${r.confirmed}`);
   }
+  if (r.entered) log(`submenu: ${r.entered}`);
+  if (r.back) log("back");
+  if (r.setting) {
+    sounds[soundTarget()] = r.setting.value;
+    setBadge(currentId);
+    log(`set ${r.setting.key}: ${r.setting.value}`);
+  }
   if (r.cancelled) log(`cancelled (${r.reason})`);
-  if (r.finished) log("countdown done");
+  if (r.finished) log(last.state === "flash" ? "setting done" : "countdown done");
   last = r;
-  statusEl.textContent = `${r.state}${r.hoverId ? ` · ${r.hoverId} ${(r.progress * 100).toFixed(0)}%` : ""}${r.selectedId ? ` · selected ${r.selectedId}` : ""}`;
+  statusEl.textContent = `${r.state}${r.level ? ` · ${r.path.join("/")}` : ""}${r.hoverId ? ` · ${r.hoverId} ${(r.progress * 100).toFixed(0)}%` : ""}${r.selectedId ? ` · selected ${r.selectedId}` : ""}`;
   statusEl.dataset.state = r.state;
+  statusEl.dataset.level = String(r.level ?? 0);
 
   g.clearRect(0, 0, innerWidth, innerHeight);
   if (right && !menu.isHoldingRight()) drawHand(right);
@@ -200,6 +238,7 @@ window.__menuLab = {
   get currentId() {
     return currentId;
   },
+  sounds,
   /** manual clock: advance `ms` in 16 ms frames */
   step(ms = 16) {
     const end = manualNow + ms;
