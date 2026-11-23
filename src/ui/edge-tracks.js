@@ -5,14 +5,20 @@
 //    value, no guide. Return (engine still holds the value, `held` signal): hollow + solid markers.
 //    A screen control that wins over the hand (ui/override) also shows as hollow (value) + solid (hand).
 //  - Hand lost: that hand's markers dashed in the warning color, a "Hand lost" plate at the edge and a
-//    ghost ring where the hand was last seen.
+//    ghost ring where the hand was last seen. Ring and plate fade out after MOTION.lostHold + lostFade.
 // Markers are level with the hand's palm (no numbers). Each track spans that hand's vertical reach zone (bus
 // `left|right/zone`, src/input/reach-zones.js: palm y for value 1 at its top, 0 at its bottom), so the marker sits
 // level with the palm everywhere in the band and stops at the band's ends; full height until a zone is known.
 
 import {
-  COLORS, LAYOUT, STROKE, edgeTrackX, drawEdgeTrack, drawLabel, drawPlate, drawRing, FONT,
+  COLORS, LAYOUT, MOTION, STROKE, edgeTrackX, drawEdgeTrack, drawLabel, drawPlate, drawRing, FONT,
 } from "./theme.js";
+
+/** Opacity of the "hand lost" ring + plate, `ms` after the hand counted as lost: 1, then fades to 0. */
+export function lostAlpha(ms) {
+  if (ms <= MOTION.lostHold) return 1;
+  return Math.max(0, 1 - (ms - MOTION.lostHold) / MOTION.lostFade);
+}
 
 const MEET_PX = 6; // return state ends when the hand marker is this close to the held marker
 
@@ -122,9 +128,13 @@ export function createEdgeTracks({ S, bus }) {
       fillY: o.fillY, guideTo: null,
     });
     G.reg(o.name, "edge", rect);
-    if (o.lostNow && o.hand.lastPos) {
+    const a = o.lostNow && o.hand.lastPos && o.hand.goneAt != null ? lostAlpha(S.now - o.hand.goneAt - S.lostGraceMs) : 0;
+    if (a > 0) {
+      g.save();
+      g.globalAlpha *= a;
       G.reg(`${o.name}-lost-label`, "edge", lostLabel(g, G, o.side, o.markerY ?? G.H / 2));
       G.reg(`${o.name}-ghost`, "hand", ghost(g, G, o.side, o.hand.lastPos));
+      g.restore();
     }
     return rect;
   }
