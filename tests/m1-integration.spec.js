@@ -341,7 +341,10 @@ test.describe("Arp in the app", () => {
     await enterArp(page, setHands);
     const leftFist = hand({ handedness: "Left", fingers: [] });
     await setHands(leftFist, openRight(1));
-    await page.waitForTimeout(500);
+    // 800 ms (was 500): R0 is higher in the right hand's reach zone (src/input/reach-zones.js) than on the old
+    // whole-image height scale, so the gate is longer (0.71: notes 0.36 s + release) and the last note scheduled before
+    // the fist must end before the silence is measured (the tap also runs ~170 ms behind).
+    await page.waitForTimeout(800);
     const beat0 = await page.evaluate(() => window.__gsTest.ctx.clock.beatAt(window.__gsTest.ctx.audio.ac.currentTime));
     expect(rms((await recordAudio(page, 600)).samples)).toBeLessThan(0.002);
     const s = await page.evaluate(() => ({

@@ -7,6 +7,7 @@
 
 import { COLORS, FONT, LAYOUT, MOTION, drawLabel } from "./theme.js";
 import { trackX } from "./edge-tracks.js";
+import { AXES } from "../core/axes.js";
 
 /** Right-hand guide rows per mode (spec table, ui-integration.md §7). A mode's own `guide` wins. */
 export const DEFAULT_GUIDE = {
@@ -25,7 +26,7 @@ export const FIRST_USE = {
 export const PHONE_FIRST_USE = new Set(["track", "arc"]);
 const isPhone = (G) => G.W < 600 || G.H < 500;
 
-export function createGuide({ S, doc }) {
+export function createGuide({ S, doc, bus }) {
   const guideEl = doc.getElementById("gestureGuide");
   let renderedFor = null;
   const seen = new Set();
@@ -35,6 +36,9 @@ export function createGuide({ S, doc }) {
   function rowsFor() {
     return (Array.isArray(S.mode?.guide) && S.mode.guide) || DEFAULT_GUIDE[S.modeId] || [];
   }
+  /** Sideways axes (every mode, src/core/axes.js) that are switched on: "Right hand sideways → Drive". */
+  const axisRows = () => AXES.filter((a) => bus?.get?.(`${a.id}/on`) !== false).map((a) => ["↔", a.guide]);
+  const renderKey = () => `${S.modeId}|${axisRows().length}|${AXES.map((a) => bus?.get?.(`${a.id}/on`) !== false).join()}`;
 
   function append() {
     if (!guideEl) return;
@@ -60,8 +64,20 @@ export function createGuide({ S, doc }) {
       row.append(e, l);
       frag.append(row);
     }
+    for (const [emoji, label] of axisRows()) {
+      const row = doc.createElement("div");
+      row.className = "gesture-guide-row gs-guide-axis gs-guide-ext";
+      const e = doc.createElement("span");
+      e.className = "gesture-guide-gesture";
+      e.textContent = emoji;
+      const l = doc.createElement("span");
+      l.className = "gs-guide-label";
+      l.textContent = label;
+      row.append(e, l);
+      frag.append(row);
+    }
     guideEl.append(frag);
-    renderedFor = S.modeId;
+    renderedFor = renderKey();
   }
 
   // controls.js replaces the guide's innerHTML on key change: put our rows back.
@@ -73,7 +89,7 @@ export function createGuide({ S, doc }) {
   const isOpen = () => !!guideEl && !guideEl.classList.contains("hidden");
 
   function update() {
-    if (S.modeId !== renderedFor) append();
+    if (renderKey() !== renderedFor) append();
     const labels = FIRST_USE[S.modeId];
     if (labels && !seen.has(S.modeId) && S.hands.right.pos) {
       seen.add(S.modeId);
