@@ -14,6 +14,12 @@ import {
 
 const MEET_PX = 6; // return state ends when the hand marker is this close to the held marker
 
+/** Track center x, moved in by the safe-area inset on that side (landscape notch; G.safe from mode-ui). */
+export function trackX(side, G) {
+  const inset = side === "left" ? G.safe?.left || 0 : G.safe?.right || 0;
+  return edgeTrackX(side, G.W) + (side === "left" ? inset : -inset);
+}
+
 export function createEdgeTracks({ S, bus }) {
   let wasHeld = false;
   let heldY = null; // hollow marker y while held (menu / pinch)
@@ -53,7 +59,7 @@ export function createEdgeTracks({ S, bus }) {
 
   function lostLabel(g, G, side, y) {
     const inward = side === "left" ? 1 : -1;
-    const edgeX = edgeTrackX(side, G.W) + inward * (LAYOUT.gutter - 2);
+    const edgeX = trackX(side, G) + inward * (LAYOUT.gutter - 2);
     const lines = G.W < 520 ? ["Hand", "lost"] : ["Hand lost"];
     const size = 12;
     g.save();
@@ -91,7 +97,7 @@ export function createEdgeTracks({ S, bus }) {
   }
 
   function track(g, G, o) {
-    const x = edgeTrackX(o.side, G.W);
+    const x = trackX(o.side, G);
     // What was drawn (read by tests through window.__gsTest.ui.tracks).
     S.tracks[o.name] = { side: o.side, markerY: o.markerY ?? null, heldY: o.heldY ?? null, dim: !!o.dim, lost: !!o.lostNow };
     const { top, bottom } = trackBounds(G);

@@ -47,7 +47,11 @@ export async function collectLayout(page, existingIds) {
       .map((e) => ({ name: `#${e.id}`, rect: box(e) }));
     const newDom = [...document.querySelectorAll("[data-gs-kind]")]
       .filter(vis)
-      .map((e) => ({ name: `#${e.id}`, kind: e.dataset.gsKind, rect: box(e) }));
+      .map((e) => {
+        // Phones: a panel re-homed in the mobile sheet (docs/mobile-ui.md) scrolls inside it; the sheet is its box.
+        const sheet = e.closest("#gsControlsSheet");
+        return { name: `#${e.id}${sheet ? " (sheet)" : ""}`, kind: e.dataset.gsKind, rect: box(sheet || e) };
+      });
     const ui = window.__gsTest.ui;
     return { existing, newDom, canvas: ui.regions, clear: ui.clearArea };
   }, existingIds);

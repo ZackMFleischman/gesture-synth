@@ -492,14 +492,17 @@ test.describe("mobile viewport", () => {
     await page.goto(`/?mockHands&signal=${encodeURIComponent(SIGNAL)}`);
     await page.locator("#startOverlay").click();
     await page.waitForFunction(() => document.getElementById("webcam").videoWidth > 0);
+    // Phones: the top-left controls live in the mobile bar's tray (docs/mobile-ui.md).
+    if (!(await page.locator("#guideToggle").isVisible())) await page.locator("#gsPill").click();
     await page.locator("#guideToggle").click();
     const chip = await page.locator("#outputChip").boundingBox();
     expect(chip.x).toBeGreaterThanOrEqual(0);
     expect(chip.x + chip.width).toBeLessThanOrEqual(390);
     const overlaps = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
     for (const id of ["keySelect", "toneSelect", "guideToggle", "gestureGuide", "volumeMeter", "distortionDisplay",
-      "chordDisplay", "qualityDisplay", "helpButton"]) {
+      "chordDisplay", "qualityDisplay", "helpButton", "gsBar"]) {
       const box = await page.locator(`#${id}`).boundingBox();
+      if (!box) continue; // folded into the collapsed mobile bar (checked as #gsBar)
       expect(overlaps(chip, box), `#outputChip overlaps #${id}`).toBe(false);
     }
   });
