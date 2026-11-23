@@ -18,7 +18,8 @@
     "test:audio": "playwright test --project=e2e audio",
     "test:smoke": "playwright test --project=e2e smoke",
     "verify": "node scripts/verify.mjs",
-    "signal": "node server/signal.js"
+    "signal": "node server/signal.js",
+    "build:pages": "VITE_ANALYTICS=off vite build --base=/gesture-synth/ --outDir dist-pages"
   },
   "keywords": [],
   "author": "",
