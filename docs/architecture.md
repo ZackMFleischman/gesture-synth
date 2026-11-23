@@ -268,3 +268,34 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
     tanh(g·x), g 0.05..9 (squared), makeup keeps a 0.3 reference peak (× 0.62 at full drive for the RMS rise):
     loudness within ±2 dB, limiter input falls as Drive rises. `audio.setDrive/setSpace`, `audio.drive/space`.
   - Wire: `/gs/drive`, `/gs/space`, `/gs/left/x`, `/gs/right/x` (ADDRESS_TABLE).
+- Lead layer (ws/lead-layer; spec note "Decided after real-camera testing: Lead plays on top of the current mode"):
+  - Modes split into BASE modes (Chords, Arp: accompaniment, left hand) and LAYERS (mode plugin `layer: true`: Lead). The
+    router keeps `active` = the base and `layer` = Lead or null. Bus: `mode` = the base id (unchanged meaning for
+    consumers), new `layer` (state, owner router) = "lead" | null; wire `/gs/layer` (ADDRESS_TABLE). Router getters
+    `layer`, `layerId`, `rightMode`, `rightModeId` (= the mode the right hand drives), `select` (= `setMode`).
+  - `router.setMode(id)`: a layer id turns the layer on over the current base (Lead again = false/no change); a base id
+    sets the base and turns the layer off; the base that was underneath gets the right hand back with the RESUME_MS
+    crossfade from the frame it last saw (`ctx.rightLocked` = that frame). Without a base (lead lab) a layer runs alone.
+  - While the layer is on, every frame: `base.hold(ctx)` (left hand live, right-hand values held — the existing menu-hold
+    mechanism, now also used indefinitely), then `layer.update(frame, ctx)`; with the menu holding, both `hold()`. `held` is
+    built from the right-hand mode (`rightMode`). `ctx.layerBase` = base id while a layer is on (null otherwise).
+  - Lead under a base: no pad, no `chord`/`voicing`/`chords/octave` publishing, no own energy wave (the base's stays).
+    Arp under the layer draws no feedback at the hand (x2 pill / tempo plate).
+  - Audio routing: the lead voice goes `env -> ctx.audio.layerOut (layerIn) -> layerFilter -> master` (new facade
+    `layerOut`, `setLayerFilter(tilt)`: same curve as `setFilter`, publishes nothing). Right tilt drives Lead's filter
+    param -> `setLayerFilter` (+ `setFilter` only without a base, for the pad). The base's shared filter stays at its held
+    value. Why: one filter can't hold the base's value and follow the hand at once; a separate one keeps both continuous
+    when the layer turns on/off and costs one BiquadFilter. Bus `filter` = the right hand's (lead's) tilt.
+  - Menu (generic, metadata only): `registry.menuItems(activeId, { layerId })`; item type "layer" (confirm = same rule as
+    "mode": the current item is a no-change); `currentId` = `router.rightModeId`. Optional item fields `secondary: true`
+    (also running under the current item: hollow marker; choosing it is a change) and `confirmHint` (hint text when
+    selected; the base gets "Open hand: Lead off").
+  - Screen controls: the router mounts the base's rows and the layer's rows in `.gs-ctl-group[data-group=base|layer]`
+    (header: mode name + "right hand held" / "right hand"). Chords shows a held Volume row (`data-control=chords-volume`)
+    only under the layer. Controls-panel Mode row lights base + layer; tap tempo / gate apply to the base (`S.base`).
+  - UI (`S` in src/ui/mode-ui.js): `modeId/mode/rightTrack/color/name` = the right-hand mode (Lead while layered);
+    `baseId/base/baseName/baseColor/baseRightTrack`, `layerId`, `meterTrack` (meter = base's held track, dimmed). body
+    `data-mode` = base, `data-layer`, class `gs-layer`, `--gs-base-mode`. Badge `● Arp + ● Lead` (`.gs-part-base` quieter,
+    `.gs-two`); mobile pill the same (`.gs-pill-base/.gs-pill-layer`). Transport follows the base. Guide adds
+    "Lead plays on top of <base>". No right edge track (Lead's ladder only).
+

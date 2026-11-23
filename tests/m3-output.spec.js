@@ -373,6 +373,7 @@ test("manifest lists the mode signals; /gs/pinch 1/0; Lead noteset/octave reach 
   expectSig("/gs/filter", "continuous");
   expectSig("/gs/gate", "continuous", "arp");
   expectSig("/gs/mode", "state", "router");
+  expectSig("/gs/layer", "state", "router"); // Lead layer on top of the base mode
   expectSig("/gs/chord", "state");
   expectSig("/gs/voicing", "state");
   expectSig("/gs/noteset", "state", "lead");
@@ -401,16 +402,24 @@ test("manifest lists the mode signals; /gs/pinch 1/0; Lead noteset/octave reach 
   const pinchEv = await v.page.evaluate(() => window.__viz.events.filter((e) => e.a === "/gs/pinch"));
   for (const e of pinchEv) expect(e.ch).toBe("reliable");
 
-  // Lead: mode, note set and octave are sent (on enter and on change) and shown.
+  // Lead: a layer on top of Arp. /gs/mode stays the base, /gs/layer = "lead"; note set and octave are sent (on enter
+  // and on change) and shown; the visualizer shows "Arp + Lead".
   await s.page.evaluate(() => window.__gsTest.router.setMode("lead"));
-  await expect.poll(() => v.page.evaluate(() => window.__viz.state["/gs/mode"])).toBe("lead");
+  await expect.poll(() => v.page.evaluate(() => window.__viz.state["/gs/layer"])).toBe("lead");
+  expect(await v.page.evaluate(() => window.__viz.state["/gs/mode"])).toBe("arp");
   const synthLead = await s.page.evaluate(() => ({ set: window.__gsTest.bus.get("lead/noteset"), oct: window.__gsTest.bus.get("lead/octave") }));
   expect(typeof synthLead.set).not.toBe("undefined");
   await expect.poll(() => v.page.evaluate(() => window.__viz.state["/gs/noteset"])).toEqual(synthLead.set);
   await expect.poll(() => v.page.evaluate(() => window.__viz.state["/gs/octave"])).toEqual(synthLead.oct);
-  await expect(v.page.locator("#modeName")).toHaveText("Lead");
+  await expect(v.page.locator("#modeName")).toHaveText("Arp + Lead");
+  await expect(v.page.locator("#modeName")).toHaveAttribute("data-layer", "lead");
+  await v.page.locator("#modeBox").screenshot({ path: `${SCREENS}/layer-visualizer.png` });
   await expect(v.page.locator("#modeSub")).toContainText("note set");
   await expect(v.page.locator("#modeSub")).toContainText("octave");
+  // Layer off by choosing the base: /gs/layer back to null.
+  await s.page.evaluate(() => window.__gsTest.router.setMode("arp"));
+  await expect.poll(() => v.page.evaluate(() => window.__viz.state["/gs/layer"] ?? null)).toBe(null);
+  await expect(v.page.locator("#modeName")).toHaveText("Arp");
 
   expect(s.errors).toEqual([]);
   expect(v.errors).toEqual([]);

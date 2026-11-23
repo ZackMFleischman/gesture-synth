@@ -38,7 +38,7 @@ export function createGuide({ S, doc, bus }) {
   }
   /** Sideways axes (every mode, src/core/axes.js) that are switched on: "Right hand sideways → Drive". */
   const axisRows = () => AXES.filter((a) => bus?.get?.(`${a.id}/on`) !== false).map((a) => ["↔", a.guide]);
-  const renderKey = () => `${S.modeId}|${axisRows().length}|${AXES.map((a) => bus?.get?.(`${a.id}/on`) !== false).join()}`;
+  const renderKey = () => `${S.modeId}|${S.layerId ? S.baseId : ""}|${axisRows().length}|${AXES.map((a) => bus?.get?.(`${a.id}/on`) !== false).join()}`;
 
   function append() {
     if (!guideEl) return;
@@ -52,6 +52,13 @@ export function createGuide({ S, doc, bus }) {
     head.className = "gs-guide-head gs-guide-ext";
     head.textContent = S.name;
     frag.append(sep, head);
+    if (S.layerId && S.baseName) {
+      // Lead layer: say what is underneath (spec deviation, docs/spec/requirements.md "Decided after real-camera testing").
+      const note = doc.createElement("div");
+      note.className = "gs-guide-note gs-guide-ext";
+      note.textContent = `${S.name} plays on top of ${S.baseName} (left hand: its chords)`;
+      frag.append(note);
+    }
     for (const [emoji, label] of rows) {
       const row = doc.createElement("div");
       row.className = "gesture-guide-row gs-guide-mode gs-guide-ext";

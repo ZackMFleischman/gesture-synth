@@ -4,9 +4,18 @@
 //   arp / lead / noteOn() voices ─────────────────────────────────────────────────────────────────────────┤
 //                                                                                                         v
 //   out (GainNode 1, the PRE-FILTER bus) -> driveIn -> waveshaper (Drive) -> driveOut -> lowpass filter
-//     -> dry (GainNode) ──────────────────────────────────────────┐
-//     -> spaceSend (0..SPACE.WET) -> convolver (generated IR) ─────┴-> masterGain (left height, all modes)
+//     -> baseGain (1; eased down under the Lead layer) -> mix (GainNode 1)
+//   lead voice -> layerIn -> layerFilter (Lead's own tilt filter, same curve) ---------> mix
+//   mix -> dry (GainNode) ──────────────────────────────────────────┐
+//   mix -> spaceSend (0..SPACE.WET) -> convolver (generated IR) ────┴-> masterGain (left height, all modes)
 //     -> limiter (DynamicsCompressor) -> clipper (soft-clip waveshaper, |y| < 0.98) -> destination
+//
+// The Lead layer (docs/architecture.md "Lead layer"): Lead plays on top of a base mode (Chords / Arp). The base
+// keeps the shared filter at its HELD value while the right hand's tilt drives the lead voice's own filter, so
+// the two never fight over one filter and neither value jumps when the layer turns on or off. The lead skips Drive
+// (a base value, held under the layer: the router holds the right-hand axes then) but gets Space (after `mix`).
+// While the layer is on, baseGain eases the base down by BASE_UNDER_LAYER (-1.9 dB, tau 0.12 s): room for the lead,
+// and the loudest base (worst chord 0.67 at the limiter input) + lead stays under the limiter threshold.
 //
 // Drive (right hand sideways, src/core/axes.js): y = makeup * tanh(g * x). The waveshaper curve is fixed (tanh over
 // its input range, DRIVE.CURVE_K); driveIn scales the input (g / CURVE_K) and driveOut is the makeup gain that keeps
@@ -43,6 +52,11 @@ const CHORD_ATTACK = 0.03;
 /** Soft clipper: linear below KNEE, saturates towards CEIL. Inputs beyond ±1 map to the curve ends. */
 const CLIP_KNEE = 0.9;
 const CLIP_CEIL = 0.09; // headroom above the knee (curve end ≈ 0.972)
+/** Base level while the Lead layer plays on top (setLayerMix): -1.9 dB. Measured worst steady Chords + Lead (sawtooth,
+ *  right 1, voicing 3, both filters open, master 1): -1.74 dBFS at the limiter input without it (over the -2 dB
+ *  threshold), see tests/gain-staging.e2e.spec.js. */
+export const BASE_UNDER_LAYER = 0.8;
+const LAYER_MIX_TAU = 0.12;
 /** Master limiter: a safety net for transients only (steady playing stays below the threshold). */
 export const LIMITER = Object.freeze({ threshold: -2, knee: 1, ratio: 20, attack: 0.001, release: 0.1 });
 /**
@@ -108,6 +122,10 @@ export class SynthEngine {
   constructor({ bus = sharedBus, waveform = "triangle", onFirstSound = null } = {}) {
     this.ctx = null;
     this.filter = null;
+    this.layerIn = null; // Lead layer bus (see header)
+    this.layerFilter = null;
+    this.baseGain = null; // base modes' level (eased down under the Lead layer)
+    this.mix = null;
     this.waveShaper = null;
     this.chordGain = null;
     this.masterGain = null;
@@ -147,8 +165,19 @@ export class SynthEngine {
     this.filter.frequency.value = 1200;
     this.filter.Q.value = 0.7;
 
+    // Lead layer: its own tilt filter into `mix` (after the shared filter and Drive, before Space).
+    this.layerIn = ac.createGain();
+    this.layerFilter = ac.createBiquadFilter();
+    this.layerFilter.type = "lowpass";
+    this.layerFilter.frequency.value = 1200;
+    this.layerFilter.Q.value = 0.7;
+
     this.chordGain = ac.createGain();
     this.chordGain.gain.value = 0;
+
+    this.baseGain = ac.createGain();
+    this.baseGain.gain.value = 1;
+    this.mix = ac.createGain(); // base + Lead layer, before dry / Space
 
     this.masterGain = ac.createGain();
     this.masterGain.gain.value = this.masterVolume;
@@ -167,7 +196,11 @@ export class SynthEngine {
     this.driveIn.connect(this.waveShaper);
     this.waveShaper.connect(this.driveOut);
     this.driveOut.connect(this.filter);
-    this.filter.connect(this.dry);
+    this.filter.connect(this.baseGain);
+    this.baseGain.connect(this.mix);
+    this.layerIn.connect(this.layerFilter);
+    this.layerFilter.connect(this.mix);
+    this.mix.connect(this.dry);
     this.dry.connect(this.masterGain);
     if (this.drive > 0) this.setDrive(this.drive, true);
     if (this.space > 0) this.setSpace(this.space, true);
@@ -184,6 +217,12 @@ export class SynthEngine {
   }
   updateVolume(volume01) {
     this.setVolume(volume01);
+  }
+
+  /** Lead layer on/off: eases the base (everything through the shared filter) to BASE_UNDER_LAYER / back to 1. */
+  setLayerMix(on) {
+    if (!this.ctx) return;
+    this.baseGain.gain.setTargetAtTime(on ? BASE_UNDER_LAYER : 1, this.ctx.currentTime, LAYER_MIX_TAU);
   }
 
   /** Master volume (left-hand height, every mode). The router already smooths it; this only de-zippers. */
@@ -227,7 +266,7 @@ export class SynthEngine {
       this.spaceSend.gain.value = 0;
       this.convolver = ac.createConvolver();
       this.convolver.buffer = makeImpulse(ac); // normalize (default) = equal-power IR
-      this.filter.connect(this.spaceSend);
+      this.mix.connect(this.spaceSend); // base + Lead layer
       this.spaceSend.connect(this.convolver);
       this.convolver.connect(this.masterGain);
     }
@@ -236,8 +275,8 @@ export class SynthEngine {
     this.dry.gain.setTargetAtTime(1 - SPACE.DUCK * v, t, SPACE.TAU);
   }
 
-  updateFilterSweep(tiltFactor) {
-    if (!this.filter || !this.ctx) return;
+  updateFilterSweep(tiltFactor, filter = this.filter) {
+    if (!filter || !this.ctx) return;
 
     // Base parameters for a balanced centered (0%) hand
     let targetFrequency = 1200;
@@ -257,8 +296,8 @@ export class SynthEngine {
 
     // Smooth out audio node updates frame-by-frame to eliminate audio clicking
     const now = this.ctx.currentTime;
-    this.filter.frequency.setTargetAtTime(targetFrequency, now, 0.04);
-    this.filter.Q.setTargetAtTime(targetQ, now, 0.04);
+    filter.frequency.setTargetAtTime(targetFrequency, now, 0.04);
+    filter.Q.setTargetAtTime(targetQ, now, 0.04);
   }
 
   playNotes(freqs) {
@@ -395,6 +434,8 @@ export function createAudioFacade(synth) {
     get master() { return synth.masterGain; },
     /** PRE-FILTER input bus: every voice connects here (-> drive -> filter -> master -> limiter). */
     get out() { return synth.inBus; },
+    /** Lead layer input: -> its own tilt filter (setLayerFilter) -> mix (dry + Space) -> master. Lead's voice connects here. */
+    get layerOut() { return synth.layerIn; },
     /** Chords' chord-voice GainNode (right-height volume in Chords). */
     get chordGain() { return synth.chordGain; },
     get waveform() { return synth.waveform; },
@@ -408,6 +449,10 @@ export function createAudioFacade(synth) {
       synth.updateFilterSweep(tilt);
       synth.bus.set("filter", tilt);
     },
+    /** Lead layer's own filter from the right tilt (same curve as setFilter). Publishes nothing. */
+    setLayerFilter: (tilt) => synth.updateFilterSweep(tilt, synth.layerFilter),
+    /** Lead layer on/off (router): the base eases down a little to make room for the lead. */
+    setLayerMix: (on) => synth.setLayerMix(on),
     setWaveform: (type) => {
       synth.waveform = type;
       synth.currentKey = null; // forces sound refresh

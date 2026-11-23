@@ -92,7 +92,7 @@ test.describe("reach zones: vertical (the user's bug)", () => {
   test("Lead: the cursor reaches the top and bottom notes and both octave arrows inside the band", async ({ synthPage: page, setHands }) => {
     await setHands(leftHand(1));
     await page.evaluate(() => window.__gsTest.router.setMode("lead"));
-    const dbg = () => page.evaluate(() => window.__gsTest.router.mode._debug());
+    const dbg = () => page.evaluate(() => window.__gsTest.router.rightMode._debug()); // Lead = a layer on the base
     const placeAtY = async (y) => {
       await setHands(leftHand(1), rightHand(4, { pos: { x: 0.3, y }, view: DESKTOP_VIEW }));
       await page.waitForTimeout(250);

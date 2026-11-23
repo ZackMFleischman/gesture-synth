@@ -1,7 +1,8 @@
 // Existing right-hand readouts, extended for modes (docs/ui-integration.md D5, D6):
 //  - #volumeMeter (8 bars) = the right-height expression meter: the active mode's right-track param
 //    (Chords = volume, exactly as indicators.js renders it today; Arp = arp/gate), bars in the mode
-//    color via CSS. Hidden when the mode has no right track (Lead).
+//    color via CSS. Hidden when the mode has no right track (Lead alone). Under the Lead layer it shows the
+//    base's HELD right-track value (S.meterTrack), dimmed and in the base color (modes.css `gs-layer`).
 //  - #distortionDisplay "Filter: x%": same text; in modes that don't publish `filter` it follows
 //    `right/tilt` (frozen while the right hand is held). Color + dim come from modes.css. Since the camera-feedback
 //    pass the element is hidden under body.gs-modes (one filter visual: the arc at the hand, which reads S.filter
@@ -17,7 +18,7 @@ export function createReadouts({ S, bus, doc }) {
   let lastFilterText = null;
 
   function renderMeter() {
-    const p = S.rightTrack?.param;
+    const p = S.meterTrack?.param;
     if (!p) return;
     const v = bus.get(p);
     if (typeof v !== "number") return;
@@ -51,12 +52,12 @@ export function createReadouts({ S, bus, doc }) {
   const consumer = {
     onSet(name) {
       if (name === "filter") filterSeenInMode = true;
-      if (name === S.rightTrack?.param || name === "volume") renderMeter();
+      if (name === S.meterTrack?.param || name === "volume") renderMeter();
     },
   };
   function resubscribe() {
     off?.();
-    off = bus.subscribe(consumer, ["filter", "volume", ...(S.rightTrack?.param ? [S.rightTrack.param] : [])]);
+    off = bus.subscribe(consumer, ["filter", "volume", ...(S.meterTrack?.param ? [S.meterTrack.param] : [])]);
   }
 
   function update() {

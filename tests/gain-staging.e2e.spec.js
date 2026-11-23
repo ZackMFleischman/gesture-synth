@@ -193,6 +193,7 @@ test.describe("gain staging: steady playing stays out of the limiter", () => {
       const { createLeadVoice } = await import("/src/modes/lead-voice.js");
       t.ctx.audio.setWaveform("sawtooth");
       t.ctx.audio.setFilter(1);
+      t.ctx.audio.setLayerFilter(1); // the lead voice's own filter (Lead layer routing)
       const v = (window.__leadVoice = createLeadVoice(t.ctx.audio));
       v.setPad(t.ctx.harmony.notes("I", true, 1));
       v.noteOn(440 * 2 ** (4 / 12));
@@ -207,4 +208,35 @@ test.describe("gain staging: steady playing stays out of the limiter", () => {
     expect(m.reduction).toBeGreaterThan(-0.5);
     expect(m.peak).toBeLessThanOrEqual(1);
   });
+
+  // Lead layer (docs/architecture.md "Lead layer"): the base keeps playing under the lead. Loud but steady settings:
+  // master 1, the base at its loudest (right height 1 before the layer), Bright-ish tone, both filters open.
+  for (const base of ["arp", "chords"]) {
+    test(`${base === "arp" ? "Arp" : "Chords"} + Lead: no limiting during steady loud playing (base held at max, lead playing, filters open)`, async ({ synthPage: page, setHands }) => {
+      const th = await threshold(page);
+      await page.locator("#toneSelect").selectOption("sawtooth");
+      const L = leftHand(1, { volume: 0.95 });
+      await setHands(L, rightHand(base === "arp" ? 4 : 3, { volume: 1, tilt: 1, thumb: base === "arp" }));
+      await page.evaluate((b) => window.__gsTest.router.setMode(b), base);
+      await setHands(L, rightHand(base === "arp" ? 4 : 3, { volume: 1, tilt: 1, thumb: base === "arp" }));
+      await page.waitForTimeout(600);
+      await page.evaluate(() => window.__gsTest.router.setMode("lead"));
+      expect(await page.evaluate(() => [window.__gsTest.bus.get("mode"), window.__gsTest.bus.get("layer")])).toEqual([base, "lead"]);
+      // Lead plays a held note with its filter fully open (tilt 1), through the real mode (screen key = a ladder note).
+      await page.evaluate(() => window.__gsTest.ctx.audio.setLayerFilter(1));
+      await page.keyboard.down("KeyG");
+      await page.waitForTimeout(800);
+      await installProbe(page);
+      await settleLimiterMeter(page);
+      const m = await measure(page, 1200);
+      expect(await page.evaluate(() => window.__gsTest.registry.getMode("lead")._debug().sounding), "lead note sounding").not.toBe(null);
+      await page.keyboard.up("KeyG");
+      writeWav(`${WAV_DIR}/gain-${base}-plus-lead-loud.wav`, m.samples, m.sampleRate);
+      console.log(`[gain] ${base}+lead: limiter in ${dB(m.pre).toFixed(2)} dBFS, out peak ${m.peak.toFixed(3)}, rms ${m.rms.toFixed(4)}, reduction ${m.reduction.toFixed(2)} dB`);
+      expect(m.rms).toBeGreaterThan(0.02);
+      expect(dB(m.pre)).toBeLessThan(th);
+      expect(m.reduction).toBeGreaterThan(-0.5);
+      expect(m.peak).toBeLessThanOrEqual(1);
+    });
+  }
 });

@@ -53,7 +53,8 @@ export async function openApp(context, { viewport } = {}) {
 }
 
 export const bus = (page, name) => page.evaluate((n) => window.__gsTest.bus.get(n), name);
-export const modeId = (page) => bus(page, "mode");
+/** The mode the right hand drives: "lead" while the Lead layer is on (bus `mode` stays the base then), else `mode`. */
+export const modeId = (page) => page.evaluate(() => window.__gsTest.bus.get("layer") || window.__gsTest.bus.get("mode"));
 export const dbg = (page, at) =>
   page.evaluate((at) => window.__gsTest.registry.getMode("lead")._debug(at ?? window.__gsTest.ctx.now), at);
 export const ladder = (page) =>

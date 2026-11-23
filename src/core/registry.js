@@ -17,18 +17,32 @@ export function createRegistry({ bus = sharedBus } = {}) {
   const getModes = () => modes.slice();
   const getMode = (id) => modes.find((m) => m.id === id) || null;
 
-  /** MenuItem[] for the radial menu: one "mode" item per registered mode + the active mode's extras. */
-  function menuItems(activeId) {
-    const items = modes.map((m) => ({
-      id: m.id,
-      type: "mode",
-      label: m.name,
-      icon: m.icon,
-      color: m.color,
-      direction: m.direction,
-    }));
+  /**
+   * MenuItem[] for the radial menu: one item per registered mode + the active mode's (and layer's) extras.
+   * A mode with `layer: true` (Lead) is a "layer" item: it plays on top of the base mode (docs/architecture.md
+   * "Lead layer"). While a layer is on, the base's item carries `secondary: true` (it still runs underneath:
+   * hollow marker; choosing it is a change = the layer turns off) and a `confirmHint`.
+   */
+  function menuItems(activeId, { layerId = null } = {}) {
+    const layer = layerId ? getMode(layerId) : null;
+    const items = modes.map((m) => {
+      const it = {
+        id: m.id,
+        type: m.layer ? "layer" : "mode",
+        label: m.name,
+        icon: m.icon,
+        color: m.color,
+        direction: m.direction,
+      };
+      if (layer && !m.layer && m.id === activeId) {
+        it.secondary = true;
+        it.confirmHint = `Open hand: ${layer.name} off`;
+      }
+      return it;
+    });
     const active = activeId ? getMode(activeId) : null;
     if (active && Array.isArray(active.menuItems)) items.push(...active.menuItems);
+    if (layer && Array.isArray(layer.menuItems)) items.push(...layer.menuItems);
     return items;
   }
 

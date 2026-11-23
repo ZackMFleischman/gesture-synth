@@ -64,7 +64,8 @@ test.describe.configure({ mode: "default" }); // audio measurements: keep this f
 // =====================================================================================================
 
 test.describe("Lead in the fist menu", () => {
-  test("fist -> left -> Lead; Lead -> Chords, Lead -> Arp and back; chord display + pad in Lead", async ({ synthPage: page }) => {
+  // Lead layer (docs/architecture.md): Lead goes on top of the base (Chords / Arp keep playing, no pad).
+  test("fist -> left -> Lead on top of Chords; Lead -> Chords, Lead -> Arp and back to Arp + Lead; chord display from the base, no pad", async ({ synthPage: page }) => {
     const L = SC.left(1);
     const open = (p) => SC.open(4, SC.R.y, { x: p.x });
     await setHandsOn(page, L, SC.open(4));
@@ -73,15 +74,14 @@ test.describe("Lead in the fist menu", () => {
     const common = { left: L, from: SC.R, fistAt: SC.fistAt, open };
 
     await switchMode(page, { ...common, dir: "left", expectId: "lead" });
-    await expect(page.locator("#modeBadge")).toHaveText("Lead");
+    await expect(page.locator("#modeBadge")).toHaveText("Chords+Lead");
     await expect(page.locator("#noteSetBadge")).toBeVisible();
-    await expect(page.locator("#chordDisplay")).toHaveText("A(I)"); // the pad chord
-    await expect(page.locator("#qualityDisplay")).toHaveText("Major");
+    await expect(page.locator("#chordDisplay")).toHaveText("A(I)"); // Chords' chord (held voicing)
     await page.waitForTimeout(400);
     let d = await dbg(page);
     expect(d.side).toBe("left"); // expression hand on the screen left
-    expect(d.pad.length).toBe(4);
-    expect(await page.evaluate(() => window.__gsTest.synth.oscillators.length)).toBe(0); // Chords released its chord
+    expect(d.pad).toEqual([]); // no pad: the base is the accompaniment
+    expect(await page.evaluate(() => window.__gsTest.synth.oscillators.length)).toBe(4); // Chords keeps playing
 
     await switchMode(page, { ...common, dir: "up", expectId: "chords" });
     await page.waitForTimeout(300);
@@ -97,7 +97,10 @@ test.describe("Lead in the fist menu", () => {
     await switchMode(page, { ...common, dir: "left", expectId: "lead" });
     await page.waitForTimeout(300);
     d = await dbg(page);
-    expect(d.pad.length).toBe(4);
+    expect(d.pad).toEqual([]);
+    await expect(page.locator("#modeBadge")).toHaveText("Arp+Lead");
+    const arpOns2 = await page.evaluate(() => window.__gsTest.registry.getMode("arp").steps.filter((s) => s.midi != null).length);
+    expect(arpOns2, "Arp keeps playing under Lead").toBeGreaterThan(arpOns);
     // The menu shows Lead on the left arc.
     expect(await page.evaluate(() => window.__gsTest.registry.getMode("lead").direction)).toBe("left");
   });
@@ -174,9 +177,9 @@ test.describe("Lead UX checks in the app", () => {
         for (let m = low; m <= low + 24; m++) if (want.includes(mod12(m))) expected.push(m);
         expect(thick.map((l) => l.midi), `${key} ${degree}${minor ? "m" : ""}`).toEqual(expected);
         for (const l of thick) expect(Math.abs(l.y - (d.geo.bottom - ((l.midi - low) / 24) * (d.geo.bottom - d.geo.top)))).toBeLessThan(0.5);
-        // The pad plays the same chord, the chord display names it.
-        const padPcs = [...new Set(d.pad.map((f) => mod12(Math.round(69 + 12 * Math.log2(f / 440)))))].sort((a, b) => a - b);
-        expect(padPcs).toEqual(want);
+        // The base (Chords, under the Lead layer) plays the same chord.
+        const c = await bus(page, "chord");
+        expect(c && [c.degree, c.isMajor]).toEqual([degree, !minor]);
       }
     }
   });
@@ -362,9 +365,10 @@ test.describe("Lead UX checks in the app", () => {
 // =====================================================================================================
 
 test.describe("Lead with the menu and the master", () => {
-  test("menu hold: the lead note stops, the ladder dims, the pad keeps playing and follows the chord; cancel returns", async ({ synthPage: page }) => {
+  test("menu hold: the lead note stops, the ladder dims, the base (Chords) keeps playing and follows the chord; cancel returns", async ({ synthPage: page }) => {
     const y = 0.5;
-    await setHandsOn(page, SC.left(1), SC.preview(y));
+    await setHandsOn(page, SC.left(1), SC.open(2, y)); // Chords plays (the base under the Lead layer)
+    await page.waitForTimeout(300);
     await enterLeadByPanel(page);
     await setNoteSet(page, 2);
     await setHandsOn(page, SC.left(1), SC.preview(y));
@@ -384,20 +388,23 @@ test.describe("Lead with the menu and the master", () => {
     expect(d.held).toBe(true);
     expect(d.sounding).toBe(null);
     expect(d.pinchMode).toBe("none");
-    expect(d.pad.length).toBe(4);
+    expect(d.pad).toEqual([]);
+    const chordFreqs = await page.evaluate(() => window.__gsTest.synth.oscillators.map((o) => o.frequency.value));
+    expect(chordFreqs.length).toBeGreaterThan(0);
     const padRec = await recordAudio(page, 400);
-    expect(rms(padRec.samples), "the pad keeps playing while the menu is open").toBeGreaterThan(0.003);
+    expect(rms(padRec.samples), "the base keeps playing while the menu is open").toBeGreaterThan(0.003);
     const padPeaks = peaks(spectrum(padRec.samples, padRec.sampleRate, 16384), 0.3).map((pk) => pk.freq);
-    for (const f of padPeaks) expect(d.pad.some((w) => Math.abs(f / w - 1) < 0.01), `pad peak ${f.toFixed(1)}`).toBe(true);
+    for (const f of padPeaks) expect(chordFreqs.some((w) => Math.abs(f / w - 1) < 0.01), `chord peak ${f.toFixed(1)}`).toBe(true);
     await page.screenshot({ path: `${SCREENS_DIR}/m2-menu-held.png` });
 
-    // Left-hand chord change while held: the pad and the ladder follow.
+    // Left-hand chord change while held: the base's chord and the ladder follow.
     await setHandsOn(page, SC.left(4), SC.fistAt({ x: p.x, y }));
     await expect(page.locator("#chordDisplay")).toHaveText("D(IV)");
     await expect.poll(async () => (await dbg(page)).chord?.degree).toBe(4);
     d = await dbg(page);
     const want = triad("A", 4, true);
-    expect([...new Set(d.pad.map((f) => mod12(Math.round(69 + 12 * Math.log2(f / 440)))))].sort((a, b) => a - b)).toEqual(want);
+    const ivFreqs = await page.evaluate(() => window.__gsTest.synth.oscillators.map((o) => o.frequency.value));
+    for (const pc of want) expect(ivFreqs.map((f) => mod12(Math.round(69 + 12 * Math.log2(f / 440))))).toContain(pc);
     expect([...new Set(d.lines.filter((l) => l.isChord).map((l) => mod12(l.midi)))].sort((a, b) => a - b)).toEqual(want);
     expect(d.sounding).toBe(null);
 
@@ -422,7 +429,7 @@ test.describe("Lead with the menu and the master", () => {
     expect(d.sounding).toBeCloseTo(midiToFreq(pv), 3);
   });
 
-  test("output never clips: Lead + pad at full master, Bright tone, open resonant filter", async ({ synthPage: page }) => {
+  test("output never clips: Lead on top of Chords at full master, Bright tone, open resonant filter", async ({ synthPage: page }) => {
     const L = SC.left(5, { y: 0.1 }); // high left hand = master 1
     await setHandsOn(page, L, SC.preview(0.5));
     await enterLeadByPanel(page);
@@ -478,7 +485,8 @@ for (const [vpName, vp] of [["desktop", DESKTOP], ["mobile", MOBILE]]) {
         }, CONTROLS);
         expect(info.chordSide).toBe(sc.chordSide);
         expect(d.side).toBe(sc.exprSide);
-        expect(info.meterVisible, "meter hidden in Lead (D5)").toBe(false);
+        // Under the Lead layer the meter shows the base's held value (desktop); the phone layout hides the meter.
+        expect(info.meterVisible, "meter = the base's held value under the Lead layer").toBe(vp.width >= 600);
         const lad = d.regions.find((r) => r.name === "lead-ladder").rect;
         const master = info.regions.find((r) => r.name === "master-track")?.rect;
         expect(master, "master track drawn").toBeTruthy();

@@ -14,6 +14,10 @@
 // note/on + note/off with voice "lead" (and "pad" for the pad notes), ids from ctx.audio.nextNoteId.
 // hold(ctx) (radial menu holds the right hand): the lead note stops, the ladder dims, the pad keeps playing
 // and follows the left-hand chord.
+// Lead layer (docs/architecture.md "Lead layer"): in the app Lead is a LAYER (`layer: true`) on top of a base mode
+// (ctx.layerBase = "chords"|"arp"). Then the base is the accompaniment: no pad, no chord/voicing publishing, no
+// energy wave of its own, and the tilt drives only the lead's own filter (ctx.audio.setLayerFilter). Without a base
+// (labs/lead-lab.html) Lead plays its pad as before.
 
 import {
   createLeadController,
@@ -217,12 +221,15 @@ function ensureParams(ctx) {
     type: "continuous",
     min: -1,
     max: 1,
-    onChange: (tilt) => ctx.audio.setFilter(tilt),
+    onChange: (tilt) => {
+      ctx.audio.setLayerFilter?.(tilt); // the lead voice's own filter
+      if (!ctx.layerBase) ctx.audio.setFilter(tilt); // the pad's (shared) filter; a base holds its own value
+    },
   });
 }
 
 function updatePad(ctx) {
-  const chord = ctx.harmony.chord;
+  const chord = ctx.layerBase ? null : ctx.harmony.chord; // on top of a base mode: no pad
   const live = !!ctx.audio.ac;
   if (chord === padChord && padApplied === live) return;
   padChord = chord;
@@ -233,6 +240,7 @@ function updatePad(ctx) {
 
 /** Chord display / quality / energy wave read these. The pad plays voicing 1 (the triad + octave). */
 function publishChord(ctx) {
+  if (ctx.layerBase) return; // the base mode publishes the chord
   const c = ctx.harmony.chord ?? null;
   ctx.bus.set("chord", c);
   ctx.bus.set("voicing", c ? 1 : 0);
@@ -785,7 +793,7 @@ const lead = {
     const ladderAlpha = holding || lostNow || menuHeld ? LOOK.dimDuringHold : 1;
 
     // ---- Energy wave behind the chord display (every mode; the pad chord here) ----
-    if (ctx?.harmony) {
+    if (ctx?.harmony && !ctx.layerBase) {
       const ch = ctx.harmony.chord;
       drawEnergy(g, S.pinchMode === "note" ? 0.7 : 0.3, ch ? 1 : 0, filterParam?.value ?? 0, ch ? ch.roman : null);
     }
@@ -1163,6 +1171,8 @@ const lead = {
   },
 
   menuItems: [],
+  /** Plays on top of the base mode (router: Lead layer). */
+  layer: true,
   /** The expression edge shows the note ladder (drawn here), not a generic track. */
   rightTrack: null,
   /** Right-hand rows for the gesture guide. */

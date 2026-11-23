@@ -15,7 +15,7 @@ const CODE_RE = /^[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{2}$/;
 // On-screen consumers: indicators.js (chord, chords/octave, filter, voicing, volume = master) and the modes UI
 // (src/ui/mode-ui.js: `mode`, `beat`, plus the right-track param = chords/volume in Chords). Everything else is
 // read with bus.get().
-const INDICATOR_SIGNALS = ["beat", "chord", "chords/octave", "chords/volume", "filter", "mode", "voicing", "volume"];
+const INDICATOR_SIGNALS = ["beat", "chord", "chords/octave", "chords/volume", "filter", "layer", "mode", "voicing", "volume"];
 
 // Headless Chrome hides local IPs behind mDNS names; resolve them as plain host candidates.
 test.use({

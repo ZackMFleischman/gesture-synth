@@ -452,7 +452,8 @@ export function createArpMode() {
       const clock = c.clock;
       const bus = c.bus;
       drawnTempo = null;
-      if (!clock || bus.get("right/held")) return;
+      // Under the Lead layer the right hand plays the lead: no Arp feedback at the hand (gate etc. are held).
+      if (!clock || bus.get("right/held") || c.layerBase) return;
       const pos = bus.get("right/pos");
       const size = bus.get("right/size");
       if (!pos || !(size > 0)) return;

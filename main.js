@@ -80,8 +80,9 @@ const mobileUI = mountMobileUI({ bus });
 // ---- Radial menu (right fist) ----
 router.setMenu(
   createRadialMenu({
-    items: () => (audio.ac ? registry.menuItems(router.modeId) : []), // modes need the AudioContext
-    currentId: () => router.modeId,
+    // Lead is a layer: its arc turns it on over the current base; the base arc then has a hollow marker.
+    items: () => (audio.ac ? registry.menuItems(router.modeId, { layerId: router.layerId }) : []), // modes need the AudioContext
+    currentId: () => router.rightModeId,
     onTick: () => { if (audio.ac) playTick(audio.ac, audio.out); },
   })
 );

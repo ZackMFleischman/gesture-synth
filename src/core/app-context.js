@@ -44,6 +44,7 @@ export function createAppContext({ bus, registry, canvasEl, controlsContainer = 
     now: 0,
     masterVolume: 1, // router: left height -> master volume (1.3); 1 until a left hand is seen
     rightLocked: null, // router: the right HandFrame locked when the menu opened
+    layerBase: null, // router: base mode id while the Lead layer plays on top of it
     axes: null, // reach axes (src/core/axes.js): Drive / Space switches
   };
   const axes = createAxes({ bus, audio });

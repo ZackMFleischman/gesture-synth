@@ -517,3 +517,12 @@ Deferred: scale setting
 A scale setting (for example Dorian or Mixolydian) is deferred. Notes for later:
 The app now takes chord roots from the major scale only. Left tilt changes only the third of the chord (major or minor).
 A scale setting would choose each chord's quality from the scale. This conflicts with the current tilt. One option: tilt flips the quality of the current chord (a borrowed chord).
+
+Decided after real-camera testing: Lead plays on top of the current mode
+(Appended note; the Lead text above is unchanged and describes the original design.)
+Going from Arp to Lead used to stop Arp and play a pad under the lead. Players wanted the accompaniment to keep going. Now Lead is a layer: it plays on top of the base mode (Chords or Arp) and does not replace it.
+The base mode keeps running. The left hand still changes its chord and the master volume. Its right-hand values (voicing, Chords volume, Arp gate / double time / tempo, its filter) are held at their last values. The right hand plays the lead. The Lead pad does not play while there is a base mode.
+In the menu, the Lead arc turns the layer on. Choosing Lead again changes nothing, like choosing the current mode. To leave Lead, choose Chords or Arp. If it is the mode that was underneath, the right hand goes back to it with the usual crossfade from the held values.
+The mode badge (and the phone pill) shows both parts, for example "Arp + Lead". The base mode's visuals stay. The Controls panel shows the base mode's held settings (still changeable) and the Lead settings in two labelled groups.
+Right tilt is the filter of the lead voice. The base keeps its own filter value.
+Output: /gs/mode stays the base mode. A new state /gs/layer is "lead" while the layer is on, else null.

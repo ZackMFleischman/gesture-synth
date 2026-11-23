@@ -55,7 +55,8 @@ export const ADDRESS_TABLE = {
   drive: { address: "/gs/drive", encode: num }, // right hand sideways (src/core/axes.js)
   space: { address: "/gs/space", encode: num }, // left hand sideways
   // state (on change + every 2 s)
-  mode: { address: "/gs/mode" },
+  mode: { address: "/gs/mode" }, // the BASE mode (chords | arp)
+  layer: { address: "/gs/layer" }, // "lead" while Lead plays on top of the base, else null (docs/architecture.md "Lead layer")
   chord: { address: "/gs/chord", encode: encodeChord },
   voicing: { address: "/gs/voicing" },
   "lead/noteset": { address: "/gs/noteset" },

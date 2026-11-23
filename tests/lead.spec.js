@@ -552,7 +552,8 @@ test.describe("audio quality", () => {
 });
 
 test.describe("mode switch", () => {
-  test("Chords -> Lead: the left hand keeps sounding (drone crossfades into the pad, no gap); Lead -> Chords works", async ({ lab: page }) => {
+  // Lead layer (docs/architecture.md): from Chords, Lead goes ON TOP of Chords (the drone keeps playing, no pad).
+  test("Chords -> Lead: the left hand keeps sounding (Chords keeps its drone under the Lead layer, no gap); Lead -> Chords works", async ({ lab: page }) => {
     await page.evaluate(() => window.__gsTest.router.setMode("chords"));
     await setHands(page, leftHand(1), rightHand(2, { volume: 0.5 }));
     await settle(page, 500);
@@ -569,13 +570,14 @@ test.describe("mode switch", () => {
     const samples = Float32Array.from(chunks.flat());
     writeWav(`${AUDIO_DIR}/lead-switch-from-chords.wav`, samples, sampleRate);
     const env = envelope(samples, Math.round(sampleRate * 0.01));
-    const padLevel = env.slice(-20).reduce((a, b) => a + b, 0) / 20;
+    const padLevel = env.slice(-20).reduce((a, b) => a + b, 0) / 20; // the held Chords drone
     expect(padLevel).toBeGreaterThan(0.005);
     // from the switch to the end, the level never drops below half the final pad level (no gap)
     const switchAt = Math.floor(0.25 / 0.01);
     expect(Math.min(...env.slice(switchAt))).toBeGreaterThan(padLevel * 0.5);
-    expect(await page.evaluate(() => window.__gsTest.synth.oscillators.length)).toBe(0);
-    expect((await dbg(page)).pad.length).toBe(4);
+    expect(await page.evaluate(() => [window.__gsTest.bus.get("mode"), window.__gsTest.bus.get("layer")])).toEqual(["chords", "lead"]);
+    expect(await page.evaluate(() => window.__gsTest.synth.oscillators.length)).toBe(4); // Chords keeps playing
+    expect((await dbg(page)).pad.length).toBe(0); // no pad over a base
     // and back: Chords plays its drone again, the Lead voices are released
     await page.evaluate(() => window.__gsTest.router.setMode("chords"));
     await setHands(page, leftHand(1), rightHand(2, { volume: 0.5 }));

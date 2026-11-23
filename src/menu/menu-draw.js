@@ -375,7 +375,8 @@ export function createMenuRenderer(themeOverrides = {}) {
         }
 
         const [vx, vy] = vec(it.angle);
-        // current-item marker: small dot on the arc's outer edge
+        // current-item marker: small dot on the arc's outer edge; an item still running under the current one
+        // (`secondary`, e.g. the base mode under the Lead layer) gets a hollow ring instead
         if (isCur) {
           g.beginPath();
           g.arc(cx + vx * R, cy + vy * R, TH.markerR, 0, Math.PI * 2);
@@ -384,6 +385,15 @@ export function createMenuRenderer(themeOverrides = {}) {
           g.stroke();
           g.fillStyle = rgba(TH.ink, base * (1 - 0.4 * a.dim));
           g.fill();
+        } else if (it.secondary) {
+          g.beginPath();
+          g.arc(cx + vx * R, cy + vy * R, TH.markerR + 0.5, 0, Math.PI * 2);
+          g.lineWidth = 3.5;
+          g.strokeStyle = rgba(TH.shadow, 0.5 * base);
+          g.stroke();
+          g.lineWidth = 1.5;
+          g.strokeStyle = rgba(TH.ink, base * (1 - 0.4 * a.dim));
+          g.stroke();
         }
 
         // sub-menu mark: outward chevron on the outer edge; it slides out while the fist passes through
@@ -450,7 +460,7 @@ export function createMenuRenderer(themeOverrides = {}) {
       else if (sel && sel.type === "submenu") hint = "Keep going to open";
       else if (sel) {
         if (sel.id === snap.currentId) hint = level === 1 ? "Already set" : "Already active";
-        else hint = sel.type === "setting" ? "Open hand to set" : "Open hand to confirm";
+        else hint = sel.confirmHint || (sel.type === "setting" ? "Open hand to set" : "Open hand to confirm");
       } else if (snap.hoverBack) hint = "Back";
       let low = Rf + 24;
       for (const it of items) {

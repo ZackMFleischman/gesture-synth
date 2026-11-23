@@ -75,7 +75,10 @@ export function createTransport({ S, bus, ctx, doc, subscribe }) {
   }
 
   function update() {
-    const on = CLOCKED.has(S.modeId) || S.mode?.transport === true;
+    // The BASE mode's transport: it keeps showing (beats + steps) under the Lead layer, Arp still runs.
+    const baseId = S.baseId ?? S.modeId;
+    const base = S.base ?? S.mode;
+    const on = CLOCKED.has(baseId) || base?.transport === true;
     el.classList.toggle("hidden", !on);
     if (!on) {
       if (beat >= 0 || pending.length) {
@@ -110,7 +113,8 @@ export function createTransport({ S, bus, ctx, doc, subscribe }) {
       bpmEl.textContent = bpm != null ? String(Math.round(bpm)) : "--";
     }
     // Tempo delta (pinch = tempo), inside the plate, only while pinching.
-    const pinching = !!S.hands.right.pinch && !!S.hands.right.pos;
+    // (Under the Lead layer a pinch plays the lead, not the tempo.)
+    const pinching = !S.layerId && !!S.hands.right.pinch && !!S.hands.right.pos;
     if (pinching && pinchStartBpm == null) pinchStartBpm = bpm;
     if (!pinching) pinchStartBpm = null;
     const d = pinching && bpm != null && pinchStartBpm != null ? Math.round(bpm - pinchStartBpm) : 0;

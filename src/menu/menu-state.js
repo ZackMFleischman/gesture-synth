@@ -50,9 +50,14 @@ export const BACK_ID = "__back";
  *   "same"      -> no change (closes like a cancel, reason "same-item")
  *   "cancel"    -> no change (reason "submenu": a submenu arc only opens by moving through it)
  * `submenu: true` marks a type whose `items` open as a sub-ring.
+ * "layer" = a mode that plays on top of the current one (Lead): same rule as "mode".
+ * Generic item metadata (all optional): `secondary: true` = also running, under the current item (hollow
+ * marker; choosing it IS a change), `confirmHint` = the hint under the ring while it is selected.
  */
+const sameIfCurrent = (item, { currentId }) => (item.id === currentId ? "same" : "countdown");
 const ITEM_TYPES = new Map([
-  ["mode", { selectable: true, confirm: (item, { currentId }) => (item.id === currentId ? "same" : "countdown") }],
+  ["mode", { selectable: true, confirm: sameIfCurrent }],
+  ["layer", { selectable: true, confirm: sameIfCurrent }],
   ["submenu", { selectable: true, submenu: true, confirm: () => "cancel" }],
   ["setting", { selectable: true, confirm: (item, { currentId }) => (item.id === currentId ? "same" : "flash") }],
 ]);

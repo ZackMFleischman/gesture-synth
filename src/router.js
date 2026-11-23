@@ -14,7 +14,13 @@
 //     only after the countdown, and its height/tilt crossfade from the locked values to the live
 //     hand over RESUME_MS (also after a cancel), so nothing jumps.
 //
-// Publishes: mode (state), volume (master volume, continuous), menu (state), right/held (state).
+// Lead layer (docs/architecture.md "Lead layer"): a mode with `layer: true` (Lead) plays ON TOP of the base mode
+// (Chords / Arp) instead of replacing it. While the layer is on, the base keeps running through `hold(ctx)` every
+// frame (left hand live: chord + master; its right-hand values held), and the right hand drives the layer.
+// Choosing a base mode (menu or Controls) turns the layer off; choosing the base that was underneath gives the right
+// hand back to it with the Return crossfade from the values it held. `mode` stays the base id; `layer` = "lead"|null.
+//
+// Publishes: mode (state), layer (state), volume (master volume, continuous), menu (state), right/held (state).
 
 import { classifyChord } from "./input/hand-input.js";
 
@@ -95,8 +101,12 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
   let masterOverride = null; // screen control value (Controls panel) while `ui/override` lists "master"
   let heldPhase = null; // null | "held" | "return" (what the `held` signal currently says)
   let heldFor = null; // mode id the `held` object was built for
+  let layer = null; // Lead layer on top of `active` (a mode with `layer: true`), or null
+  let lastBaseFrame = null; // the last right frame the base mode got (its held values = this frame's)
+  let baseLocked = null; // that frame when the layer turned on (Return crossfade start when the base gets the hand back)
 
   bus.declare("mode", { type: "state", owner: "router" });
+  bus.declare("layer", { type: "state", owner: "router" });
   bus.declare("volume", { type: "continuous", owner: "router" });
   bus.declare("menu", { type: "state", owner: "router" });
   bus.declare("right/held", { type: "state", owner: "router" });
@@ -104,7 +114,9 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
   bus.set("right/held", false);
   bus.set("menu", null);
   bus.set("held", null);
+  bus.set("layer", null);
   ctx.rightLocked = null;
+  ctx.layerBase = null; // id of the base mode while a layer plays on top of it (Lead skips its pad then)
 
   /** Controls panel master slider: the screen value wins until the left hand moves (`ui/override`). */
   ctx.setMasterVolume = (v) => {
@@ -126,7 +138,8 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
   // A mode can hold right-hand values itself (Arp pinch) through the optional `mode.heldState()` ->
   // null | { phase: "held"|"return", values: {[param]: heldValue} }; the menu wins over it.
   function publishHeld(phase, values = null, src = "menu") {
-    const id = active ? active.id : null;
+    const rm = layer || active;
+    const id = rm ? `${active.id}+${layer ? layer.id : ""}` : null;
     const key = phase ? `${src}|${phase}` : null;
     if (key === heldPhase && id === heldFor) return;
     heldPhase = key;
@@ -135,21 +148,100 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
     const h = phase === "held" ? { right: true } : {};
     if (values) Object.assign(h, values);
     else {
-      const p = active?.rightTrack?.param;
+      const p = rm?.rightTrack?.param;
       if (p) h[p] = bus.get(p) ?? null;
     }
     bus.set("held", h);
   }
 
+  /** (Re)mounts the screen controls: the base's rows, plus the layer's rows in labelled groups while it is on. */
+  function mountControls() {
+    if (cleanupControls) { cleanupControls(); cleanupControls = null; }
+    if (!controlsContainer || !active) return;
+    if (!layer) {
+      if (active.controls) cleanupControls = active.controls(controlsContainer, ctx) || null;
+      return;
+    }
+    const doc = controlsContainer.ownerDocument;
+    const group = (m, kind, note) => {
+      const el = doc.createElement("div");
+      el.className = "gs-ctl-group";
+      el.dataset.group = kind;
+      el.dataset.mode = m.id;
+      el.style.setProperty("--gs-group", m.color);
+      const head = doc.createElement("div");
+      head.className = "gs-ctl-head";
+      head.innerHTML = `<span class="gs-dot"></span><span class="gs-ctl-name"></span><span class="gs-ctl-note"></span>`;
+      head.querySelector(".gs-ctl-name").textContent = m.name;
+      head.querySelector(".gs-ctl-note").textContent = note;
+      el.append(head);
+      controlsContainer.append(el);
+      return el;
+    };
+    const baseEl = group(active, "base", "right hand held");
+    const layerEl = group(layer, "layer", "right hand");
+    const cb = active.controls ? active.controls(baseEl, ctx) || null : null;
+    const cl = layer.controls ? layer.controls(layerEl, ctx) || null : null;
+    cleanupControls = () => {
+      cb?.();
+      cl?.();
+      baseEl.remove();
+      layerEl.remove();
+    };
+  }
+
+  /** Lead layer off (its exit runs; the base keeps playing). */
+  function clearLayer() {
+    if (!layer) return;
+    const l = layer;
+    layer = null;
+    if (l.exit) l.exit(ctx);
+    ctx.layerBase = null;
+    ctx.audio?.setLayerMix?.(false);
+    bus.set("layer", null);
+  }
+
+  /** Lead layer on over the current base: the base's right-hand values stay held, the right hand plays the layer. */
+  function setLayer(next) {
+    if (!active || next === layer) return false;
+    clearLayer();
+    baseLocked = lastBaseFrame;
+    layer = next;
+    ctx.layerBase = active.id;
+    ctx.audio?.setLayerMix?.(true);
+    bus.set("layer", layer.id);
+    if (layer.enter) layer.enter(ctx);
+    mountControls();
+    return true;
+  }
+
+  /**
+   * Selects a mode (menu confirm, Controls panel): a base mode replaces the base and turns a layer off; a layer
+   * mode turns the layer on over the current base. Returns true if something changed.
+   */
   function setMode(id) {
     const next = registry.getMode(id);
-    if (!next || next === active) return false;
+    if (!next) return false;
+    // A layer needs a base under it; without one (labs/lead-lab.html) it runs alone like a base mode.
+    if (next.layer && active && !active.layer) return setLayer(next);
+    if (next === active) {
+      if (!layer) return false;
+      // The base that was underneath gets the right hand back: crossfade from the values it held.
+      clearLayer();
+      ctx.rightLocked = baseLocked;
+      resumePending = true;
+      resumeStart = null;
+      mountControls();
+      return true;
+    }
+    clearLayer();
     if (active && active.exit) active.exit(ctx);
     if (cleanupControls) { cleanupControls(); cleanupControls = null; }
     active = next;
+    lastBaseFrame = null;
     bus.set("mode", active.id); // badge switches at the start of the countdown
     if (active.enter) active.enter(ctx);
-    if (controlsContainer && active.controls) cleanupControls = active.controls(controlsContainer, ctx) || null;
+    mountControls();
     return true;
   }
 
@@ -214,14 +306,16 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
       held = menu.isHoldingRight();
     }
     bus.set("right/held", held);
-    // ---- Sideways axes (every mode; right-hand axes hold while the menu holds the right hand) ----
-    axes?.update(left, right ? (right.fist ? lastOpenRight : right) : null, { now, rightHeld: held });
+    // ---- Sideways axes (every mode; right-hand axes hold while the menu holds the right hand, and under the Lead
+    // layer: Drive is a base value there, like the base's other right-hand values; Space (left) stays live) ----
+    axes?.update(left, right ? (right.fist ? lastOpenRight : right) : null, { now, rightHeld: held || !!layer });
     if (!active) return;
 
     if (held) {
       // Values stay locked; the left hand (chord changes, master volume) stays live.
       publishHeld("held");
       if (active.hold) active.hold(ctx);
+      if (layer && layer.hold) layer.hold(ctx);
       return;
     }
 
@@ -240,10 +334,18 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
         frame = { ...frame, height: lerp(locked.height, frame.height, e), tilt: lerp(locked.tilt, frame.tilt, e) };
       }
     }
-    active.update(frame, ctx);
+    if (layer) {
+      // Lead layer: the base keeps playing with its right-hand values held; the right hand plays the layer.
+      if (active.hold) active.hold(ctx);
+      layer.update(frame, ctx);
+    } else {
+      active.update(frame, ctx);
+      lastBaseFrame = frame;
+    }
     if (resumePending || resumeStart !== null) publishHeld("return");
     else {
-      const mh = active.heldState ? active.heldState() : null;
+      const rm = layer || active;
+      const mh = rm.heldState ? rm.heldState() : null;
       if (mh) publishHeld(mh.phase, mh.values, "mode");
       else publishHeld(null);
     }
@@ -251,6 +353,7 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
 
   function draw(g) {
     if (active && active.draw) active.draw(g, ctx);
+    if (layer && layer.draw) layer.draw(g, ctx);
     if (menu && menu.draw) menu.draw(g, ctx);
   }
 
@@ -258,11 +361,23 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
     update,
     draw,
     setMode,
-    /** Plug in the radial menu: createRadialMenu({ items: () => registry.menuItems(router.modeId), currentId: () => router.modeId }). */
+    /** Same as setMode (a layer id toggles the layer on; a base id sets the base and turns the layer off). */
+    select: setMode,
+    /**
+     * Plug in the radial menu: createRadialMenu({ items: () => registry.menuItems(router.modeId, { layerId: router.layerId }),
+     * currentId: () => router.rightModeId }).
+     */
     setMenu(m) { menu = m || null; },
     get menu() { return menu; },
+    /** The base mode (Chords / Arp): bus `mode`. */
     get mode() { return active; },
     get modeId() { return active ? active.id : null; },
+    /** The layer playing on top of the base (Lead) or null: bus `layer`. */
+    get layer() { return layer; },
+    get layerId() { return layer ? layer.id : null; },
+    /** The mode the right hand drives (the layer if on, else the base). */
+    get rightMode() { return layer || active; },
+    get rightModeId() { return (layer || active)?.id ?? null; },
     get masterVolume() { return master.value; },
     /** Reach axes (src/core/axes.js) or null. */
     get axes() { return axes; },
