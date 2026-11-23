@@ -99,7 +99,8 @@ for (const [vpName, vp] of Object.entries(VIEWPORTS)) {
       });
     }
 
-    // Chord hand on the screen right (open question Q1): layout must hold either way.
+    // Swapped: chord hand on the screen right (the unusual case; real use = chord hand on the screen left, the
+    // lab's default, docs/ui-integration.md Q1). Layout must hold either way.
     for (const state of ["chords-play", "arp-play", "lead-preview"]) {
       test(`${state} (swapped sides)`, async ({ page }) => {
         await page.goto(`/labs/ui-lab.html?state=${state}&clean&swap`);

@@ -13,7 +13,7 @@ test.describe.configure({ mode: "default" });
 
 // Display-space positions (DESKTOP_VIEW: fake camera 640x480 on a 1280x800 canvas).
 // Hand size ~0.11 canvas widths -> select radius ~0.1 width (x) / ~0.15 height (y).
-const R0 = { x: 0.3, y: 0.42 }; // right hand home (screen left: the video is mirrored)
+const R0 = { x: 0.7, y: 0.42 }; // right hand home (screen right, as in real use: mirrored selfie view)
 const STEP = { right: [0.014, 0], left: [-0.014, 0], up: [0, -0.022], down: [0, 0.022] };
 
 const at = (p) => ({ pos: p, view: DESKTOP_VIEW });
@@ -150,7 +150,7 @@ test.describe("mode switching with the fist menu", () => {
     test(`no click or gap across ${from} -> ${to} while the left hand holds a chord`, async ({ synthPage: page, setHands }, info) => {
       test.setTimeout(45_000);
       // High right hand: Chords = loud pad, Arp = long overlapping notes (so silence = a real gap).
-      const HIGH = { x: 0.3, y: 0.3 };
+      const HIGH = { x: 0.7, y: 0.3 };
       const open = (p) => openRight(1, HIGH);
       await setHands(LEFT, open());
       await page.waitForTimeout(400);
@@ -268,14 +268,14 @@ test.describe("Arp in the app", () => {
   test("right height = gate (measured note length)", async ({ synthPage: page, setHands }) => {
     await enterArp(page, setHands);
     // Low hand: short plucked notes.
-    await setHands(LEFT, openRight(1, { x: 0.3, y: 0.86 }));
+    await setHands(LEFT, openRight(1, { x: 0.7, y: 0.86 }));
     await page.waitForTimeout(600);
     const lowGate = (await arpState(page)).gate;
     const low = await recordAudio(page, 1500);
     const lowOn = detectOnsets(low.samples, low.sampleRate);
     const lowLens = noteLengths(low.samples, low.sampleRate, lowOn).slice(0, -1);
     // High hand: long overlapping notes.
-    await setHands(LEFT, openRight(1, { x: 0.3, y: 0.2 }));
+    await setHands(LEFT, openRight(1, { x: 0.7, y: 0.2 }));
     await page.waitForTimeout(600);
     const highGate = (await arpState(page)).gate;
     const high = await recordAudio(page, 1500);
@@ -475,7 +475,7 @@ test("video: Chords -> Arp -> Chords (test-results/videos/m1-switch.webm)", asyn
   await page.waitForTimeout(1200);
   await switchMode(page, setHands, { dir: "right", expectId: "arp", left: leftHand(1) });
   await page.waitForTimeout(800);
-  await setHands(leftHand(4), openRight(2, { x: 0.3, y: 0.35 }));
+  await setHands(leftHand(4), openRight(2, { x: 0.7, y: 0.35 }));
   await page.waitForTimeout(1200);
   await switchMode(page, setHands, { dir: "up", expectId: "chords", left: leftHand(4) });
   await page.waitForTimeout(1200);

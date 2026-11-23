@@ -7,20 +7,21 @@ import { makeView } from "../../src/input/hand-input.js";
 export const SCREENS = "test-results/screens";
 
 /**
- * Hand scene for a viewport. Default: the chord ("Left") hand on the screen right (the mock's MediaPipe
- * convention), so the expression hand and the ladder are on the LEFT edge. `swap` mirrors it.
+ * Hand scene for a viewport. Default = real use: the chord ("Left") hand on the screen LEFT (selfie view, verified
+ * with a real camera), so the expression hand and the ladder are on the RIGHT edge. `swap` mirrors it (the unusual
+ * case: chord hand on the screen right, e.g. crossed hands).
  */
 export function scene({ width = 1280, height = 800 } = {}, { swap = false } = {}) {
   const view = makeView(640, 480, width, height);
-  const L = swap ? { x: 0.3, y: 0.5 } : { x: 0.72, y: 0.5 };
-  const R = swap ? { x: 0.72, y: 0.42 } : { x: 0.3, y: 0.42 };
+  const L = swap ? { x: 0.72, y: 0.5 } : { x: 0.28, y: 0.5 };
+  const R = swap ? { x: 0.3, y: 0.42 } : { x: 0.7, y: 0.42 };
   const at = (p) => ({ pos: p, view });
   return {
     view,
     L,
     R,
-    exprSide: swap ? "right" : "left",
-    chordSide: swap ? "left" : "right",
+    exprSide: swap ? "left" : "right",
+    chordSide: swap ? "right" : "left",
     /** Chord hand: degree 1..7 at the scene position (left height 0.5 = master 2/3 unless `volume`). */
     left: (deg = 1, o = {}) => leftHand(deg, { ...at({ x: L.x, y: o.y ?? L.y }), ...o }),
     /** Open right hand with `count` fingers at height y (display). */

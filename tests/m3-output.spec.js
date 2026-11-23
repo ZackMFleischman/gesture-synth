@@ -44,7 +44,7 @@ test.use({
 test.describe.configure({ mode: "default" });
 
 // Display-space positions on the 1280x800 synth (DESKTOP_VIEW), same as m1-integration.spec.js.
-const R0 = { x: 0.3, y: 0.42 };
+const R0 = { x: 0.7, y: 0.42 }; // right hand home (screen right, as in real use)
 const STEP = { right: [0.014, 0], left: [-0.014, 0], up: [0, -0.022], down: [0, 0.022] };
 const at = (p) => ({ pos: p, view: DESKTOP_VIEW });
 const openRight = (q = 1, p = R0, o = {}) => rightHand(q, { ...at(p), ...o });
