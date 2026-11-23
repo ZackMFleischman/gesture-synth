@@ -68,7 +68,7 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `pinch-tempo.unit.spec.js` | unit | Pinch -> tempo mapping, the `pinch` bus event, `matchToScheduleAnyOffset` (helpers/schedule-match.js). |
 | `arp.spec.js` | integration | Right place for engine timing (±3 ms) on recorded audio. Lab-only: **app-level timing owed** (M1). Includes a WAV demo (not a gate-worthy assert; keep, it's cheap). |
 | `gesture-test.int.spec.js` | integration | From `gesture-reliability.spec.js`. |
-| `lead.spec.js` | integration | Right place for Lead UX checks 2.1–2.5 in the lab. Lab-only: **app journeys owed** (M2). Mode-switch test (Chords→Lead) belongs in e2e once Lead is registered in the app. |
+| `lead.spec.js` | integration | Right place for Lead UX checks 2.1–2.5 in the lab (engine-level measurements: glide, retrigger, clicks). App journeys: `m2-lead.spec.js`. |
 | `lead-demo.spec.js` | integration | Demo artifact (melody WAV + screenshots), 1 assert. Keep; candidate for a non-gating demo tag later. |
 | `mobile-ui.int.spec.js` | integration | Mobile system prototype in `labs/mobile-lab.html` (+ planned chrome as the before): budgets, clear area, 2-tap reach, sheets, 44 px targets, auto-collapse. |
 | `menu-lab.int.spec.js` | integration | From `radial-menu.spec.js` (lab visuals). |
@@ -78,10 +78,12 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `app-input.e2e.spec.js` | e2e | From `hand-input` + `gesture-reliability` (`?replay` and view geometry in the app). |
 | `audio.spec.js` | e2e | Right place: Chords pitches/expression on recorded audio. In-flight (m1-wiring). `output never clips` is `test.fail()` until the limiter lands. |
 | `bus.spec.js` | e2e (legacy) | **Mixed**: 7 Node unit tests + 3 app tests in one file. Split the `bus (unit)` block into `bus.unit.spec.js` after m1-wiring merges (it edits this file). |
+| `gain-staging.e2e.spec.js` | e2e | Gain staging around the master limiter: every chord (1344, offline render of the real engine) under the threshold at max settings; loudness linear in right volume and master; no limiting in steady loud Chords/Arp/Lead; peak <= 1. |
 | `gestures.spec.js` | e2e | Right place (gesture → UI mapping in the app). Overlaps `hand-input.unit` on purpose: unit proves classification, this proves the wiring. |
 | `m1-ui.spec.js` | e2e | Milestone spec, right place. |
 | `mobile-ui.e2e.spec.js` | e2e | The app's mobile system: before/after audit, tray/sheets/guide strip/minimal HUD with the real handlers, first visit, blocked storage, phone first-use labels, desktop inert, real-app screens + video. |
 | `m1-pinch.spec.js` | e2e | Milestone spec (1.6 pinch = tempo): no jump at the start, voicing kept (bus + heard pitches), locks, Return, no lost/doubled step on recorded audio, visuals, screenshots + video. |
+| `m2-lead.spec.js` | e2e | Milestone spec: Lead in the app (fist menu, switches without a gap, 2.1–2.5, menu hold, clipping, layout both sides at 1280×800 / 390×844, screenshots + `test-results/videos/m2-lead.webm` with sound). Helpers: `helpers/m2-lead.js` (browser-only). |
 | `output.spec.js` | e2e | Right place (app + visualizer, two contexts). Its demo-video test is the slowest e2e test (~19 s). |
 | `m3-output.spec.js` | e2e | M3 3.3: output hooked into the modes app (beat grid, menu/mode, Arp notes, manifest, pinch, screens + video). |
 | `output-m3.unit.spec.js` | unit | M3 3.3 pure mapping + clock transport notifications. |
@@ -147,7 +149,7 @@ that need a browser: none.
   the screenshot via `stylePath: tests/helpers/visual.css`; canvas visuals are asserted structurally instead.
 - After an intended UI change: `PW_PORT=52xx npm run test:visual -- --update-snapshots`, **Read the new PNGs**,
   commit them in the same commit as the change. A baseline diff you didn't intend is a regression.
-- Arp / Lead / radial-menu chrome gets baselines after M1 wiring + M2 integration land (still in flux).
+- Lead chrome has a baseline (`lead-playing`, M2). Arp / radial-menu chrome gets baselines once they settle.
 
 ## Real-hand data → regression tests
 1. On the dev server open `/labs/gesture-test.html` (real camera), do one thing on purpose (e.g. "pinch 3×
@@ -169,9 +171,9 @@ integration level, and **one e2e journey in the real app**. Status:
 | M0 pinch 20/20, fist never pinch | gesture-reliability.unit, hand-input.unit | gesture-test.int | gestures.spec |
 | M1 arp timing ±3 ms, no drift | arp-patterns (clock) | arp.spec | **owed (M1 wiring)** |
 | M1 menu state machine, cancel = no change | radial-menu.unit | menu-lab.int | m1-integration (in flight) |
-| M1 no click/gap on mode switch | — | lead.spec (Chords→Lead) | m1-integration (Chords↔Arp, in flight) |
+| M1 no click/gap on mode switch | — | lead.spec (Chords→Lead) | m1-integration (Chords↔Arp), m2-lead (Chords/Arp↔Lead) |
 | M1 height/thumb/pinch roles | hand-input.unit, pinch-tempo.unit | arp.spec | m1-integration + m1-ui + m1-pinch (pinch = tempo on recorded audio, ±3 ms) |
-| M2 preview == played, no flicker, set/octave rules | lead-notes.unit | lead.spec | **owed (M2)** |
+| M2 preview == played, no flicker, set/octave rules | lead-notes.unit | lead.spec | m2-lead |
 | M3 chip < 1 s, zero work when off, visualizer data | output-protocol, output-m3.unit (menu/pinch/note-id mapping, clock.onTransport) | — | output.spec (chip, Q4 Output row, relay, zero work), m3-output (beat grid at once + on the audio clock, fist menu → /gs/menu + /gs/mode, Arp notes early/on time/paired/cancel, manifest, pinch, Lead state) |
 
 ## Owed by integration
@@ -182,8 +184,7 @@ integration level, and **one e2e journey in the real app**. Status:
 | Remove `test.fail()` from `audio.spec › output never clips` once the master limiter lands | M1 wiring |
 | Re-baseline `visual.e2e` after m1-wiring merges (main.js changes meter/volume roles); add baselines for Arp chrome, menu open, controls panel | M1 wiring + M1 UI |
 | Retire `ui-lab.spec` states now covered by `m1-ui.spec` in the app | M1 UI (after wiring) |
-| Lead in the real app: select via the fist menu, pinch plays the previewed note (FFT), note-set toggle, octave arrows, pad under the melody, Lead↔Chords/Arp without a gap, Lead visual baseline (`m2-*.spec.js`) | M2 Lead integration |
-| ~~Output with modes: Arp/Lead notes reach the visualizer early with their playTime, manifest lists mode signals, chip clear of the new chrome on mobile~~ Done in M3 hookups (`m3-output.spec.js`, `output.spec.js` mobile). Lead notes are live input (spec: not sendable early); Lead tested for mode/noteset/octave state. Re-check the chip once `body.gs-mobile` lands in the app. | M3 hookups |
+| ~~Output with modes: Arp/Lead notes reach the visualizer early with their playTime, manifest lists mode signals, chip clear of the new chrome on mobile~~ Done in M3 hookups (`m3-output.spec.js`, `output.spec.js` mobile incl. the mobile bar). Lead notes are live input (spec: not sendable early); Lead tested for mode/noteset/octave state. | M3 hookups |
 | Real-hand recordings (pinch, fist/menu entry, thumb flapping) with `.expect.json` | each milestone's dev-instance session (needs a person + camera) |
 
 ## Before a merge

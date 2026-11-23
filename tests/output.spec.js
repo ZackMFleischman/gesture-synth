@@ -3,7 +3,7 @@
 // The signaling server is started by playwright.config.js (webServer, port PW_SIGNAL_PORT).
 import fs from "node:fs";
 import { test, expect } from "@playwright/test";
-import { results, leftHand, rightHand } from "./helpers/hands.js";
+import { results, leftHand, rightHand, masterAt } from "./helpers/hands.js";
 import { createScreencast } from "./helpers/screencast.js";
 import { installSynthLog, checkRender } from "./helpers/output-timing.js";
 
@@ -220,8 +220,8 @@ test("visualizer gets manifest, full state, fast frames, timed events, periodic 
   }));
   expect(cont.ch).toBe("fast");
   expect(Array.isArray(cont.pos) && cont.pos.length === 2).toBe(true);
-  // M1 1.3: /gs/volume = master volume (left height 0.5 -> 2/3); right height = /gs/chords/volume.
-  expect(cont.volume).toBeCloseTo(2 / 3, 1);
+  // M1 1.3: /gs/volume = master volume (left height 0.5 -> masterAt(0.5)); right height = /gs/chords/volume.
+  expect(cont.volume).toBeCloseTo(masterAt(0.5), 1);
   expect(await v.page.evaluate(() => window.__viz.cont["/gs/chords/volume"])).toBeCloseTo(0.4, 1);
   expect(cont.filter).toBeCloseTo(-0.5, 1);
   expect(cont.maxKeys).toBeGreaterThanOrEqual(3); // several values batched in one message

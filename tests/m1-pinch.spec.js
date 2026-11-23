@@ -185,18 +185,66 @@ test.describe("1.6 right pinch = tempo (Arp)", () => {
     });
   }
 
-  test("a realistic pinch approach (3 fingers read for ~70 ms before the pinch) restores the pre-pinch voicing", async ({ synthPage: page, setHands }) => {
-    await enterArp(page, setHands, { bpm: 110, q: 4 });
-    await page.waitForTimeout(500);
-    // Thumb approaching the curled index: not a pinch yet (distance 0.6 > PINCH_START), reads 3 fingers.
-    await setHands(LEFT, pinchAt(R0, { distance: 0.6 }));
-    await page.waitForTimeout(70);
-    await setHands(LEFT, pinchAt(R0));
-    await page.waitForTimeout(600);
-    expect((await arpState(page)).voicing).toBe(4);
-    expect(await bus(page, "voicing")).toBe(4);
+  // Voicing hold (src/modes/arp.js VOICING_HOLD): the hand reads 3 fingers (index curled, thumb closing in)
+  // for a few frames before the pinch is detected. None of it may be heard or published.
+  for (const ms of [30, 70, 120]) {
+    test(`UX 1.6: a pinch approach reading 3 fingers for ${ms} ms never sounds or publishes voicing 3`, async ({ synthPage: page, setHands }) => {
+      test.setTimeout(45_000);
+      const P = { x: R0.x, y: 0.7 }; // ~150 ms notes: each fills the pitch window, clean gaps between them
+      await enterArp(page, setHands, { bpm: 110, q: 1, p: P });
+      await page.waitForTimeout(400);
+      expect(await bus(page, "voicing")).toBe(1);
+      await installLog(page, ["voicing"]);
+      const acStart = await page.evaluate(() => window.__gsTest.ctx.audio.ac.currentTime);
+      const rec = recordAudio(page, 2000);
+      await page.waitForTimeout(250);
+      // Approach: thumb closing on the curled index (distance 0.5 > PINCH_START: not a pinch yet).
+      await setHands(LEFT, pinchAt(P, { distance: 0.5 }));
+      await page.waitForTimeout(ms);
+      await setHands(LEFT, pinchAt(P));
+      await page.waitForTimeout(1200);
+      await setHands(LEFT, openRight(1, P));
+      const { samples, sampleRate } = await rec;
+      writeWav(`${WAV_DIR}/m1-pinch-approach-${ms}ms.wav`, samples, sampleRate);
+      expect((await log(page)).filter((e) => e.n === "voicing"), "bus `voicing` never changed").toEqual([]);
+      expect((await arpState(page)).voicing).toBe(1);
+      const midis = await page.evaluate(
+        (t0) => window.__gsTest.registry.getMode("arp").steps.filter((s) => s.time > t0).map((s) => s.midi),
+        acStart
+      );
+      expect(midis.length).toBeGreaterThanOrEqual(5);
+      for (const m of midis) expect(notesOf(1), `scheduled ${midis}`).toContain(m);
+      const onsets = detectOnsets(samples, sampleRate).filter((t) => t < samples.length / sampleRate - 0.2);
+      expect(onsets.length).toBeGreaterThanOrEqual(5);
+      const heard = onsets.map((t) => Math.round(hzToMidi(pitchAt(samples, sampleRate, t + 0.004, 4096))));
+      const v3only = notesOf(3).filter((n) => !notesOf(1).includes(n)); // C#4 61, G#4 68
+      expect(heard.filter((m) => v3only.includes(m)), `heard ${heard}`).toEqual([]);
+      for (const m of heard) expect(notesOf(1), `heard ${heard}`).toContain(m);
+    });
+  }
+
+  test("a deliberate change to 3 fingers applies after the ~100 ms hold; a shorter flicker does not", async ({ synthPage: page, setHands }) => {
+    await enterArp(page, setHands, { bpm: 110, q: 1 });
+    await page.waitForTimeout(300);
+    await installLog(page, ["voicing"]);
+    // Flicker: 3 fingers for ~40 ms (about one video frame), then back to 1.
+    await setHands(LEFT, openRight(3));
+    await page.waitForTimeout(40);
+    await setHands(LEFT, openRight(1));
+    await page.waitForTimeout(400);
+    expect((await log(page)).filter((e) => e.n === "voicing"), "flicker ignored").toEqual([]);
+    // Deliberate: 3 fingers held.
+    const t0 = await page.evaluate(() => performance.now());
+    await setHands(LEFT, openRight(3));
+    await expect.poll(() => bus(page, "voicing"), { timeout: 2000 }).toBe(3);
+    const set = (await log(page)).find((e) => e.n === "voicing" && e.v === 3);
+    // Applied no earlier than the hold (minus one video frame of input latency jitter) and well within ~0.3 s.
+    expect(set.t - t0).toBeGreaterThan(90);
+    expect(set.t - t0).toBeLessThan(400);
+    await page.waitForTimeout(800);
     const recent = await page.evaluate(() => window.__gsTest.registry.getMode("arp").steps.slice(-3).map((s) => s.midi));
-    for (const m of recent) expect(notesOf(4)).toContain(m);
+    for (const m of recent) expect(notesOf(3)).toContain(m);
+    expect(await page.evaluate(() => window.__gsTest.ctx.harmony.voicing)).toBe(3);
   });
 
   test("gate, filter and double time stay locked while pinched, even if height and tilt change", async ({ synthPage: page, setHands }) => {

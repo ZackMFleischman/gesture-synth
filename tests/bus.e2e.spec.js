@@ -1,7 +1,7 @@
 // Signal bus: live checks in the real app via window.__gsTest.bus.
 import { expect } from "@playwright/test";
 import { test } from "./fixtures.js";
-import { leftHand, rightHand } from "./helpers/hands.js";
+import { leftHand, rightHand, masterAt } from "./helpers/hands.js";
 
 test.describe("bus in the app", () => {
   test("chords state appears on the bus while playing", async ({ synthPage: page, setHands }) => {
@@ -18,8 +18,8 @@ test.describe("bus in the app", () => {
     expect(s.values.voicing).toBe(3);
     expect(s.values["chords/octave"]).toBe(false);
     expect(s.values["chords/volume"]).toBeCloseTo(0.75, 5); // right height = chord-voice volume
-    // M1 1.3: `volume` is the master volume from the left height (0.5 -> (0.5 - 0.1) / 0.6).
-    expect(s.values.volume).toBeCloseTo(2 / 3, 3);
+    // M1 1.3: `volume` is the master volume from the left height (0.5 -> MASTER_VOLUME mapping).
+    expect(s.values.volume).toBeCloseTo(masterAt(0.5), 3);
     expect(s.values.filter).toBeCloseTo(0.5, 5);
     expect(s.values["right/height"]).toBeCloseTo(0.75, 5);
     expect(s.values["right/tilt"]).toBeCloseTo(0.5, 5);

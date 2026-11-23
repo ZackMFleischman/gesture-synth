@@ -16,6 +16,7 @@ import { drawEnergy } from "./chords.js";
 import { drawX2Pill, drawBpmPlate } from "../ui/hand-overlays.js";
 import { COLORS, LAYOUT, MOTION, withAlpha, drawPlate } from "../ui/theme.js";
 import { PINCH_LOOKBACK_MS } from "../input/hand-input.js";
+import { CHORD_HOLD_TIME_MS } from "../services/harmony.js";
 
 export const ARP_COLOR = "#4fb3ff"; // placeholder accent (see requirements: mode colors TBD)
 const REBIND_MARGIN = 0.008; // s: steps starting later than now + this can still be re-bound
@@ -38,6 +39,30 @@ export const PINCH_TEMPO = Object.freeze({
   /** The thumb (x2) is ignored this long after a release (the thumb leaves the index finger). */
   THUMB_SETTLE_MS: 300,
 });
+
+// ---------- Voicing hold (UX check 1.6: a pinch never changes the voicing) ----------
+// A new right-hand finger count must be stable before Arp applies it (to scheduled steps and the bus
+// `voicing`): CHORD_HOLD_TIME_MS (100 ms, the original app's gesture hold) for a normal hand. A shape that
+// looks like a pinch forming (index curled, thumb tip near the index tip) waits PINCH_LOOKBACK_MS
+// (300 ms) instead: it reads 3 fingers for a few frames before the pinch is detected, and a 100 ms hold
+// alone would let an approach of > 100 ms through.
+export const VOICING_HOLD = Object.freeze({
+  /** ms a new count must be stable (normal shapes). */
+  MS: CHORD_HOLD_TIME_MS,
+  /** pinchDistance (hand sizes) below which a curled-index shape counts as a pinch approach. */
+  APPROACH_DISTANCE: 0.8,
+});
+
+/** Pure: is this frame a pinch forming (index curled, thumb tip near the index tip, not pinched yet)? */
+export function isPinchApproach(f) {
+  return !!f && !f.pinch && f.fingers?.index === false && typeof f.pinchDistance === "number" &&
+    f.pinchDistance < VOICING_HOLD.APPROACH_DISTANCE;
+}
+
+/** Pure: how long (ms) the count in frame `f` must be stable before it becomes the voicing. */
+export function voicingHoldMs(f) {
+  return isPinchApproach(f) ? Math.max(VOICING_HOLD.MS, PINCH_LOOKBACK_MS) : VOICING_HOLD.MS;
+}
 
 /**
  * Pure: the pinch tempo for a vertical movement of `dyHands` hand sizes (up = +) since the pinch start.
@@ -69,6 +94,7 @@ export function createArpMode() {
   let ret = null; // after a release, until the hand reaches the held gate: { gate, side: -1|0|1|null }
   let tiltFade = null; // { from, t0 } filter crossfade after a release
   let thumbSettleUntil = -Infinity;
+  let voicingCand = null; // { v, since } a right-hand count waiting for the voicing hold
   let shown = null; // tempo visuals after a release: { startBpm, bpm, startY, size, until (ms, linger end) }
   const dblHistory = []; // { t, v } requested double time per frame (restored at a pinch start)
   let drawnTempo = null;
@@ -169,6 +195,7 @@ export function createArpMode() {
     // The pinch shape reads as 3 fingers: restore the voicing from ~PINCH_LOOKBACK_MS before the pinch.
     const v = right.voicingBeforePinch;
     if (v >= 1 && v <= 4) voicing = v;
+    voicingCand = null;
     if (ctx.harmony) ctx.harmony.voicing = voicing;
     // Same for double time (the thumb moves onto the index finger just before the pinch is detected).
     let dbl = null;
@@ -225,6 +252,7 @@ export function createArpMode() {
     tiltFade = null;
     shown = null;
     dblHistory.length = 0;
+    voicingCand = null;
     publishTempo();
   }
 
@@ -298,7 +326,14 @@ export function createArpMode() {
           pinchMove(right);
         } else {
           if (pinch) endPinch(right, t);
-          if (right.voicingCount >= 1 && right.voicingCount <= 4) voicing = right.voicingCount;
+          const vc = right.voicingCount;
+          if (vc >= 1 && vc <= 4 && vc !== voicing) {
+            if (!voicingCand || voicingCand.v !== vc) voicingCand = { v: vc, since: t };
+            if (t - voicingCand.since >= voicingHoldMs(right)) {
+              voicing = vc;
+              voicingCand = null;
+            }
+          } else voicingCand = null;
           if (ctx.harmony) ctx.harmony.voicing = voicing;
           // A screen control listed in `ui/override` wins until the hand moves (the panel decides that).
           const ov = ctx.bus?.get?.("ui/override");

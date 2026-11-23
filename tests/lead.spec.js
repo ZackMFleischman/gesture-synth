@@ -2,9 +2,9 @@
 // labs/lead-lab.html (real services + router, Lead active) with ?mockHands. The pure logic in
 // src/modes/lead-notes.js is unit-tested in lead-notes.unit.spec.js.
 import { expect } from "@playwright/test";
-import { recordAudio, spectrum, peaks, writeWav, rms } from "./helpers/audio.js";
+import { recordAudio, spectrum, peaks, writeWav, rms, captureHealth, retryOnCaptureGlitch } from "./helpers/audio.js";
 import { leftHand, rightHand, pinch, DESKTOP_VIEW } from "./helpers/hands.js";
-import { test, SCREENS, rh, preview, play, setHands, dbg, yFor, settle, setKey, setNoteSet, snapWhen } from "./helpers/lead-lab.js";
+import { test, SCREENS, rh, preview, play, setHands, dbg, yFor, settle, setKey, setNoteSet, snapWhen, openLab } from "./helpers/lead-lab.js";
 import { makeView } from "../src/input/hand-input.js";
 import { triad, rng } from "./helpers/theory.js";
 import { midiToFreq, rangeLow, mod12, OCTAVE_MIN, OCTAVE_MAX, OCTAVE_DEFAULT } from "../src/modes/lead-notes.js";
@@ -477,38 +477,49 @@ test.describe("2.5 octave arrows", () => {
 });
 
 test.describe("audio quality", () => {
-  test("no clicks at note on/off/retrigger; the pitch is right", async ({ lab: page }) => {
-    await setNoteSet(page, 3);
-    const y = 0.5;
-    await setHands(page, preview(y));
-    await settle(page, 100);
-    await page.evaluate(() => { window.__audioCap.chunks = []; window.__audioCap.recording = true; });
-    for (let k = 0; k < 4; k++) {
-      await setHands(page, play(y + k * 0.03));
-      await page.waitForTimeout(220);
-      await setHands(page, preview(y + k * 0.03));
-      await page.waitForTimeout(k % 2 ? 60 : 200);
-    }
-    const { chunks, sampleRate } = await page.evaluate(() => {
-      window.__audioCap.recording = false;
-      return { chunks: window.__audioCap.chunks, sampleRate: window.__audioCap.sampleRate };
+  // A capture glitch (the main-thread tap starved under heavy parallel load) splices the waveform, which
+  // reads exactly like a click; such a failure is retried once (docs/testing.md "Capture glitches").
+  test("no clicks at note on/off/retrigger; the pitch is right", async ({ context }, info) => {
+    await retryOnCaptureGlitch(info, async ({ track }) => {
+      const page = await openLab(context);
+      try {
+        await setNoteSet(page, 3);
+        const y = 0.5;
+        await setHands(page, preview(y));
+        await settle(page, 100);
+        await page.evaluate(() => { window.__audioCap.chunks = []; window.__audioCap.blocks = []; window.__audioCap.recording = true; });
+        for (let k = 0; k < 4; k++) {
+          await setHands(page, play(y + k * 0.03));
+          await page.waitForTimeout(220);
+          await setHands(page, preview(y + k * 0.03));
+          await page.waitForTimeout(k % 2 ? 60 : 200);
+        }
+        const { chunks, blocks, sampleRate } = await page.evaluate(() => {
+          window.__audioCap.recording = false;
+          return { chunks: window.__audioCap.chunks, blocks: window.__audioCap.blocks, sampleRate: window.__audioCap.sampleRate };
+        });
+        const samples = Float32Array.from(chunks.flat());
+        track({ samples, sampleRate, health: captureHealth(blocks, sampleRate) });
+        writeWav(`${AUDIO_DIR}/lead-onoff.wav`, samples, sampleRate);
+        // A click is a sample-to-sample jump far above what the sounding waveform produces. The triangle's
+        // steepest slope is 4*A*f/sr; allow 1.6x of the steady-state max jump.
+        let steadyMax = 0;
+        let allMax = 0;
+        const env = envelope(samples, 240);
+        const peakEnv = Math.max(...env);
+        for (let i = 1; i < samples.length; i++) {
+          const d = Math.abs(samples[i] - samples[i - 1]);
+          allMax = Math.max(allMax, d);
+          const w = Math.floor(i / 240);
+          if (env[w] > 0.9 * peakEnv && env[w - 1] > 0.9 * peakEnv && env[w + 1] > 0.9 * peakEnv) steadyMax = Math.max(steadyMax, d);
+        }
+        expect(steadyMax).toBeGreaterThan(0);
+        expect(allMax / steadyMax, `max jump ${allMax.toFixed(4)} vs steady ${steadyMax.toFixed(4)}`).toBeLessThan(1.6);
+        expect(page.__errors).toEqual([]);
+      } finally {
+        await page.close();
+      }
     });
-    const samples = Float32Array.from(chunks.flat());
-    writeWav(`${AUDIO_DIR}/lead-onoff.wav`, samples, sampleRate);
-    // A click is a sample-to-sample jump far above what the sounding waveform produces. The triangle's
-    // steepest slope is 4*A*f/sr; allow 1.6x of the steady-state max jump.
-    let steadyMax = 0;
-    let allMax = 0;
-    const env = envelope(samples, 240);
-    const peakEnv = Math.max(...env);
-    for (let i = 1; i < samples.length; i++) {
-      const d = Math.abs(samples[i] - samples[i - 1]);
-      allMax = Math.max(allMax, d);
-      const w = Math.floor(i / 240);
-      if (env[w] > 0.9 * peakEnv && env[w - 1] > 0.9 * peakEnv && env[w + 1] > 0.9 * peakEnv) steadyMax = Math.max(steadyMax, d);
-    }
-    expect(steadyMax).toBeGreaterThan(0);
-    expect(allMax / steadyMax, `max jump ${allMax.toFixed(4)} vs steady ${steadyMax.toFixed(4)}`).toBeLessThan(1.6);
   });
 
   test("output peak stays <= 1 (bright tone, open filter, pad + top notes)", async ({ lab: page }) => {

@@ -7,6 +7,8 @@
 //   await rec.track(page, "synth");      // starts capturing; call again for the same slot later
 //   await rec.untrack(page);             // (closing the page also ends it)
 //   await rec.save(browser, "out.webm", { layout: ["synth", "viz"] });
+//   Optional sound track: save(..., { audio: { b64, startMs } }) with a WebM/Opus recording (base64) whose
+//   first sample was captured at epoch ms `startMs` (e.g. MediaRecorder on a MediaStreamDestination in the page).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -40,7 +42,7 @@ export function createScreencast() {
     },
 
     /** Composite slots left-to-right (each scaled to `cellW` wide) and encode in real time. */
-    async save(browser, file, { layout, cellW = 960, cellH = 620, fps = 25 } = {}) {
+    async save(browser, file, { layout, cellW = 960, cellH = 620, fps = 25, audio = null } = {}) {
       const all = layout.flatMap((sl) => slots.get(sl) || []);
       const withData = all.filter((f) => f.data);
       if (!withData.length) throw new Error("no frames captured");
@@ -63,14 +65,39 @@ export function createScreencast() {
           await page.evaluate(({ i, chunk }) => window.__tracks[i].push(...chunk), { i, chunk: tracks[i].slice(j, j + 40) });
         }
       }
-      const b64 = await page.evaluate(async ({ duration, cellW, cellH, fps, labels }) => {
+      if (audio) {
+        for (let j = 0; j < audio.b64.length; j += 4_000_000) {
+          await page.evaluate((part) => (window.__audioB64 = (window.__audioB64 || "") + part), audio.b64.slice(j, j + 4_000_000));
+        }
+      }
+      const audioOffset = audio ? audio.startMs - t0 : 0;
+      const b64 = await page.evaluate(async ({ duration, cellW, cellH, fps, labels, audioOffset }) => {
         const c = document.querySelector("canvas");
         const g = c.getContext("2d");
         const decoded = await Promise.all(window.__tracks.map((tr) => Promise.all(tr.map(async (f) => ({
           t: f.t,
           img: f.data ? await createImageBitmap(await (await fetch(`data:image/jpeg;base64,${f.data}`)).blob()) : null,
         })))));
-        const rec = new MediaRecorder(c.captureStream(fps), { mimeType: "video/webm;codecs=vp8", videoBitsPerSecond: 5_000_000 });
+        const stream = c.captureStream(fps);
+        let startAudio = () => {};
+        if (window.__audioB64) {
+          // Sound track: decode the recording and play it into the recorder in sync with the frames.
+          const ac = new AudioContext();
+          const bin = Uint8Array.from(atob(window.__audioB64), (ch) => ch.charCodeAt(0));
+          const buf = await ac.decodeAudioData(bin.buffer);
+          const dest = ac.createMediaStreamDestination();
+          for (const tr of dest.stream.getAudioTracks()) stream.addTrack(tr);
+          startAudio = () => {
+            const src = ac.createBufferSource();
+            src.buffer = buf;
+            src.connect(dest);
+            const off = audioOffset / 1000;
+            if (off >= 0) src.start(ac.currentTime + off);
+            else src.start(ac.currentTime, -off);
+          };
+        }
+        const mime = window.__audioB64 ? "video/webm;codecs=vp8,opus" : "video/webm;codecs=vp8";
+        const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5_000_000 });
         const chunks = [];
         rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
         const done = new Promise((r) => (rec.onstop = r));
@@ -93,6 +120,7 @@ export function createScreencast() {
         };
         draw(0);
         rec.start(250);
+        startAudio();
         const start = performance.now();
         await new Promise((resolve) => {
           const tick = () => {
@@ -108,7 +136,7 @@ export function createScreencast() {
         let s = "";
         for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode(...buf.subarray(i, i + 0x8000));
         return btoa(s);
-      }, { duration: t1 - t0, cellW, cellH, fps, labels: layout });
+      }, { duration: t1 - t0, cellW, cellH, fps, labels: layout, audioOffset });
       await ctx.close();
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, Buffer.from(b64, "base64"));

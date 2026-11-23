@@ -382,25 +382,30 @@ test("mode plugin: contract fields and right-hand mapping", async ({ page }) => 
     arp.enter(ctx);
     const right = (o) => ({ handedness: "Right", fingers: { thumb: false, index: true, middle: true, ring: false, pinky: false },
       voicingCount: 2, fist: false, pinch: false, height: 0.8, tilt: 1, ...o });
-    arp.update(right({}), ctx);
+    arp.update(right({ t: 880 }), ctx);
+    arp.update(right({ t: 1000 }), ctx); // voicing 2 stable for the hold
     const a = { ...arp.state };
-    arp.update(right({ fingers: { thumb: true }, voicingCount: 3, height: 0.1 }), ctx);
+    // A new finger count applies once it was stable for the voicing hold (100 ms, src/modes/arp.js VOICING_HOLD).
+    arp.update(right({ t: 1050, fingers: { thumb: true }, voicingCount: 3, height: 0.1 }), ctx);
+    const b0 = { ...arp.state };
+    arp.update(right({ t: 1160, fingers: { thumb: true }, voicingCount: 3, height: 0.1 }), ctx);
     const b = { ...arp.state };
     arp.update(null, ctx); // hand gone: last values stay
     const c = { ...arp.state };
-    arp.update(right({ pinch: true, voicingCount: 1, height: 0.9 }), ctx); // pinch holds gate + voicing
+    arp.update(right({ t: 1200, pinch: true, voicingCount: 1, height: 0.9 }), ctx); // pinch holds gate + voicing
     const d = { ...arp.state };
     await new Promise((res) => setTimeout(res, 300));
     const cutoff = ctx.audio.filter.frequency.value;
     const gateOnBus = ctx.bus.get("arp/gate");
     arp.exit();
     ctx.clock.stop();
-    return { fields, a, b, c, d, cutoff, gateOnBus };
+    return { fields, a, b0, b, c, d, cutoff, gateOnBus };
   });
   expect(r.fields).toMatchObject({ id: "arp", name: "Arp", direction: "right" });
   expect(r.fields.color).toMatch(/^#[0-9a-f]{6}$/i);
   expect(r.fields.signals).toContain("arp/gate");
   expect(r.a).toMatchObject({ voicing: 2, gate: 0.8, doubleTime: false });
+  expect(r.b0).toMatchObject({ voicing: 2, gate: 0.1 }); // count not stable yet
   expect(r.b).toMatchObject({ voicing: 3, gate: 0.1, doubleTime: true });
   expect(r.c).toMatchObject({ voicing: 3, gate: 0.1, doubleTime: true });
   expect(r.d).toMatchObject({ voicing: 3, gate: 0.1 });
