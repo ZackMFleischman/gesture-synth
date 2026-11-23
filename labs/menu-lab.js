@@ -8,7 +8,9 @@ const params = new URLSearchParams(location.search);
 const MANUAL = params.has("manualClock");
 
 const ICONS = {
-  chords: "M5 7h14M5 12h14M5 17h14",
+  // three stacked noteheads (a triad) on one stem
+  chords:
+    "M16 4v14M9 18a3 2.3 0 1 0 6 0a3 2.3 0 1 0-6 0M9 12.5a3 2.3 0 1 0 6 0a3 2.3 0 1 0-6 0M9 7a3 2.3 0 1 0 6 0a3 2.3 0 1 0-6 0",
   arp: "M4 18h4v-4h4v-4h4V6h4",
   lead: "M10 18V5l8 3M10 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0",
 };

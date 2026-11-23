@@ -16,25 +16,26 @@ export const MENU_THEME = Object.freeze({
   selectedW: 2,
   rimW: 3,
   rimGap: 4,
-  plateAlpha: 0.34,
+  plateAlpha: 0.45, // dark plate under every arc so accent hues stay true over video
   outlineAlpha: 0.72,
-  approachFill: 0.38,
-  selectedFill: 0.5,
-  dimAlpha: 0.35,
+  approachFill: 0.55,
+  selectedFill: 0.72,
+  dimAlpha: 0.35, // other arcs when one is selected
+  labelDim: 0.5, // other labels' text when one is selected
   labelPx: 14,
-  labelGap: 20, // ring outer edge -> label plate
-  labelQuiet: 0.62,
+  iconPx: 17,
+  labelGap: 14, // ring outer edge (or rim) -> label pill
+  labelQuiet: 0.66,
   hintPx: 12,
-  markerR: 3,
-  markerGap: 10, // ring outer edge -> current-mode dot center
+  markerR: 3, // current-mode dot, sits on the arc's outer edge
   entryR: 2.5,
   fistR: 6,
-  countdownR: 0.42, // x handSize
+  countdownR: 0.33, // x handSize
   countdownW: 3,
   growFrom: 0.55, // ring scale at the start of the grow animation
   tauMs: 40, // easing time constant for highlight changes (~120 ms to settle)
   fillTauMs: 25,
-  edgePad: 10,
+  edgePad: 18,
 });
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
@@ -110,7 +111,7 @@ function roundRect(g, x, y, w, h, r) {
 }
 
 const pathCache = new Map();
-function drawIcon(g, icon, x, y, size, color) {
+function drawIcon(g, icon, x, y, size, color, alpha = 1) {
   if (!icon) return;
   const isPath = /^\s*[Mm]\s*[-\d.]/.test(icon) && typeof Path2D !== "undefined";
   g.save();
@@ -121,10 +122,10 @@ function drawIcon(g, icon, x, y, size, color) {
     g.scale(size / 24, size / 24);
     g.lineCap = "round";
     g.lineJoin = "round";
-    g.lineWidth = 2.6;
-    g.strokeStyle = "rgba(0,0,0,0.45)";
+    g.lineWidth = 3.4;
+    g.strokeStyle = `rgba(0,0,0,${0.35 * alpha})`;
     g.stroke(p);
-    g.lineWidth = 1.8;
+    g.lineWidth = 2.1;
     g.strokeStyle = color;
     g.stroke(p);
   } else {
@@ -180,13 +181,14 @@ export function createMenuRenderer(themeOverrides = {}) {
       }
     } else if (phase === "open") {
       const u = easeOut((now - snap.openedAt) / T.GROW_MS);
-      ringAlpha = u;
+      ringAlpha = u * (snap.tracking ? 1 : 0.7);
       ringScale = TH.growFrom + (1 - TH.growFrom) * u;
     }
 
     const s = snap.handSize * view.scale; // px per hand size
     const R = G.SELECT_R * s * ringScale;
     const ri = G.INNER_R * s * ringScale;
+    const labelStart0 = TH.rimGap + TH.rimW + TH.labelGap; // labels clear the selected rim
     const b = view.bounds;
     const items = snap.items;
 
@@ -222,20 +224,24 @@ export function createMenuRenderer(themeOverrides = {}) {
 
       for (const it of items) {
         let a = anim.get(it.id);
-        if (!a) anim.set(it.id, (a = { fill: 0, sel: 0, hov: 0, dim: 0, vis: 1, lab: TH.labelQuiet }));
+        if (!a) anim.set(it.id, (a = { fill: 0, sel: 0, hov: 0, dim: 0, vis: 1, lab: TH.labelQuiet, push: 0 }));
         const isSel = it.id === snap.selectedId;
         const isHov = it.id === snap.hoverId;
         const fillT = isSel ? 1 : isHov ? clamp01((distPx / ringScale - G.INNER_R * s) / ((G.SELECT_R - G.INNER_R) * s)) : 0;
         const dimT = snap.selectedId && !isSel ? 1 : 0;
-        const visT = flashing && !isSel ? 0 : 1;
         const labT = isSel ? 1 : isHov ? TH.labelQuiet + (1 - TH.labelQuiet) * snap.progress : TH.labelQuiet;
         if (mode === "open" || flashing) {
           a.fill = step(a.fill, fillT, dt, TH.fillTauMs);
           a.sel = step(a.sel, isSel ? 1 : 0, dt, TH.tauMs);
           a.hov = step(a.hov, isHov || isSel ? 1 : 0, dt, TH.tauMs);
           a.dim = step(a.dim, dimT, dt, TH.tauMs);
-          a.vis = flashing ? step(a.vis, visT, dt, 35) : 1;
+          a.vis = flashing ? (isSel ? 1 : Math.min(a.vis, clamp01(1 - confirmT / 60))) : 1;
           a.lab = step(a.lab, labT, dt, TH.tauMs);
+          // keep the label ahead of the fist so the fist never covers it
+          const [ux, uy] = DIR_VEC[it.direction];
+          const along = offPx.x * ux + offPx.y * uy;
+          const pushT = isHov || isSel ? Math.max(0, along + TH.fistR + 6 - (G.SELECT_R * s + labelStart0)) : 0;
+          a.push = step(a.push, pushT, dt, TH.fillTauMs);
         }
       }
 
@@ -247,8 +253,10 @@ export function createMenuRenderer(themeOverrides = {}) {
         const a0 = mid - span / 2;
         const a1 = mid + span / 2;
         const dimF = 1 - (1 - TH.dimAlpha) * a.dim;
-        const alpha = ringAlpha * a.vis * dimF * (1 - postFlash);
-        if (alpha <= 0.002) continue;
+        const base = ringAlpha * a.vis * (1 - postFlash);
+        const alpha = base * dimF;
+        if (base <= 0.002) continue;
+        const isCur = it.id === snap.currentId;
 
         // plate
         sectorPath(g, cx, cy, ri, R, a0, a1, TH.cornerPx);
@@ -259,7 +267,8 @@ export function createMenuRenderer(themeOverrides = {}) {
         if (a.fill > 0.004) {
           const rf = ri + (R - ri) * a.fill;
           sectorPath(g, cx, cy, ri, rf, a0, a1, TH.cornerPx);
-          const fa = TH.approachFill + (TH.selectedFill - TH.approachFill) * a.sel + 0.4 * flash;
+          const selFill = isCur ? TH.approachFill : TH.selectedFill; // "no change" stays quieter
+          const fa = TH.approachFill + (selFill - TH.approachFill) * a.sel + 0.3 * flash;
           g.fillStyle = rgba(col, Math.min(0.95, fa) * alpha);
           g.fill();
         }
@@ -268,47 +277,42 @@ export function createMenuRenderer(themeOverrides = {}) {
         sectorPath(g, cx, cy, ri, R, a0, a1, TH.cornerPx);
         const w = TH.outlineW + (TH.hoverW - TH.outlineW) * a.hov + (TH.selectedW - TH.hoverW) * a.sel;
         g.lineWidth = w + 2;
-        g.strokeStyle = rgba(TH.shadow, 0.28 * alpha);
+        g.strokeStyle = rgba(TH.shadow, 0.28 * alpha * (1 - 0.7 * a.sel));
         g.stroke();
         g.lineWidth = w;
-        g.strokeStyle = a.hov > 0.5 ? rgba(col, alpha) : rgba(TH.ink, TH.outlineAlpha * alpha);
+        // selected: the rim carries the accent, so the arc's own outline steps back
+        g.strokeStyle = a.hov > 0.5 ? rgba(col, alpha * (1 - 0.75 * a.sel)) : rgba(TH.ink, TH.outlineAlpha * alpha);
         g.stroke();
 
         // selected rim with a soft glow
         if (a.sel > 0.01) {
           const rr = R + TH.rimGap + TH.rimW / 2;
           g.save();
-          g.shadowColor = rgba(col, 0.7 * a.sel * alpha);
+          const rimCol = isCur ? TH.ink : col; // selecting the current item = neutral rim, no glow
+          g.shadowColor = rgba(rimCol, (isCur ? 0 : 0.7) * a.sel * alpha);
           g.shadowBlur = 10 + 10 * flash;
           g.beginPath();
           g.arc(cx, cy, rr, a0 + 2 / rr, a1 - 2 / rr);
           g.lineWidth = TH.rimW;
-          g.strokeStyle = rgba(flash > 0.3 ? TH.ink : col, a.sel * alpha);
+          g.strokeStyle = rgba(flash > 0.3 ? TH.ink : rimCol, (isCur ? 0.8 : 1) * a.sel * alpha);
           g.stroke();
           g.restore();
         }
 
-        // icon in the band
-        const iconSize = Math.max(14, Math.min(26, (R - ri) * 0.5));
-        const rm = (ri + R) / 2;
         const [vx, vy] = DIR_VEC[it.direction];
-        const iconCol = rgba(TH.ink, (0.78 + 0.22 * a.hov) * alpha);
-        drawIcon(g, it.icon, cx + vx * rm, cy + vy * rm, iconSize, iconCol);
-
-        // current-mode marker: small dot just outside the arc
-        if (it.id === snap.currentId) {
-          const rd = R + TH.markerGap;
+        // current-mode marker: small dot on the arc's outer edge
+        if (isCur) {
           g.beginPath();
-          g.arc(cx + vx * rd, cy + vy * rd, TH.markerR, 0, Math.PI * 2);
-          g.fillStyle = rgba(TH.ink, 0.95 * alpha);
-          g.strokeStyle = rgba(TH.shadow, 0.5 * alpha);
+          g.arc(cx + vx * R, cy + vy * R, TH.markerR, 0, Math.PI * 2);
           g.lineWidth = 2;
+          g.strokeStyle = rgba(TH.shadow, 0.55 * base);
           g.stroke();
+          g.fillStyle = rgba(TH.ink, base * (1 - 0.4 * a.dim));
           g.fill();
         }
 
         // label outside the ring, in the direction of movement
-        drawLabel(it, cx, cy, a, alpha, col);
+        drawLabel(it, cx, cy, a, base, col);
       }
 
       if (flashing) return;
@@ -355,60 +359,84 @@ export function createMenuRenderer(themeOverrides = {}) {
         g.restore();
       }
 
-      // hint under the ring
+      // hint under the ring (not while fading out)
+      if (mode !== "open") return;
       const sel = items.find((i) => i.id === snap.selectedId);
       let hint = "Move to choose";
       if (!snap.tracking) hint = "Hand lost";
       else if (sel) hint = sel.id === snap.currentId ? "Already active" : "Open hand to confirm";
-      const hasDown = items.some((i) => i.direction === "down");
-      const hy = cy + R + (hasDown ? TH.labelGap + TH.labelPx + 30 : 22);
+      const down = items.find((i) => i.direction === "down");
+      const hy = cy + R + 24 + (down ? labelStart0 + labelBox(down).h : 0);
       g.font = `${sel ? 600 : 500} ${TH.hintPx}px ${TH.font}`;
+      const hw = g.measureText(hint).width + 20;
+      const hh = TH.hintPx + 10;
+      roundRect(g, cx - hw / 2, hy - hh / 2, hw, hh, hh / 2);
+      g.fillStyle = rgba(TH.plate, 0.5 * ringAlpha);
+      g.fill();
+      if (!snap.tracking) {
+        g.lineWidth = 1;
+        g.setLineDash([3, 3]);
+        g.strokeStyle = TH.warn;
+        g.stroke();
+        g.setLineDash([]);
+      }
       g.textAlign = "center";
       g.textBaseline = "middle";
-      g.lineWidth = 3;
-      g.strokeStyle = rgba(TH.shadow, 0.55 * ringAlpha);
-      g.strokeText(hint, cx, hy);
-      g.fillStyle = !snap.tracking ? TH.warn : rgba(TH.ink, (sel ? 0.95 : 0.7) * ringAlpha);
-      g.fillText(hint, cx, hy);
+      g.fillStyle = !snap.tracking ? TH.warn : rgba(TH.ink, (sel ? 0.95 : 0.72) * ringAlpha);
+      g.fillText(hint, cx, hy + 0.5);
     }
 
     function labelBox(it) {
       g.font = labelFont(true);
-      const w = g.measureText(it.label).width + 18;
-      const h = TH.labelPx + 10;
-      return { w, h };
+      const icon = it.icon ? TH.iconPx + 6 : 0;
+      const w = g.measureText(it.label).width + icon + 22;
+      const h = TH.labelPx + 12;
+      return { w, h, icon };
+    }
+
+    /** Icon + label pill, centered at (x, y). */
+    function drawPill(it, x, y, { textA, plateA, strokeCol, bold }) {
+      const { w, h, icon } = labelBox(it);
+      roundRect(g, x - w / 2, y - h / 2, w, h, h / 2);
+      g.fillStyle = rgba(TH.plate, plateA);
+      g.fill();
+      if (strokeCol) {
+        g.lineWidth = 1.25;
+        g.strokeStyle = strokeCol;
+        g.stroke();
+      }
+      const left = x - w / 2 + 11;
+      if (icon) drawIcon(g, it.icon, left + TH.iconPx / 2, y, TH.iconPx, rgba(TH.ink, textA), textA);
+      g.font = labelFont(bold);
+      g.textAlign = "left";
+      g.textBaseline = "middle";
+      g.fillStyle = rgba(TH.ink, textA);
+      g.fillText(it.label, left + icon, y + 0.5);
     }
 
     function drawLabel(it, cx, cy, a, alpha, col) {
       const { w, h } = labelBox(it);
       const [vx, vy] = DIR_VEC[it.direction];
-      const start = R + TH.labelGap;
+      const start = R + labelStart0 + a.push;
       const lx = cx + vx * (start + w / 2);
       const ly = cy + vy * (start + h / 2);
-      const la = a.lab * alpha * (1 - (1 - 0.6) * a.dim);
-      roundRect(g, lx - w / 2, ly - h / 2, w, h, h / 2);
-      g.fillStyle = rgba(TH.plate, (0.42 + 0.2 * a.hov) * alpha);
-      g.fill();
-      if (a.sel > 0.01) {
-        g.lineWidth = 1.25;
-        g.strokeStyle = rgba(col, a.sel * alpha);
-        g.stroke();
-      }
-      g.font = labelFont(a.hov > 0.5 && a.lab > TH.labelQuiet + 0.05);
-      g.textAlign = "center";
-      g.textBaseline = "middle";
-      g.fillStyle = rgba(TH.ink, la);
-      g.fillText(it.label, lx, ly + 0.5);
+      const isCur = it.id === snap.currentId;
+      drawPill(it, lx, ly, {
+        textA: a.lab * alpha * (1 - (1 - TH.labelDim) * a.dim),
+        plateA: (0.5 + 0.15 * a.hov) * alpha,
+        strokeCol: a.sel > 0.01 ? rgba(isCur ? TH.ink : col, a.sel * alpha * (isCur ? 0.6 : 1)) : null,
+        bold: a.hov > 0.5 && a.lab > TH.labelQuiet + 0.05,
+      });
     }
 
     function clampedCenter() {
       const real = view.toCanvas(snap.center);
       const Rf = G.SELECT_R * s; // clamp against the full-size ring so it doesn't drift while growing
-      const ext = { up: Rf + TH.rimGap + TH.rimW, down: Rf + 30, left: Rf + 8, right: Rf + 8 };
+      const ext = { up: Rf + TH.rimGap + TH.rimW, down: Rf + 40, left: Rf + TH.rimGap + TH.rimW, right: Rf + TH.rimGap + TH.rimW };
       for (const it of items) {
         const { w, h } = labelBox(it);
-        const e = Rf + TH.labelGap + (it.direction === "up" || it.direction === "down" ? h : w);
-        ext[it.direction] = Math.max(ext[it.direction], e + (it.direction === "down" ? 30 : 0));
+        const e = Rf + labelStart0 + (it.direction === "up" || it.direction === "down" ? h : w);
+        ext[it.direction] = Math.max(ext[it.direction], e + (it.direction === "down" ? 40 : 0));
       }
       const p = TH.edgePad;
       const fit = (v, lo, hi) => (lo > hi ? (lo + hi) / 2 : Math.max(lo, Math.min(hi, v)));
@@ -423,9 +451,9 @@ export function createMenuRenderer(themeOverrides = {}) {
       const col = hexToRgb(item.color);
       const rc = TH.countdownR * s;
       const hp = view.toCanvas(snap.handPos || snap.center);
-      const m = rc + 8;
+      const m = rc * 1.3 + 8;
       const hx = Math.max(b.x0 + m, Math.min(b.x1 - m, hp.x));
-      const hy = Math.max(b.y0 + m, Math.min(b.y1 - m - 30, hp.y));
+      const hy = Math.max(b.y0 + m, Math.min(b.y1 - m - TH.labelPx - 22, hp.y));
       let u, alpha, r;
       if (mode === "done") {
         const d = clamp01((now - snap.closedAt) / 160);
@@ -437,16 +465,13 @@ export function createMenuRenderer(themeOverrides = {}) {
         if (tc < -60) return; // countdown fades in at the tail of the flash
         u = clamp01(tc / T.COUNTDOWN_MS);
         alpha = clamp01((tc + 60) / 100);
-        r = rc * (1 + 0.6 * (1 - easeOut(u)));
+        r = rc * (1 + 0.3 * (1 - easeOut(u)));
       }
-      // track
+      // single quiet track on a soft dark band, so it reads over any video
       g.beginPath();
       g.arc(hx, hy, r, 0, Math.PI * 2);
-      g.lineWidth = TH.countdownW + 2;
-      g.strokeStyle = rgba(TH.shadow, 0.3 * alpha);
-      g.stroke();
-      g.lineWidth = TH.countdownW;
-      g.strokeStyle = rgba(TH.ink, 0.22 * alpha);
+      g.lineWidth = TH.countdownW + 3;
+      g.strokeStyle = rgba(TH.plate, 0.5 * alpha);
       g.stroke();
       // closing arc
       if (u > 0.001) {
@@ -469,16 +494,14 @@ export function createMenuRenderer(themeOverrides = {}) {
       g.lineWidth = 2;
       g.strokeStyle = rgba(TH.ink, 0.95 * alpha);
       g.stroke();
-      // mode name under the ring
-      g.font = `650 ${TH.labelPx}px ${TH.font}`;
-      g.textAlign = "center";
-      g.textBaseline = "top";
-      const ty = hy + rc * 1.6 + 8;
-      g.lineWidth = 3;
-      g.strokeStyle = rgba(TH.shadow, 0.55 * alpha);
-      g.strokeText(item.label, hx, ty);
-      g.fillStyle = rgba(TH.ink, alpha);
-      g.fillText(item.label, hx, ty);
+      // mode name under the ring, on the same pill as the arc labels
+      const { h } = labelBox(item);
+      drawPill(item, hx, hy + rc * 1.3 + 10 + h / 2, {
+        textA: alpha,
+        plateA: 0.6 * alpha,
+        strokeCol: rgba(col, alpha),
+        bold: true,
+      });
     }
   };
 }

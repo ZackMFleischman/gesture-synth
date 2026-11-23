@@ -344,7 +344,7 @@ test.describe("radial menu lab", () => {
     expect((await step(page, 0)).state).toBe("closed");
     await step(page, 60);
     expect((await step(page, 0)).state).toBe("open");
-    await step(page, 80); // mid-grow
+    await step(page, 16); // mid-grow (ring opened ~20 ms ago)
     await shot(page, "enter");
     await step(page, 200);
     await shot(page, "available");
@@ -360,6 +360,7 @@ test.describe("radial menu lab", () => {
     expect(r.selectedId).toBe("arp");
     await expect(page.locator("#log")).toContainText("tick");
     await shot(page, "selected");
+    await page.screenshot({ path: `${SCREENS_DIR}/menu-selected-crop.png`, clip: { x: 400, y: 230, width: 500, height: 380 } });
 
     await page.mouse.up();
     await step(page, 48);
