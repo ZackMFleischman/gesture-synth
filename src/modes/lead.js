@@ -86,15 +86,21 @@ const footprint = (sz) => sz.edgeInset + sz.lineChord / 2 + sz.arrowSize * 1.35 
  * Ladder geometry in canvas px. side = screen edge of the expression hand ("left" | "right"); inset = safe-area
  * inset on that edge; clear = {top, bottom}: the band of that edge that is free of DOM controls (the arrows stay
  * inside it). `dir` points from the edge inward; `edge` = outer end of the lines, `inner` = inner end of the
- * chord lines.
+ * chord lines. band = {top, bottom} in px: the right hand's vertical reach zone (palm y for height 1 / 0, bus
+ * `right/zone`; src/input/reach-zones.js). With it the arrows sit at the band's ends and the lines between them, so
+ * the whole ladder incl. both arrows is reachable with the whole hand in frame ("the hand is the pointer").
  */
-export function ladderGeometry(W, H, side = "right", inset = 0, clear = null) {
+export function ladderGeometry(W, H, side = "right", inset = 0, clear = null, band = null) {
   const sz = W < NARROW_PX ? SIZE_NARROW : SIZE_WIDE;
   const dir = side === "left" ? 1 : -1;
   const edge = side === "left" ? inset + sz.edgeInset : W - inset - sz.edgeInset;
   const reach = sz.arrowGap + arrowReach(sz) + 6;
   let top = Math.min(LOOK.topPx, Math.round(H * 0.24));
   let bottom = H - LOOK.bottomInset;
+  if (band && band.bottom > band.top) {
+    top = Math.round(band.top + sz.arrowGap);
+    bottom = Math.round(band.bottom - sz.arrowGap);
+  }
   if (clear) {
     top = Math.max(top, Math.ceil(clear.top + reach));
     bottom = Math.min(bottom, Math.floor(clear.bottom - reach));
@@ -182,6 +188,7 @@ const view = {
   regions: [], // [{name, kind: "edge"|"hand", rect}] drawn this frame (layout tests)
   padEl: null, // mouse strip on the ladder (screen control)
   padKey: "",
+  band: null, // the right hand's reach zone (bus `right/zone`, display fractions; last known)
 };
 
 function ensureParams(ctx) {
@@ -531,7 +538,11 @@ const lead = {
     const H = g.canvas.height;
     const sides = ctx?.bus?.get?.("ui/sides");
     const side = sides && sides.expr === "left" ? "left" : "right";
-    const geo = (lastGeo = ladderGeometry(W, H, side, safeInsets()[side], edgeClearance(W, H, side, now)));
+    // Reach zone of the right hand (kept while the hand is lost, so the ladder does not jump).
+    const z = ctx?.bus?.get?.("right/zone");
+    if (z && typeof z.top === "number") view.band = z;
+    const band = view.band ? { top: view.band.top * H, bottom: view.band.bottom * H } : null;
+    const geo = (lastGeo = ladderGeometry(W, H, side, safeInsets()[side], edgeClearance(W, H, side, now), band));
     const sz = geo.sz;
     const dir = geo.dir;
     const alignIn = side === "left" ? "left" : "right"; // labels on the inner side of the ladder

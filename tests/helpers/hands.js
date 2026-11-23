@@ -4,8 +4,9 @@
 // Landmark indices: 0 wrist, 1-4 thumb (cmc, mcp, ip, tip),
 // 5-8 index, 9-12 middle, 13-16 ring, 17-20 pinky (mcp, pip, dip, tip).
 
-import { makeView } from "../../src/input/hand-input.js";
+import { makeView, toDisplay, displayDistance } from "../../src/input/hand-input.js";
 import { MASTER_VOLUME } from "../../src/router.js";
+import { DEFAULT_RANGE, handExtents, zoneFor, yForHeight, xForValue } from "../../src/input/reach-zones.js";
 
 /** Master volume the router maps a left hand at `volume` (= height) to; the default leftHand() is at 0.5. */
 export const masterAt = (volume = 0.5) =>
@@ -23,13 +24,41 @@ const PALM = [0, 5, 9, 13, 17]; // palm-center landmarks (must match hand-input.
 export const DESKTOP_VIEW = makeView(640, 480, 1280, 800);
 export const IDENTITY_VIEW = makeView();
 
+// View used to place a hand at a given `volume` (= HandFrame.height over the reach zone) or `x` when no `view` is
+// passed. Node tests (buildHandFrame's default) use the identity view; tests/fixtures.js sets the page's view
+// (fake camera 640x480 cover-cropped into the viewport) so `volume` means the same height in the app.
+let placeView = IDENTITY_VIEW;
+export function setPlacementView(v) { placeView = v || IDENTITY_VIEW; }
+export const getPlacementView = () => placeView;
+/** The app's view for a viewport (fake camera 640x480). */
+export const viewFor = (w, h) => makeView(640, 480, w, h);
+
+/**
+ * Display-space geometry of landmarks under a view: palm, handSize, reach zone (same math as hand-input.js).
+ * side = screen half for the horizontal band (default: guessed from the palm).
+ */
+export function handGeometry(lm, view = placeView, { side, range = DEFAULT_RANGE } = {}) {
+  const pts = lm.map((p) => toDisplay(p, view));
+  let x = 0, y = 0;
+  for (const i of PALM) { x += pts[i].x; y += pts[i].y; }
+  const pos = { x: x / PALM.length, y: y / PALM.length };
+  const handSize = displayDistance(lm[0], lm[9], view);
+  const ext = handExtents(pts, pos, handSize, view.dstW / view.dstH);
+  const zone = zoneFor(ext, side || (pos.x < 0.5 ? "left" : "right"), range);
+  return { pts, pos, handSize, ext, zone };
+}
+
 /**
  * @param {object} opts
  * @param {"Left"|"Right"} opts.handedness  MediaPipe handedness label
  * @param {string[]} opts.fingers  extended fingers, any of index/middle/ring/pinky
  * @param {boolean} opts.thumb  thumb extended
  * @param {number} opts.tilt  desired output of getHandHorizontalTilt, -1..1
- * @param {number} opts.volume  desired output of getVolumeFromHeight, 0..1 (ignored if `pos` given)
+ * @param {number} opts.volume  desired HandFrame.height, 0..1 over the reach zone (the palm is placed at that height of
+ *   the zone for the placement view: `view` if given, else setPlacementView()'s). Ignored if `pos` is given.
+ * @param {number} opts.x  desired HandFrame.x (0 inner .. 0.5 neutral .. 1 outer of the horizontal band; `side`
+ *   = screen half, default guessed from the palm). Omitted = the default x (0.3 / 0.7 of the image). Ignored with `pos`.
+ * @param {string} opts.range  reach-zone preset for `volume` / `x` (default comfort)
  * @param {boolean} opts.fist  tightly closed hand (index..pinky curled into the palm); thumb still follows `thumb`
  * @param {boolean|number} opts.pinch  thumb tip on the index tip; a number = desired pinchDistance
  *   (thumb-index distance / hand size), `true` = 0.1. Fingers default to middle+ring+pinky (an "OK" sign).
@@ -46,9 +75,14 @@ export function hand({
   fist = false,
   pinch = false,
   pos,
-  view = IDENTITY_VIEW,
+  view,
   scale = 1,
+  x,
+  side,
+  range = DEFAULT_RANGE,
 } = {}) {
+  const pv = view || placeView; // placement view for volume / x
+  view = view || IDENTITY_VIEW;
   if (fingers === undefined) fingers = pinch ? ["middle", "ring", "pinky"] : [];
   if (fist) fingers = [];
 
@@ -95,7 +129,13 @@ export function hand({
     lm[4] = pt(lm[8].x, lm[8].y + d * handSize);
   }
 
-  if (pos) {
+  if (!pos) {
+    // Palm to `volume` (height) over the reach zone, and to `x` across the horizontal band, in the placement view.
+    const geo = handGeometry(lm, pv, { side, range });
+    const dy = (yForHeight(geo.zone, volume) - geo.pos.y) * pv.sHeight / pv.srcH;
+    const dx = x == null ? 0 : -(xForValue(geo.zone, x) - geo.pos.x) * pv.sWidth / pv.srcW; // display x is mirrored
+    for (const p of lm) { p.x += dx; p.y += dy; }
+  } else {
     // Move the whole hand so its palm center lands on `pos` (display space -> image space).
     const px = 1 - pos.x; // un-mirror
     const ix = (view.sx + px * view.sWidth) / view.srcW;
