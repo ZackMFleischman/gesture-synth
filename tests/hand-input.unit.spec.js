@@ -1,4 +1,5 @@
 // Pure-logic tests for src/input/hand-input.js (run in Node, no browser).
+// The app-side geometry check (view + ctx.toCanvas vs drawFrame) is in app-input.e2e.spec.js.
 import { test, expect } from "@playwright/test";
 import {
   buildHandFrame,
@@ -9,7 +10,6 @@ import {
   PINCH_END,
 } from "../src/input/hand-input.js";
 import { createBus } from "../src/core/bus.js";
-import { test as appTest } from "./fixtures.js";
 import { hand, fist, pinch, leftHand, rightHand, results, DESKTOP_VIEW } from "./helpers/hands.js";
 
 const frameOf = (h, opts) => buildHandFrame(h.landmarks, h.handedness, opts);
@@ -170,29 +170,4 @@ test("createHandInput publishes hand values on the bus", () => {
   expect(seen["right/fist"]).toBe(false);
   input.process(results(leftHand(1)), 1);
   expect(seen["right/height"]).toBeNull();
-});
-
-appTest("app view + ctx.toCanvas match drawFrame's mirrored cover crop", async ({ synthPage: page, setHands }) => {
-  await setHands(fist({ pos: { x: 0.25, y: 0.6 }, view: DESKTOP_VIEW }));
-  await expect.poll(() => page.evaluate(() => window.__gsTest.bus.get("right/fist"))).toBe(true);
-  const r = await page.evaluate(() => {
-    const { handInput, ctx, results } = window.__gsTest;
-    const v = handInput.view;
-    // where drawFrame draws the wrist dot (mirrored context => screen x = W - canvasX)
-    const c = document.getElementById("overlay");
-    const p = results.landmarks[0][0];
-    const canvasX = ((p.x * v.srcW - v.sx) / v.sWidth) * c.width;
-    const canvasY = ((p.y * v.srcH - v.sy) / v.sHeight) * c.height;
-    const { right } = handInput.process(results, 0);
-    const wrist = { x: 1 - (p.x * v.srcW - v.sx) / v.sWidth, y: (p.y * v.srcH - v.sy) / v.sHeight };
-    return { view: [v.srcW, v.srcH, v.dstW, v.dstH], dot: { x: c.width - canvasX, y: canvasY },
-      mapped: ctx.toCanvas(wrist), pos: right.pos, palm: ctx.toCanvas(right.pos) };
-  });
-  expect(r.view).toEqual([640, 480, 1280, 800]); // = DESKTOP_VIEW
-  expect(r.mapped.x).toBeCloseTo(r.dot.x, 6);
-  expect(r.mapped.y).toBeCloseTo(r.dot.y, 6);
-  expect(r.pos.x).toBeCloseTo(0.25, 6);
-  expect(r.pos.y).toBeCloseTo(0.6, 6);
-  expect(r.palm.x).toBeCloseTo(320, 3);
-  expect(r.palm.y).toBeCloseTo(480, 3);
 });

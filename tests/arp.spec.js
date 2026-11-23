@@ -4,7 +4,7 @@
 // capture offset.
 import fs from "node:fs";
 import { test, expect, SCREENS_DIR } from "./fixtures.js";
-import { writeWav, et } from "./helpers/audio.js";
+import { writeWav, et, retryOnCaptureGlitch } from "./helpers/audio.js";
 import {
   startRecording, stopRecording, detectOnsets, noteLengths, pitchAt, pitchesAt, hzToMidi,
   peakAbs, clickStats, matchToSchedule, stats,
@@ -61,32 +61,37 @@ for (const { rate, label, step } of [
 ]) {
   test(`timing: 120 BPM ${label} stays on the grid for 10 s (no drift, ±3 ms)`, async ({ page }, info) => {
     test.setTimeout(60_000);
-    await openLab(page, { rate, gate: 0.25 });
-    const r = await record(page, 10_500);
-    const on = detectOnsets(r.samples, r.sampleRate);
-    expect(on.length).toBeGreaterThanOrEqual(Math.floor(10 / step));
+    await retryOnCaptureGlitch(info, async ({ track }) => {
+      await openLab(page, { rate, gate: 0.25 });
+      const r = await record(page, 10_500);
+      track(r); // a failure on a glitched capture is retried once (helpers/audio.js retryOnCaptureGlitch)
+      const on = detectOnsets(r.samples, r.sampleRate);
+      expect(on.length).toBeGreaterThanOrEqual(Math.floor(10 / step));
 
-    // 1) Scheduled times (onStep) are an exact grid.
-    const log = r.stepLog;
-    for (let i = 1; i < log.length; i++) {
-      expect(log[i].i).toBe(log[i - 1].i + 1);
-      expect(Math.abs(log[i].time - log[i - 1].time - step)).toBeLessThan(1e-9);
-    }
-    // 2) Inter-onset intervals in the audio.
-    const ioi = on.slice(1).map((t, i) => t - on[i] - step);
-    // 3) Drift: every onset against the ideal grid from the first onset.
-    const drift = on.map((t, k) => t - on[0] - k * step);
-    // 4) Expected (scheduled) vs actual.
-    const m = matchToSchedule(on, r.steps.map((s) => s.time), r.recStart);
-    const res = { ioi: stats(ioi), drift: stats(drift), vsSchedule: stats(m.errors), captureOffsetMs: m.offset * 1000 };
-    console.log(`[arp timing ${label}] ${on.length} onsets over ${(on.at(-1) - on[0]).toFixed(2)} s`, JSON.stringify(res));
-    info.annotations.push({ type: "timing", description: JSON.stringify(res) });
-    expect(res.ioi.maxAbs).toBeLessThan(TOL);
-    expect(res.drift.maxAbs).toBeLessThan(TOL);
-    expect(res.vsSchedule.maxAbs).toBeLessThan(TOL);
-    expect(Math.abs(drift.at(-1))).toBeLessThan(0.001); // end of the run: < 1 ms
-    checkClean(r.samples, r.sampleRate, on, label);
-    writeWav(`${WAV_DIR}/arp-timing-${label.replace("/", "_")}.wav`, r.samples, r.sampleRate);
+      // 1) Scheduled times (onStep) are an exact grid.
+      const log = r.stepLog;
+      for (let i = 1; i < log.length; i++) {
+        expect(log[i].i).toBe(log[i - 1].i + 1);
+        expect(Math.abs(log[i].time - log[i - 1].time - step)).toBeLessThan(1e-9);
+      }
+      // 2) Inter-onset intervals in the audio.
+      const ioi = on.slice(1).map((t, i) => t - on[i] - step);
+      // 3) Drift: every onset against the ideal grid from the first onset.
+      const drift = on.map((t, k) => t - on[0] - k * step);
+      // 4) Expected (scheduled) vs actual.
+      const m = matchToSchedule(on, r.steps.map((s) => s.time), r.recStart);
+      const res = { ioi: stats(ioi), drift: stats(drift), vsSchedule: stats(m.errors), captureOffsetMs: m.offset * 1000,
+        capture: { blocks: r.health.blocks, samples: r.health.capturedSamples, maxCallbackLagMs: +r.health.maxCallbackLagMs.toFixed(1),
+          discontinuities: r.health.discontinuities.length, lateSteps: r.lateSteps.length } };
+      console.log(`[arp timing ${label}] ${on.length} onsets over ${(on.at(-1) - on[0]).toFixed(2)} s`, JSON.stringify(res));
+      info.annotations.push({ type: "timing", description: JSON.stringify(res) });
+      expect(res.ioi.maxAbs).toBeLessThan(TOL);
+      expect(res.drift.maxAbs).toBeLessThan(TOL);
+      expect(res.vsSchedule.maxAbs).toBeLessThan(TOL);
+      expect(Math.abs(drift.at(-1))).toBeLessThan(0.001); // end of the run: < 1 ms
+      checkClean(r.samples, r.sampleRate, on, label);
+      writeWav(`${WAV_DIR}/arp-timing-${label.replace("/", "_")}.wav`, r.samples, r.sampleRate);
+    });
   });
 }
 
@@ -125,48 +130,51 @@ test("pitches: down / up-down / 2 octaves / minor 7th follow the pattern", async
   }
 });
 
-test("chord change mid-pattern lands on the next step, keeps the rhythm and the pattern position", async ({ page }) => {
-  await openLab(page, { chord: { key: "A", degree: 1, isMajor: true }, voicing: 1, pattern: "up", gate: 0.3 });
-  const recStart = await startRecording(page);
-  // Change the chord ~75% into a step: the next step (~60 ms away) is already scheduled with the old
-  // chord (lookahead 100 ms), so this exercises re-binding scheduled-but-not-sounding steps.
-  const change = await page.evaluate(async () => {
-    const { ctx } = window.__lab;
-    window.__cancels = [];
-    ctx.bus.subscribe({ onEvent: (name, d, t) => name === "note/cancel" && window.__cancels.push(t) });
-    await new Promise((res) => setTimeout(res, 1100));
-    const ac = ctx.audio.ac;
-    for (;;) {
-      const frac = (ctx.clock.beatAt(ac.currentTime) * 2) % 1; // position inside a 1/8 step
-      if (frac > 0.7 && frac < 0.8) break;
-      await new Promise((res) => setTimeout(res, 1));
-    }
-    const t = ac.currentTime;
-    window.__lab.pick({ degree: 4 });
-    return { t, cancels: window.__cancels };
-  }).then((r) => {
-    expect(r.cancels.length, "an already-scheduled step was re-bound").toBe(1);
-    return r.t;
-  });
-  await page.waitForTimeout(1300);
-  const rec = await stopRecording(page);
-  const steps = await page.evaluate(() => window.__lab.arp.steps.map((s) => ({ step: s.step, pos: s.pos, time: s.time, midi: s.midi })));
-  const on = detectOnsets(rec.samples, rec.sampleRate);
-  const m = matchToSchedule(on, steps.map((s) => s.time), recStart);
+test("chord change mid-pattern lands on the next step, keeps the rhythm and the pattern position", async ({ page }, info) => {
+  await retryOnCaptureGlitch(info, async ({ track }) => {
+    await openLab(page, { chord: { key: "A", degree: 1, isMajor: true }, voicing: 1, pattern: "up", gate: 0.3 });
+    const recStart = await startRecording(page);
+    // Change the chord ~75% into a step: the next step (~60 ms away) is already scheduled with the old
+    // chord (lookahead 100 ms), so this exercises re-binding scheduled-but-not-sounding steps.
+    const change = await page.evaluate(async () => {
+      const { ctx } = window.__lab;
+      window.__cancels = [];
+      ctx.bus.subscribe({ onEvent: (name, d, t) => name === "note/cancel" && window.__cancels.push(t) });
+      await new Promise((res) => setTimeout(res, 1100));
+      const ac = ctx.audio.ac;
+      for (;;) {
+        const frac = (ctx.clock.beatAt(ac.currentTime) * 2) % 1; // position inside a 1/8 step
+        if (frac > 0.7 && frac < 0.8) break;
+        await new Promise((res) => setTimeout(res, 1));
+      }
+      const t = ac.currentTime;
+      window.__lab.pick({ degree: 4 });
+      return { t, cancels: window.__cancels };
+    }).then((r) => {
+      expect(r.cancels.length, "an already-scheduled step was re-bound").toBe(1);
+      return r.t;
+    });
+    await page.waitForTimeout(1300);
+    const rec = await stopRecording(page);
+    track(rec); // a failure on a glitched capture is retried once (helpers/audio.js retryOnCaptureGlitch)
+    const steps = await page.evaluate(() => window.__lab.arp.steps.map((s) => ({ step: s.step, pos: s.pos, time: s.time, midi: s.midi })));
+    const on = detectOnsets(rec.samples, rec.sampleRate);
+    const m = matchToSchedule(on, steps.map((s) => s.time), recStart);
 
-  // Rhythm: one onset per step, no gap, no extra onset (all intervals one step ±3 ms).
-  for (let i = 1; i < on.length; i++) expect(Math.abs(on[i] - on[i - 1] - 0.25)).toBeLessThan(TOL);
-  // The first step after the change already plays the new chord, at the continuing pattern position.
-  const firstNew = steps.find((s) => s.time > change);
-  expect(firstNew.time - change).toBeLessThan(0.25);
-  for (const { onset, sched } of m.pairs.slice(0, -1)) {
-    const s = steps.find((x) => x.time === sched);
-    const expected = (s.time < firstNew.time ? A_MAJOR_V1 : D_MAJOR_V1)[s.pos % 4];
-    expect(midiOf(rec.samples, rec.sampleRate, onset - recStart, 4096), `step ${s.step} pos ${s.pos}`).toBe(expected);
-  }
-  // Pattern position is continuous across the change.
-  const around = steps.filter((s) => Math.abs(s.time - firstNew.time) < 0.6);
-  for (let i = 1; i < around.length; i++) expect(around[i].pos).toBe(around[i - 1].pos + 1);
+    // Rhythm: one onset per step, no gap, no extra onset (all intervals one step ±3 ms).
+    for (let i = 1; i < on.length; i++) expect(Math.abs(on[i] - on[i - 1] - 0.25)).toBeLessThan(TOL);
+    // The first step after the change already plays the new chord, at the continuing pattern position.
+    const firstNew = steps.find((s) => s.time > change);
+    expect(firstNew.time - change).toBeLessThan(0.25);
+    for (const { onset, sched } of m.pairs.slice(0, -1)) {
+      const s = steps.find((x) => x.time === sched);
+      const expected = (s.time < firstNew.time ? A_MAJOR_V1 : D_MAJOR_V1)[s.pos % 4];
+      expect(midiOf(rec.samples, rec.sampleRate, onset - recStart, 4096), `step ${s.step} pos ${s.pos}`).toBe(expected);
+    }
+    // Pattern position is continuous across the change.
+    const around = steps.filter((s) => Math.abs(s.time - firstNew.time) < 0.6);
+    for (let i = 1; i < around.length; i++) expect(around[i].pos).toBe(around[i - 1].pos + 1);
+  });
 });
 
 test("gate: low = short plucked notes, high = long overlapping notes", async ({ page }) => {
@@ -204,131 +212,140 @@ test("gate: low = short plucked notes, high = long overlapping notes", async ({ 
   expect(peakAbs(high.samples), "overlapping notes keep headroom").toBeLessThan(0.6);
 });
 
-test("double time: the rate doubles exactly at the next beat", async ({ page }) => {
-  await openLab(page, { rate: 1 / 8, gate: 0.2 });
-  const recStart = await startRecording(page);
-  const req = await page.evaluate(async () => {
-    const { ctx, arp } = window.__lab;
-    const ac = ctx.audio.ac;
-    await new Promise((res) => setTimeout(res, 900));
-    for (;;) {
-      const f = ctx.clock.beatAt(ac.currentTime) % 1;
-      if (f > 0.85 && f < 0.95) break; // 25-75 ms before the beat: its step is already scheduled
-      await new Promise((res) => setTimeout(res, 1));
+test("double time: the rate doubles exactly at the next beat", async ({ page }, info) => {
+  await retryOnCaptureGlitch(info, async ({ track }) => {
+    await openLab(page, { rate: 1 / 8, gate: 0.2 });
+    const recStart = await startRecording(page);
+    const req = await page.evaluate(async () => {
+      const { ctx, arp } = window.__lab;
+      const ac = ctx.audio.ac;
+      await new Promise((res) => setTimeout(res, 900));
+      for (;;) {
+        const f = ctx.clock.beatAt(ac.currentTime) % 1;
+        if (f > 0.85 && f < 0.95) break; // 25-75 ms before the beat: its step is already scheduled
+        await new Promise((res) => setTimeout(res, 1));
+      }
+      const t = ac.currentTime;
+      const beat = ctx.clock.beatAt(t);
+      arp.set({ doubleTime: true });
+      return { t, beat, nextBeat: Math.ceil(beat), nextBeatTime: ctx.clock.nextBeatTime() };
+    });
+    await page.waitForTimeout(1600);
+    const rec = await stopRecording(page);
+    track(rec); // a failure on a glitched capture is retried once (helpers/audio.js retryOnCaptureGlitch)
+    const log = await page.evaluate(() => window.__lab.stepLog);
+    // Clock: 0.5-beat steps up to the boundary, 0.25-beat steps from the boundary on.
+    const boundary = log.find((s) => s.beat === req.nextBeat);
+    expect(boundary, "a step on the next beat").toBeTruthy();
+    expect(Math.abs(boundary.time - req.nextBeatTime)).toBeLessThan(1e-9);
+    // Step lengths from consecutive play times (the beat step's emitted `stepBeats` predates the change:
+    // its start was already scheduled, only its length changed).
+    for (let i = 1; i < log.length; i++) {
+      const prev = log[i - 1];
+      const want = prev.beat < req.nextBeat ? 0.5 : 0.25;
+      expect(log[i].beat - prev.beat, `step at beat ${prev.beat}`).toBe(want);
+      expect(Math.abs(log[i].time - prev.time - want * 0.5)).toBeLessThan(1e-9);
     }
-    const t = ac.currentTime;
-    const beat = ctx.clock.beatAt(t);
-    arp.set({ doubleTime: true });
-    return { t, beat, nextBeat: Math.ceil(beat), nextBeatTime: ctx.clock.nextBeatTime() };
+    // Audio: intervals 250 ms before the boundary, 125 ms from it.
+    const on = detectOnsets(rec.samples, rec.sampleRate);
+    const m = matchToSchedule(on, log.map((s) => s.time), recStart);
+    const bOnset = m.pairs.find((p) => p.sched === boundary.time);
+    expect(bOnset, "an onset at the beat boundary").toBeTruthy();
+    const b = bOnset.onset - recStart;
+    for (let i = 1; i < on.length; i++) {
+      const want = on[i] <= b + 1e-4 ? 0.25 : 0.125;
+      expect(Math.abs(on[i] - on[i - 1] - want), `interval ending at ${on[i].toFixed(3)} (boundary ${b.toFixed(3)})`).toBeLessThan(TOL);
+    }
+    expect(Math.max(...m.errors.map(Math.abs))).toBeLessThan(TOL);
   });
-  await page.waitForTimeout(1600);
-  const rec = await stopRecording(page);
-  const log = await page.evaluate(() => window.__lab.stepLog);
-  // Clock: 0.5-beat steps up to the boundary, 0.25-beat steps from the boundary on.
-  const boundary = log.find((s) => s.beat === req.nextBeat);
-  expect(boundary, "a step on the next beat").toBeTruthy();
-  expect(Math.abs(boundary.time - req.nextBeatTime)).toBeLessThan(1e-9);
-  // Step lengths from consecutive play times (the beat step's emitted `stepBeats` predates the change:
-  // its start was already scheduled, only its length changed).
-  for (let i = 1; i < log.length; i++) {
-    const prev = log[i - 1];
-    const want = prev.beat < req.nextBeat ? 0.5 : 0.25;
-    expect(log[i].beat - prev.beat, `step at beat ${prev.beat}`).toBe(want);
-    expect(Math.abs(log[i].time - prev.time - want * 0.5)).toBeLessThan(1e-9);
-  }
-  // Audio: intervals 250 ms before the boundary, 125 ms from it.
-  const on = detectOnsets(rec.samples, rec.sampleRate);
-  const m = matchToSchedule(on, log.map((s) => s.time), recStart);
-  const bOnset = m.pairs.find((p) => p.sched === boundary.time);
-  expect(bOnset, "an onset at the beat boundary").toBeTruthy();
-  const b = bOnset.onset - recStart;
-  for (let i = 1; i < on.length; i++) {
-    const want = on[i] <= b + 1e-4 ? 0.25 : 0.125;
-    expect(Math.abs(on[i] - on[i - 1] - want), `interval ending at ${on[i].toFixed(3)} (boundary ${b.toFixed(3)})`).toBeLessThan(TOL);
-  }
-  expect(Math.max(...m.errors.map(Math.abs))).toBeLessThan(TOL);
 });
 
-test("tempo change: no lost or doubled step", async ({ page }) => {
-  await openLab(page, { rate: 1 / 8, gate: 0.2 });
-  const recStart = await startRecording(page);
-  const change = await page.evaluate(async () => {
-    await new Promise((res) => setTimeout(res, 1030));
-    const t = window.__lab.ctx.audio.ac.currentTime;
-    window.__lab.arp.set({ bpm: 100 });
-    return t;
+test("tempo change: no lost or doubled step", async ({ page }, info) => {
+  await retryOnCaptureGlitch(info, async ({ track }) => {
+    await openLab(page, { rate: 1 / 8, gate: 0.2 });
+    const recStart = await startRecording(page);
+    const change = await page.evaluate(async () => {
+      await new Promise((res) => setTimeout(res, 1030));
+      const t = window.__lab.ctx.audio.ac.currentTime;
+      window.__lab.arp.set({ bpm: 100 });
+      return t;
+    });
+    await page.waitForTimeout(1500);
+    const rec = await stopRecording(page);
+    track(rec); // a failure on a glitched capture is retried once (helpers/audio.js retryOnCaptureGlitch)
+    const log = await page.evaluate(() => window.__lab.stepLog);
+    // Clock: contiguous indices and beats; intervals are 0.25 s (120) then 0.3 s (100), nothing else.
+    for (let i = 1; i < log.length; i++) {
+      expect(log[i].i).toBe(log[i - 1].i + 1);
+      expect(log[i].beat).toBe(log[i - 1].beat + 0.5);
+      const d = log[i].time - log[i - 1].time;
+      expect(Math.min(Math.abs(d - 0.25), Math.abs(d - 0.3))).toBeLessThan(1e-9);
+      if (log[i - 1].time > change + 0.11) expect(d).toBeCloseTo(0.3, 9);
+    }
+    // Audio: exactly one onset per scheduled step in the window, all on time.
+    const on = detectOnsets(rec.samples, rec.sampleRate);
+    const m = matchToSchedule(on, log.map((s) => s.time), recStart);
+    const inWindow = log.filter((s) => s.time >= m.pairs[0].sched && s.time <= m.pairs.at(-1).sched);
+    const dbg = `onsets ${on.map((t) => (t + recStart).toFixed(4))} | steps ${inWindow.map((s) => s.time.toFixed(4))} | change ${change.toFixed(4)}`;
+    expect(on.length, dbg).toBe(inWindow.length);
+    expect(new Set(m.pairs.map((p) => p.sched)).size).toBe(on.length);
+    expect(Math.max(...m.errors.map(Math.abs))).toBeLessThan(TOL);
+    const ioi = on.slice(1).map((t, i) => t - on[i]);
+    expect(ioi.some((d) => Math.abs(d - 0.3) < TOL)).toBe(true);
+    for (const d of ioi) expect(Math.min(Math.abs(d - 0.25), Math.abs(d - 0.3))).toBeLessThan(TOL);
   });
-  await page.waitForTimeout(1500);
-  const rec = await stopRecording(page);
-  const log = await page.evaluate(() => window.__lab.stepLog);
-  // Clock: contiguous indices and beats; intervals are 0.25 s (120) then 0.3 s (100), nothing else.
-  for (let i = 1; i < log.length; i++) {
-    expect(log[i].i).toBe(log[i - 1].i + 1);
-    expect(log[i].beat).toBe(log[i - 1].beat + 0.5);
-    const d = log[i].time - log[i - 1].time;
-    expect(Math.min(Math.abs(d - 0.25), Math.abs(d - 0.3))).toBeLessThan(1e-9);
-    if (log[i - 1].time > change + 0.11) expect(d).toBeCloseTo(0.3, 9);
-  }
-  // Audio: exactly one onset per scheduled step in the window, all on time.
-  const on = detectOnsets(rec.samples, rec.sampleRate);
-  const m = matchToSchedule(on, log.map((s) => s.time), recStart);
-  const inWindow = log.filter((s) => s.time >= m.pairs[0].sched && s.time <= m.pairs.at(-1).sched);
-  const dbg = `onsets ${on.map((t) => (t + recStart).toFixed(4))} | steps ${inWindow.map((s) => s.time.toFixed(4))} | change ${change.toFixed(4)}`;
-  expect(on.length, dbg).toBe(inWindow.length);
-  expect(new Set(m.pairs.map((p) => p.sched)).size).toBe(on.length);
-  expect(Math.max(...m.errors.map(Math.abs))).toBeLessThan(TOL);
-  const ioi = on.slice(1).map((t, i) => t - on[i]);
-  expect(ioi.some((d) => Math.abs(d - 0.3) < TOL)).toBe(true);
-  for (const d of ioi) expect(Math.min(Math.abs(d - 0.25), Math.abs(d - 0.3))).toBeLessThan(TOL);
 });
 
-test("left fist: the arp rests while the clock keeps counting, then resumes in phase", async ({ page }) => {
-  await openLab(page, { chord: { key: "A", degree: 1, isMajor: true }, voicing: 1, pattern: "up", rate: 1 / 8, gate: 0.25 });
-  const recStart = await startRecording(page);
-  const marks = await page.evaluate(async () => {
-    const lab = window.__lab;
-    const ac = lab.ctx.audio.ac;
-    const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
-    await sleep(700);
-    const restAt = ac.currentTime;
-    lab.pick({ rest: true });
-    await sleep(1100);
-    const resumeAt = ac.currentTime;
-    lab.pick({ rest: false });
-    return { restAt, resumeAt };
+test("left fist: the arp rests while the clock keeps counting, then resumes in phase", async ({ page }, info) => {
+  await retryOnCaptureGlitch(info, async ({ track }) => {
+    await openLab(page, { chord: { key: "A", degree: 1, isMajor: true }, voicing: 1, pattern: "up", rate: 1 / 8, gate: 0.25 });
+    const recStart = await startRecording(page);
+    const marks = await page.evaluate(async () => {
+      const lab = window.__lab;
+      const ac = lab.ctx.audio.ac;
+      const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+      await sleep(700);
+      const restAt = ac.currentTime;
+      lab.pick({ rest: true });
+      await sleep(1100);
+      const resumeAt = ac.currentTime;
+      lab.pick({ rest: false });
+      return { restAt, resumeAt };
+    });
+    await page.waitForTimeout(900);
+    const rec = await stopRecording(page);
+    track(rec); // a failure on a glitched capture is retried once (helpers/audio.js retryOnCaptureGlitch)
+    const steps = await page.evaluate(() => window.__lab.arp.steps.map((s) => ({ step: s.step, pos: s.pos, time: s.time, midi: s.midi })));
+    const log = await page.evaluate(() => window.__lab.stepLog);
+
+    // Clock kept counting at a steady rate through the rest.
+    for (let i = 1; i < log.length; i++) expect(Math.abs(log[i].time - log[i - 1].time - 0.25)).toBeLessThan(1e-9);
+    const rests = steps.filter((s) => s.midi == null);
+    expect(rests.length).toBeGreaterThanOrEqual(3);
+    for (let i = 1; i < steps.length; i++) expect(steps[i].pos).toBe(steps[i - 1].pos + 1);
+
+    // Audio: silence during the rest (after the note that was sounding has ended).
+    const sr = rec.sampleRate;
+    const quietFrom = rests[0].time - recStart;
+    const quietTo = rests.at(-1).time + 0.25 - recStart;
+    let quietPeak = 0;
+    for (let i = Math.round(quietFrom * sr); i < Math.round(quietTo * sr); i++) quietPeak = Math.max(quietPeak, Math.abs(rec.samples[i]));
+    expect(quietPeak).toBeLessThan(0.002);
+
+    // Resumes in phase: every onset (before and after) is on the same grid, and the first note after
+    // the rest plays the pattern note of its step position (as if it had never stopped).
+    const on = detectOnsets(rec.samples, sr);
+    for (const t of on) {
+      const k = (t - on[0]) / 0.25;
+      expect(Math.abs(k - Math.round(k)) * 0.25).toBeLessThan(TOL);
+    }
+    const m = matchToSchedule(on, steps.filter((s) => s.midi != null).map((s) => s.time), recStart);
+    const firstBack = steps.find((s) => s.time > marks.resumeAt && s.midi != null);
+    const pair = m.pairs.find((p) => p.sched === firstBack.time);
+    expect(pair).toBeTruthy();
+    expect(midiOf(rec.samples, sr, pair.onset - recStart, 4096)).toBe(A_MAJOR_V1[firstBack.pos % 4]);
+    expect(firstBack.pos).toBe(firstBack.step); // pattern position == clock step: no restart, no skip
   });
-  await page.waitForTimeout(900);
-  const rec = await stopRecording(page);
-  const steps = await page.evaluate(() => window.__lab.arp.steps.map((s) => ({ step: s.step, pos: s.pos, time: s.time, midi: s.midi })));
-  const log = await page.evaluate(() => window.__lab.stepLog);
-
-  // Clock kept counting at a steady rate through the rest.
-  for (let i = 1; i < log.length; i++) expect(Math.abs(log[i].time - log[i - 1].time - 0.25)).toBeLessThan(1e-9);
-  const rests = steps.filter((s) => s.midi == null);
-  expect(rests.length).toBeGreaterThanOrEqual(3);
-  for (let i = 1; i < steps.length; i++) expect(steps[i].pos).toBe(steps[i - 1].pos + 1);
-
-  // Audio: silence during the rest (after the note that was sounding has ended).
-  const sr = rec.sampleRate;
-  const quietFrom = rests[0].time - recStart;
-  const quietTo = rests.at(-1).time + 0.25 - recStart;
-  let quietPeak = 0;
-  for (let i = Math.round(quietFrom * sr); i < Math.round(quietTo * sr); i++) quietPeak = Math.max(quietPeak, Math.abs(rec.samples[i]));
-  expect(quietPeak).toBeLessThan(0.002);
-
-  // Resumes in phase: every onset (before and after) is on the same grid, and the first note after
-  // the rest plays the pattern note of its step position (as if it had never stopped).
-  const on = detectOnsets(rec.samples, sr);
-  for (const t of on) {
-    const k = (t - on[0]) / 0.25;
-    expect(Math.abs(k - Math.round(k)) * 0.25).toBeLessThan(TOL);
-  }
-  const m = matchToSchedule(on, steps.filter((s) => s.midi != null).map((s) => s.time), recStart);
-  const firstBack = steps.find((s) => s.time > marks.resumeAt && s.midi != null);
-  const pair = m.pairs.find((p) => p.sched === firstBack.time);
-  expect(pair).toBeTruthy();
-  expect(midiOf(rec.samples, sr, pair.onset - recStart, 4096)).toBe(A_MAJOR_V1[firstBack.pos % 4]);
-  expect(firstBack.pos).toBe(firstBack.step); // pattern position == clock step: no restart, no skip
 });
 
 test("bus: notes are published ~100 ms before they play, with their play time", async ({ page }) => {

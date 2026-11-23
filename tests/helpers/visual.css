@@ -1,0 +1,5 @@
+/* Applied only while tests/visual.e2e.spec.js takes a screenshot (toHaveScreenshot stylePath).
+   The canvas shows the fake camera (a moving test pattern) plus the energy wave, which animates with
+   performance.now() and Math.random() by design -- never pixel-stable. Hide it so the baseline covers the
+   DOM chrome only; canvas visuals are asserted structurally (debug APIs, geometry tests) instead. */
+#overlay { visibility: hidden !important; }

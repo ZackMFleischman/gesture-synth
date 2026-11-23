@@ -1,5 +1,5 @@
 // Signal analysis for rhythmic (arp) recordings: onsets, note lengths, per-note pitch, clicks.
-import { spectrum, peaks } from "./audio.js";
+import { spectrum, peaks, captureHealth } from "./audio.js";
 
 /**
  * Starts a recording and returns the AudioContext time at which it started (approximate: the tap's
@@ -8,22 +8,38 @@ import { spectrum, peaks } from "./audio.js";
 export async function startRecording(page) {
   return page.evaluate(() => {
     window.__audioCap.chunks = [];
+    window.__audioCap.blocks = [];
     window.__audioCap.recording = true;
     return window.__lab.ctx.audio.ac.currentTime;
   });
 }
 
+/** Stops the recording. `health` = captureHealth() of the tap blocks (see helpers/audio.js). */
 export async function stopRecording(page) {
-  const { chunks, sampleRate, acEnd } = await page.evaluate(() => {
+  const { chunks, blocks, sampleRate, acEnd, stepLog } = await page.evaluate(() => {
     window.__audioCap.recording = false;
     return {
       chunks: window.__audioCap.chunks,
+      blocks: window.__audioCap.blocks,
       sampleRate: window.__audioCap.sampleRate,
       acEnd: window.__lab.ctx.audio.ac.currentTime,
+      stepLog: window.__lab.stepLog,
     };
   });
-  return { samples: Float32Array.from(chunks.flat()), sampleRate, acEnd };
+  const recStart = blocks.length ? blocks[0].t : acEnd;
+  return { samples: Float32Array.from(chunks.flat()), sampleRate, acEnd, health: captureHealth(blocks, sampleRate),
+    lateSteps: lateSteps(stepLog, recStart, acEnd) };
 }
+
+/**
+ * Steps the clock emitted only after their play time had passed (`at` = ac.currentTime in the onStep
+ * callback, logged by labs/arp-lab.html). The scheduler runs ~75-100 ms ahead, so this only happens when
+ * the main thread was starved for that long: the note then plays late no matter how good the scheduler is.
+ */
+function lateSteps(stepLog = [], from, to) {
+  return stepLog.filter((s) => s.at != null && s.time >= from && s.time <= to && s.at > s.time);
+}
+
 
 /** Onsets = first sample above `thresh` after at least `gap` s below it. Returns seconds. */
 export function detectOnsets(samples, sr, { thresh = 0.004, gap = 0.006 } = {}) {

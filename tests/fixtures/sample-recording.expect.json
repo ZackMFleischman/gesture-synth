@@ -1,0 +1,14 @@
+{
+  "description": "Synthetic example (tests/helpers/replay.js sampleRecording()): left hand degree I throughout; right hand voicing 2, one pinch 1.5-2.7 s with a 0.2 s approach (the finger count drops during the approach: 2 voicing changes), then voicing 2 again.",
+  "expect": {
+    "left.framesSeen": 81,
+    "left.fingerCountChanges": 0,
+    "left.fistStarts": 0,
+    "left.pinchStarts": 0,
+    "right.framesSeen": 81,
+    "right.pinchStarts": 1,
+    "right.pinchEnds": 1,
+    "right.fistStarts": 0,
+    "right.voicingChanges": { "max": 2 }
+  }
+}
