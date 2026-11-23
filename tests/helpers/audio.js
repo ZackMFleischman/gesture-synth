@@ -4,8 +4,12 @@ import path from "node:path";
 // Injected before page scripts run. Every node connected to an AudioContext's
 // destination is routed through a pass-through ScriptProcessor that can record
 // the final mixed output, so tests analyse exactly what the speakers would get.
+// The ScriptProcessor runs on the main thread, so a starved main thread can lose or shift captured
+// blocks. Each recorded block therefore also stores its playbackTime (AudioContext time of its first
+// sample) and the context time when the callback ran; captureHealth() turns these into a glitch report.
+export const TAP_BLOCK = 4096;
 export const AUDIO_TAP_SCRIPT = `(() => {
-  const cap = (window.__audioCap = { recording: false, sampleRate: 0, chunks: [] });
+  const cap = (window.__audioCap = { recording: false, sampleRate: 0, chunks: [], blocks: [] });
   const origConnect = AudioNode.prototype.connect;
   const taps = new WeakMap();
   AudioNode.prototype.connect = function (dest, ...rest) {
@@ -13,11 +17,14 @@ export const AUDIO_TAP_SCRIPT = `(() => {
       const ctx = this.context;
       let tap = taps.get(ctx);
       if (!tap) {
-        tap = ctx.createScriptProcessor(4096, 1, 1);
+        tap = ctx.createScriptProcessor(${TAP_BLOCK}, 1, 1);
         tap.onaudioprocess = (e) => {
           const input = e.inputBuffer.getChannelData(0);
           e.outputBuffer.getChannelData(0).set(input);
-          if (cap.recording) cap.chunks.push(Array.from(input));
+          if (cap.recording) {
+            cap.chunks.push(Array.from(input));
+            cap.blocks.push({ t: e.playbackTime, n: input.length, cbAt: ctx.currentTime });
+          }
         };
         origConnect.call(tap, dest);
         taps.set(ctx, tap);
@@ -29,18 +36,98 @@ export const AUDIO_TAP_SCRIPT = `(() => {
   };
 })();`;
 
-/** Records `ms` of the page's audio output. Returns { samples: Float32Array, sampleRate }. */
+/** Records `ms` of the page's audio output. Returns { samples: Float32Array, sampleRate, health }. */
 export async function recordAudio(page, ms = 900) {
   await page.evaluate(() => {
     window.__audioCap.chunks = [];
+    window.__audioCap.blocks = [];
     window.__audioCap.recording = true;
   });
   await page.waitForTimeout(ms);
-  const { chunks, sampleRate } = await page.evaluate(() => {
+  const { chunks, blocks, sampleRate } = await page.evaluate(() => {
     window.__audioCap.recording = false;
-    return { chunks: window.__audioCap.chunks, sampleRate: window.__audioCap.sampleRate };
+    return { chunks: window.__audioCap.chunks, blocks: window.__audioCap.blocks, sampleRate: window.__audioCap.sampleRate };
   });
-  return { samples: Float32Array.from(chunks.flat()), sampleRate };
+  return { samples: Float32Array.from(chunks.flat()), sampleRate, health: captureHealth(blocks, sampleRate) };
+}
+
+/**
+ * Glitch report for a capture from the tap. A clean capture is gap-free: block k+1 starts exactly where
+ * block k ended (playbackTime + n / sampleRate, within one sample). Anything else means the main thread was
+ * starved and the captured timeline no longer matches the AudioContext timeline, so sample-index timing
+ * measurements on it are meaningless.
+ * @returns {{ ok: boolean, blocks: number, capturedSamples: number, expectedSamples: number,
+ *             discontinuities: {at: number, deltaSamples: number}[], maxCallbackLagMs: number, reason: string }}
+ */
+export function captureHealth(blocks, sampleRate) {
+  const discontinuities = [];
+  let captured = 0;
+  let maxLag = 0;
+  for (let k = 0; k < blocks.length; k++) {
+    const b = blocks[k];
+    captured += b.n;
+    maxLag = Math.max(maxLag, b.cbAt - b.t);
+    if (k > 0) {
+      const want = blocks[k - 1].t + blocks[k - 1].n / sampleRate;
+      const deltaSamples = Math.round((b.t - want) * sampleRate);
+      if (deltaSamples !== 0) discontinuities.push({ at: b.t, deltaSamples });
+    }
+  }
+  const expected = blocks.length ? Math.round((blocks.at(-1).t - blocks[0].t) * sampleRate) + blocks.at(-1).n : 0;
+  const ok = blocks.length > 0 && discontinuities.length === 0 && captured === expected;
+  const reason = ok
+    ? ""
+    : blocks.length === 0
+      ? "no audio blocks captured"
+      : `captured ${captured} samples, timeline spans ${expected}; ${discontinuities.length} discontinuities ` +
+        discontinuities.slice(0, 3).map((d) => `${d.deltaSamples > 0 ? "+" : ""}${d.deltaSamples} samples at ${d.at.toFixed(3)} s`).join(", ");
+  return { ok, blocks: blocks.length, capturedSamples: captured, expectedSamples: expected, discontinuities,
+    maxCallbackLagMs: maxLag * 1000, reason };
+}
+
+/** A timing measurement failed on a glitched capture, twice. See docs/testing.md "Timing tolerance policy". */
+export class CaptureGlitch extends Error {
+  constructor(message, cause) {
+    super(message);
+    this.name = "CaptureGlitch";
+    this.cause = cause;
+  }
+}
+
+/** Why a recording is not trustworthy for timing, or "" if it is clean. */
+export function glitchReason(rec) {
+  const why = [];
+  if (rec.health && !rec.health.ok) why.push(rec.health.reason);
+  if (rec.lateSteps?.length)
+    why.push(`${rec.lateSteps.length} step(s) emitted after their play time (main thread starved), worst ` +
+      `${(Math.max(...rec.lateSteps.map((s) => s.at - s.time)) * 1000).toFixed(1)} ms late`);
+  return why.join("; ");
+}
+
+/**
+ * Runs a timing measurement `fn({ track })`. `fn` must open its own page/lab (so it can run twice) and pass
+ * every recording it measures through `track(rec)`.
+ *   - fn passes                          -> pass (the strict tolerance was met; nothing is retried).
+ *   - fn fails, every capture clean       -> fail immediately: a real timing failure, never retried.
+ *   - fn fails on a glitched capture      -> logged as a capture glitch and run once more; if the second
+ *                                            run also fails on a glitched capture -> CaptureGlitch error.
+ * Tolerances are the same in every attempt; this only decides whether a failure is trustworthy.
+ */
+export async function retryOnCaptureGlitch(testInfo, fn) {
+  for (let attempt = 1; ; attempt++) {
+    const recs = [];
+    try {
+      return await fn({ track: (rec) => (recs.push(rec), rec) });
+    } catch (e) {
+      const why = recs.map(glitchReason).filter(Boolean);
+      if (!why.length) throw e;
+      const first = String(e.message).split("\n").find((l) => l.trim()) || String(e);
+      const msg = `capture glitch (test environment, not a timing result): ${why.join("; ")} | failed on it: ${first}`;
+      testInfo.annotations.push({ type: "capture-glitch", description: msg });
+      console.log(`[capture glitch] attempt ${attempt}: ${msg}`);
+      if (attempt >= 2) throw new CaptureGlitch(`${msg} (twice in a row; rerun on a quieter machine)`, e);
+    }
+  }
 }
 
 export function rms(samples) {
