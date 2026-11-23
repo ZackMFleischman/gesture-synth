@@ -20,9 +20,9 @@ export const BUDGET = Object.freeze({
   /** Collapsed, playing: DOM chrome only. */
   playingDom: 0.06,
   /** Minimal HUD: DOM chrome only. */
-  minimalDom: 0.035,
+  minimalDom: 0.04,
   /** Smallest phones (< 360 px wide): the two edge tracks alone are ~6 % there. */
-  small: { playing: 0.14, playingDom: 0.075, minimalDom: 0.04 },
+  small: { playing: 0.14, playingDom: 0.075, minimalDom: 0.045 },
   /** Minimum touch target edge when expanded (px). */
   touch: 44,
 });

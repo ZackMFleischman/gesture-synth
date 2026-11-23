@@ -65,15 +65,21 @@ body.gs-mobile #gsBar.open {
 #gsPill::after { content: ""; position: absolute; inset: -5px -4px; }
 #gsBar.open #gsPill { height: var(--gs-m-target); border-radius: 22px; padding: 0 14px 0 12px; }
 #gsPill .gs-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--gs-m-accent); flex: none; }
-#gsPill .gs-pill-key { color: #e8a13d; }
+#gsPill .gs-pill-key { color: var(--gs-m-ink); }
 #gsPill .gs-pill-mode { color: var(--gs-m-accent); }
 #gsPill.no-mode .gs-pill-mode { display: none; }
 #gsPill .gs-caret {
   width: 0; height: 0; margin-left: 1px;
-  border-left: 4px solid transparent; border-right: 4px solid transparent;
-  border-top: 5px solid var(--gs-m-ink); opacity: 0.7;
+  border-left: 5px solid transparent; border-right: 5px solid transparent;
+  border-top: 6px solid var(--gs-m-ink);
 }
-#gsBar.open #gsPill .gs-caret { border-top: 0; border-bottom: 5px solid var(--gs-m-ink); }
+#gsBar.open #gsPill .gs-caret { border-top: 0; border-bottom: 6px solid var(--gs-m-ink); }
+/* Minimal HUD on: the collapsed pill says so (the way back is the same pill). */
+#gsPill .gs-pill-min { display: none; }
+body.gs-hud-min #gsPill .gs-pill-min {
+  display: block; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--gs-m-ink); box-sizing: border-box;
+  background: linear-gradient(90deg, var(--gs-m-ink) 50%, transparent 50%); opacity: 0.85;
+}
 body.gs-mobile.gs-playing:not(.gs-bar-open) #gsPill { opacity: 0.8; }
 
 #gsBar .gs-tray-extra, #gsBar .gs-tray-rows { display: none; }
@@ -95,7 +101,9 @@ body.gs-mobile.gs-playing:not(.gs-bar-open) #gsPill { opacity: 0.8; }
 #gsBar #keySelect { min-width: 76px; }
 #gsBar #toneSelect { flex: 1 1 140px; }
 #gsBar #guideToggle, #gsBar #controlsToggle { padding: 0 14px; border-radius: 8px; min-width: 0; flex: 1 1 auto; }
-#gsBar #modeBadge { height: var(--gs-m-target); border-radius: 22px; padding: 0 14px 0 12px; flex: 0 0 auto; }
+/* The mode badge stays in the DOM (hidden): the pill shows the mode, Controls opens the same panel. */
+#gsBar #modeBadge { display: none; }
+#gsBar #modeBadge.gs-keep { display: flex; height: var(--gs-m-target); border-radius: 22px; padding: 0 14px 0 12px; flex: 0 0 auto; }
 #gsBar #helpButton { width: var(--gs-m-target); height: var(--gs-m-target); left: auto; bottom: auto; border-color: var(--gs-m-line); }
 #gsBar #noteSetBadge { position: static; height: 26px; flex: none; }
 #gsHudToggle {
@@ -121,8 +129,8 @@ html body.gs-mobile .vol-bar { width: 34px; height: 3px; border-radius: 1.5px; }
 html body.gs-mobile #distortionDisplay {
   top: calc(var(--gs-m-top) + 44px);
   right: var(--gs-m-right);
-  font-size: 11px;
-  line-height: 15px;
+  font-size: clamp(11px, 1.6vmin, 14px);
+  line-height: 1.35;
   padding: 0 5px;
   border-radius: 4px;
   background: rgba(20, 20, 20, 0.72); /* legible over a bright window */
@@ -144,11 +152,21 @@ html body.gs-mobile #outputPopover { top: calc(var(--gs-m-top) + 40px); right: v
 
 /* ------------------------------------------------------------------ chord + quality (bottom center) */
 /* Text center stays at h-56, where the existing energy wave is drawn. */
-html body.gs-mobile #chordDisplay { font-size: 34px; bottom: 36px; text-shadow: 0 0 10px rgba(232, 161, 61, 0.55), 0 1px 2px rgba(0, 0, 0, 0.8); }
-html body.gs-mobile #qualityDisplay { bottom: 14px; font-size: 11px; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85); }
+html body.gs-mobile #chordDisplay {
+  font-size: clamp(34px, 6vmin, 56px);
+  line-height: 1.12;
+  bottom: calc(56px - 0.56em);
+  /* Hard dark outline first (legible over the bright energy wave), then the existing amber glow. */
+  text-shadow: 0 0 2px #000, 0 0 2px #000, 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 14px rgba(232, 161, 61, 0.5);
+  /* Soft scrim so the bright wave does not run through the letters. */
+  padding: 0 2px;
+  border-radius: 12px;
+  background: radial-gradient(closest-side, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.3) 70%, transparent);
+}
+html body.gs-mobile #qualityDisplay { bottom: 13px; font-size: 12px; text-shadow: 0 0 2px #000, 0 1px 2px rgba(0, 0, 0, 0.9); }
 @media (max-height: 640px) {
-  html body.gs-mobile #chordDisplay { font-size: 28px; bottom: 39px; }
-  html body.gs-mobile #qualityDisplay { bottom: 18px; }
+  html body.gs-mobile #chordDisplay { font-size: 28px; }
+  html body.gs-mobile #qualityDisplay { bottom: 17px; }
 }
 
 /* ------------------------------------------------------------------ transport (Arp) */
@@ -184,17 +202,15 @@ html body.gs-mobile #gestureGuide > .gesture-guide-row:not(.gs-guide-mode) {
   flex: 1 1 0; min-width: 0; flex-direction: column; gap: 0; align-items: center; justify-content: center;
 }
 html body.gs-mobile #gestureGuide .gesture-guide-note { width: auto; font-size: 12px; line-height: 15px; text-align: center; }
-html body.gs-mobile #gestureGuide .gesture-guide-gesture { font-size: 18px; line-height: 22px; }
+html body.gs-mobile #gestureGuide .gesture-guide-gesture { font-size: 22px; line-height: 26px; }
 html body.gs-mobile #gestureGuide .gs-guide-sep { flex: 0 0 100%; margin: 3px 0 2px; }
 html body.gs-mobile #gestureGuide .gs-guide-head { font-size: 11px; margin-right: 2px; }
-html body.gs-mobile #gestureGuide .gesture-guide-row.gs-guide-mode { gap: 3px; flex: 0 0 auto; }
+html body.gs-mobile #gestureGuide .gesture-guide-row.gs-guide-mode { gap: 3px; flex: 0 0 auto; margin-right: 8px; }
 html body.gs-mobile #gestureGuide .gesture-guide-row.gs-guide-mode .gesture-guide-gesture { width: auto; font-size: 14px; line-height: 18px; }
 html body.gs-mobile #gestureGuide .gs-guide-label { font-size: 11px; }
 @media (max-height: 499px) {
   /* Landscape: one row (degrees, then the mode's right-hand rows). */
-  html body.gs-mobile #gestureGuide { flex-wrap: nowrap; align-items: center; }
-  html body.gs-mobile #gestureGuide > .gesture-guide-row:not(.gs-guide-mode) { flex: 0 0 34px; }
-  html body.gs-mobile #gestureGuide .gs-guide-sep { flex: 0 0 1px; align-self: stretch; height: auto; margin: 0 4px; }
+  html body.gs-mobile #gestureGuide { right: auto; width: min(400px, 48vw); box-sizing: border-box; }
 }
 
 body.gs-mobile.gs-guide-open #gsGuideClose { display: flex; }
@@ -203,6 +219,9 @@ body.gs-mobile #gsGuideClose {
   top: calc(var(--gs-m-top) + 64px);
   right: var(--gs-m-right);
   z-index: 6;
+}
+@media (max-height: 499px) {
+  body.gs-mobile #gsGuideClose { right: auto; left: calc(var(--gs-m-left) + min(400px, 48vw) - 46px); }
 }
 
 .gs-close {
@@ -256,13 +275,21 @@ body.gs-mobile #gsControlsSheet {
   cursor: grab;
   flex: none;
 }
+.gs-help-handle::before { content: ""; }
 .gs-sheet-handle, .gs-help-handle::before {
   position: absolute; top: 7px; left: 50%; width: 38px; height: 4px; border-radius: 2px;
   background: rgba(243, 239, 231, 0.35); transform: translateX(-50%);
 }
 .gs-sheet-title { color: #e8a13d; font: 600 15px monospace; flex: 1; }
 .gs-sheet-head .gs-close { display: flex; }
-.gs-sheet-body { overflow-y: auto; overscroll-behavior: contain; padding: 0 18px 16px; }
+.gs-sheet-body {
+  overflow-y: auto; overscroll-behavior: contain; padding: 0 18px 16px;
+  /* Scroll cue: a shade at the bottom edge while more rows are below; the opaque "cover" scrolls with the content
+     and hides it at the end. */
+  background:
+    linear-gradient(rgba(22, 22, 22, 0), rgb(22, 22, 22) 70%) bottom / 100% 28px no-repeat local,
+    linear-gradient(rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.7)) bottom / 100% 22px no-repeat scroll;
+}
 @media (max-height: 499px) {
   body.gs-mobile #gsControlsSheet {
     top: 0; left: auto; bottom: 0;
@@ -274,6 +301,9 @@ body.gs-mobile #gsControlsSheet {
     border-left: 1px solid var(--gs-m-line);
   }
   .gs-sheet-handle { top: 50%; left: 7px; width: 4px; height: 38px; transform: translateY(-50%); }
+  /* The side sheet covers the right side: chord + quality re-center in what is left. */
+  html body.gs-mobile.gs-controls-open #chordDisplay,
+  html body.gs-mobile.gs-controls-open #qualityDisplay { left: calc((100vw - min(400px, 56vw)) / 2); }
 }
 
 /* The modes UI's #controlsPanel, re-homed in the sheet: in flow, no own plate, 44 px targets. */
@@ -287,7 +317,7 @@ html body.gs-mobile #gsControlsSheet #controlsPanel {
   border-radius: 0;
   font-size: 14px;
   grid-template-columns: 92px minmax(0, 1fr);
-  gap: 10px 10px;
+  gap: 4px 10px;
 }
 html body.gs-mobile #gsControlsSheet button,
 html body.gs-mobile #gsControlsSheet select { min-height: var(--gs-m-target); min-width: var(--gs-m-target); font-size: 14px; }
@@ -360,4 +390,10 @@ html body.gs-mobile.gs-hud-min #outputChip:not(.relayed):not([data-state="relaye
 @media (prefers-reduced-motion: no-preference) {
   body.gs-mobile #gsControlsSheet, body.gs-mobile .help-content { transition: transform 180ms ease-out; }
   body.gs-mobile #gsPill { transition: opacity 150ms, height 150ms; }
+}
+
+/* Chip moves to the edge when the meter is not shown (minimal HUD; smallest phones with the modes UI). */
+html body.gs-mobile.gs-hud-min #outputChip { right: var(--gs-m-right); }
+@media (max-width: 359px) {
+  html body.gs-mobile.gs-modes:not(.gs-bar-open) #outputChip { right: var(--gs-m-right); }
 }

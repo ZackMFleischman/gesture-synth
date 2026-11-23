@@ -63,7 +63,7 @@ $("helpModal").addEventListener("click", (e) => e.target === $("helpModal") && $
 const mem = new Map();
 const storage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)) };
 const force = ["mobile", "desktop"].includes(params.get("layout")) ? params.get("layout") : null;
-const mobile = mountMobileUI({ storage, force });
+const mobile = mountMobileUI({ storage, force, intro: false });
 mobile.setPlaying(def.playing);
 if (def.minimal) mobile.setMinimal(true);
 if (def.expand) mobile.expand();

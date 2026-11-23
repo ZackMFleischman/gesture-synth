@@ -123,7 +123,6 @@ const CONTROLS = [
   // [selector inside the expanded bar, what tapping it must do]
   ["#keySelect", "focus"],
   ["#toneSelect", "focus"],
-  ["#modeBadge", "controls"],
   ["#controlsToggle", "controls"],
   ["#guideToggle", "guide"],
   ["#helpButton", "help"],
@@ -135,6 +134,9 @@ for (const [size, vp] of Object.entries(PHONES)) {
     test.use(device(vp));
 
     test("every control is reachable within 2 taps from collapsed", async ({ page }) => {
+      // The mode badge stays in the DOM, hidden in the tray: the pill shows the mode, Controls opens its panel.
+      await openLab(page, "playing-collapsed");
+      expect(await page.locator("#gsBar #modeBadge").count()).toBe(1);
       for (const [sel, effect] of CONTROLS) {
         await openLab(page, "playing-collapsed");
         await expect(page.locator(sel), `${sel} hidden while collapsed`).toBeHidden();
@@ -255,11 +257,11 @@ for (const [size, vp] of Object.entries(PHONES)) {
 
 // =====================================================================================================
 // The mobile system on the REAL app (handlers from controls.js), injected the way Phase B will mount it.
-async function mountInApp(page) {
-  await page.evaluate(async () => {
+async function mountInApp(page, opts = { intro: false }) {
+  await page.evaluate(async (opts) => {
     const m = await import("/src/ui/mobile/mobile-ui.js");
-    window.__mobile = m.mountMobileUI();
-  });
+    window.__mobile = m.mountMobileUI(opts);
+  }, opts);
 }
 
 test.describe("real app + mobile system", () => {
@@ -320,14 +322,27 @@ test.describe("real app + mobile system", () => {
       await expect(page.locator("#gsHudToggle")).toHaveAttribute("aria-pressed", "true");
     });
 
+    test("first visit shows the tray open once; it folds away when hands play", async ({ synthPage: page, setHands }) => {
+      await page.evaluate(() => localStorage.removeItem("gs.mobile.seen"));
+      await mountInApp(page, {});
+      await expect(page.locator("#gsBar")).toHaveClass(/open/);
+      await page.screenshot({ path: `${SCREENS_DIR}/mobile-after-app-intro-390x844.png` });
+      await setHands(leftHand(1), rightHand(1));
+      await page.evaluate(() => window.__mobile.setPlaying(true));
+      await expect(page.locator("#gsBar")).not.toHaveClass(/open/, { timeout: 4000 });
+      await page.evaluate(() => window.__mobile.destroy());
+      await mountInApp(page, {});
+      await expect(page.locator("#gsBar")).not.toHaveClass(/open/);
+    });
+
     test("blocked storage: no errors, toggle still works", async ({ page }) => {
       await page.addInitScript(() => {
         Object.defineProperty(window, "localStorage", { get() { throw new Error("blocked"); } });
       });
       await page.goto("/?mockHands");
       await page.locator("#startOverlay").click();
-      await mountInApp(page);
-      await page.locator("#gsPill").click();
+      await mountInApp(page, {}); // intro on: storage throws, so the tray opens (every load) and nothing breaks
+      await expect(page.locator("#gsBar")).toHaveClass(/open/);
       await page.locator("#gsHudToggle").click();
       await expect(page.locator("body")).toHaveClass(/gs-hud-min/);
     });

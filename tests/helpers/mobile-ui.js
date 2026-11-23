@@ -16,7 +16,7 @@ export const EXISTING = [
 ];
 
 /** Elements a user opens on purpose (exempt from coverage/clear-area while open; must be closable). */
-export const PANELS = ["gestureGuide", "controlsPanel", "helpModal", "gsTray", "gsControlsSheet"];
+export const PANELS = ["gestureGuide", "gsGuideClose", "controlsPanel", "helpModal", "gsControlsSheet"];
 
 /**
  * Visible UI on the page.

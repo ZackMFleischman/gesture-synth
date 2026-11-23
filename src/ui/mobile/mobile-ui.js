@@ -20,6 +20,8 @@ import "./mobile.css";
 /** Layout switch: phones (portrait or landscape) and touch tablets. Desktop (fine pointer, wide) is untouched. */
 export const MOBILE_QUERY = "(max-width: 599px), (max-height: 499px), (pointer: coarse) and (max-width: 1366px)";
 export const HUD_STORAGE_KEY = "gs.mobile.hud";
+/** Set once the bar has been shown open on a first visit (so new players see what the pill holds). */
+export const INTRO_STORAGE_KEY = "gs.mobile.seen";
 /** Bar collapses this long after the last touch on it once hands are playing (ms). */
 export const AUTO_COLLAPSE_MS = 2500;
 /** A hand counts as gone after this long without a position (ms). */
@@ -44,7 +46,7 @@ function safeSet(storage, key, value) {
 
 /**
  * @param {{doc?:Document, win?:Window, bus?:object, storage?:Storage|null, force?:"mobile"|"desktop"|null,
- *          now?:()=>number}} [o]
+ *          intro?:boolean, now?:()=>number}} [o]  intro (default true): open the tray once on a first visit
  * @returns {{isMobile:()=>boolean, expand():void, collapse():void, toggle():void, isOpen:()=>boolean,
  *            setPlaying(on:boolean):void, setMinimal(on:boolean):void, isMinimal:()=>boolean,
  *            openSheet(name:"controls"|"guide"|"help"):void, closeSheets():void, refresh():void, destroy():void}}
@@ -68,10 +70,10 @@ export function mountMobileUI(o = {}) {
   const bar = h("div", { id: "gsBar", "data-gs-mobile": "bar" });
   const head = h("div", { class: "gs-tray-head" });
   const pill = h("button", { id: "gsPill", type: "button", "aria-expanded": "false", "aria-controls": "gsBar", title: "Show controls" },
-    `<span class="gs-dot"></span><span class="gs-pill-key"></span><span class="gs-pill-mode"></span><span class="gs-caret" aria-hidden="true"></span>`);
+    `<span class="gs-dot"></span><span class="gs-pill-key"></span><span class="gs-pill-mode"></span><span class="gs-pill-min" title="Minimal HUD is on"></span><span class="gs-caret" aria-hidden="true"></span>`);
   const extra = h("div", { class: "gs-tray-extra" });
   const hudBtn = h("button", { id: "gsHudToggle", type: "button", "aria-pressed": "false", title: "Minimal HUD: hide everything but the chord" },
-    `<span class="gs-hud-icon" aria-hidden="true"></span><span>Minimal</span>`);
+    `<span class="gs-hud-icon" aria-hidden="true"></span><span class="gs-hud-label">Minimal</span>`);
   const rows = h("div", { class: "gs-tray-rows" });
   const row1 = h("div", { class: "gs-tray-row", "data-row": "sound" });
   const row2 = h("div", { class: "gs-tray-row", "data-row": "views" });
@@ -174,6 +176,7 @@ export function mountMobileUI(o = {}) {
     minimal = !!v;
     body.classList.toggle("gs-hud-min", minimal && mobile);
     hudBtn.setAttribute("aria-pressed", String(minimal));
+    hudBtn.title = minimal ? "Minimal HUD is on: tap for the full HUD" : "Minimal HUD: hide everything but the chord";
     safeSet(storage, HUD_STORAGE_KEY, minimal ? "minimal" : "full");
   }
 
@@ -205,6 +208,7 @@ export function mountMobileUI(o = {}) {
     const guideOpen = !!guide && !guide.classList.contains("hidden");
     const helpOpen = !!$("helpModal") && !$("helpModal").classList.contains("hidden");
     body.classList.toggle("gs-sheet-open", mobile && (panelOpen || helpOpen));
+    body.classList.toggle("gs-controls-open", mobile && panelOpen);
     body.classList.toggle("gs-guide-open", mobile && guideOpen);
     // A panel taking over collapses the bar (closing it returns to collapsed, not expanded).
     if (mobile && open && (panelOpen || guideOpen || helpOpen)) setOpen(false);
@@ -324,6 +328,11 @@ export function mountMobileUI(o = {}) {
   off.push(() => mq.removeEventListener?.("change", onMq));
 
   apply();
+  // First visit: show the tray open once (it folds away by itself when the hands start playing).
+  if (o.intro !== false && mobile && safeGet(storage, INTRO_STORAGE_KEY) !== "1") {
+    safeSet(storage, INTRO_STORAGE_KEY, "1");
+    setOpen(true);
+  }
 
   const api = {
     isMobile: () => mobile,
@@ -351,7 +360,7 @@ export function mountMobileUI(o = {}) {
       moveOut();
       bar.remove();
       sheet.remove();
-      for (const c of ["gs-mobile", "gs-bar-open", "gs-playing", "gs-hud-min", "gs-sheet-open", "gs-guide-open"]) body.classList.remove(c);
+      for (const c of ["gs-mobile", "gs-bar-open", "gs-playing", "gs-hud-min", "gs-sheet-open", "gs-controls-open", "gs-guide-open"]) body.classList.remove(c);
       delete body.__gsMobile;
     },
   };
