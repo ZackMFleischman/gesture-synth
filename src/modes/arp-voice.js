@@ -19,13 +19,15 @@ export const VOICE_DEFAULTS = {
  * @param {AudioContext} ac
  * @param {AudioNode} destination
  * @param {{waveform?: OscillatorType, onNote?: (ev) => void} & Partial<typeof VOICE_DEFAULTS>} opts
- *   onNote({type: "on"|"off", freq, time, id, ...}) is called at schedule time with the play time.
+ *   onNote({type: "on"|"off"|"cancel", freq, time, id, ...}) is called at schedule time with the play time.
+ *   nextId?: () => number — note id source (the app passes ctx.audio.nextNoteId so ids are unique across voices).
  */
 export function createArpVoice(ac, destination, opts = {}) {
   const cfg = { ...VOICE_DEFAULTS, ...opts };
   let waveform = opts.waveform || "triangle";
   let onNote = opts.onNote || null;
-  let nextId = 1;
+  let localId = 1;
+  const newId = typeof opts.nextId === "function" ? opts.nextId : () => localId++;
   const live = new Set();
 
   /**
@@ -62,7 +64,7 @@ export function createArpVoice(ac, destination, opts = {}) {
     osc.start(t0);
     osc.stop(stopAt);
 
-    const id = nextId++;
+    const id = newId();
     const note = { id, freq, time: t0, end, stopAt, osc, gain: g, meta, cancelled: false };
     live.add(note);
     osc.onended = () => {
