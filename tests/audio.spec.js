@@ -53,14 +53,33 @@ test.describe("chords sound the right pitches", () => {
 });
 
 test.describe("expression", () => {
-  test("silent with no right hand, or right hand closed", async ({ synthPage: page, setHands }) => {
+  // M1 meaning change: a closed right hand is no longer a mute. After 100 ms it opens the mode menu,
+  // and Chords holds its last right-hand values while the menu is open. So a fist that appears
+  // without a previous open right hand stays silent (nothing to hold), and a fist made while playing
+  // keeps the chord sounding. No right hand at all is still a rest.
+  test("silent with no right hand; a closed right hand holds (it opens the menu, not a mute)", async ({ synthPage: page, setHands }) => {
     await setHands(leftHand(1));
     await page.waitForTimeout(300);
     expect(rms((await recordAudio(page, 400)).samples)).toBeLessThan(0.001);
 
+    // Fist with no open right hand before it: menu opens, nothing to hold -> still silent.
     await setHands(leftHand(1), rightHand(0));
     await page.waitForTimeout(300);
+    expect(await page.evaluate(() => window.__gsTest.router.rightHeld)).toBe(true);
     expect(rms((await recordAudio(page, 400)).samples)).toBeLessThan(0.001);
+
+    // Playing, then a fist: the chord keeps sounding at the held level.
+    await setHands();
+    await page.waitForTimeout(400); // menu cancels (tracking lost)
+    await setHands(leftHand(1), rightHand(1));
+    await page.waitForTimeout(400);
+    const playing = rms((await recordAudio(page, 300)).samples);
+    await setHands(leftHand(1), rightHand(0));
+    await page.waitForTimeout(300);
+    const held = rms((await recordAudio(page, 300)).samples);
+    expect(playing).toBeGreaterThan(0.05);
+    expect(held / playing).toBeGreaterThan(0.9);
+    expect(held / playing).toBeLessThan(1.1);
   });
 
   test("silent with only a right hand", async ({ synthPage: page, setHands }) => {
@@ -125,12 +144,11 @@ test.describe("expression", () => {
   });
 
   test("output never clips", async ({ synthPage: page, setHands }) => {
-    // KNOWN ISSUE: four full-scale oscillators are summed with gain up to 1, so the
-    // output exceeds ±1 (hard clipping) above ~30% volume. Remove this line once fixed.
-    test.fail();
+    // Fixed in M1: chord oscillators leave headroom and the master has a limiter + soft clipper.
+    // Worst case: right volume 1 and the left hand high (master volume 1).
     let peak = 0;
     for (let i = 0; i < 7; i++) {
-      await setHands(leftHand(i + 1), rightHand((i % 4) + 1, { volume: 1 }));
+      await setHands(leftHand(i + 1, { volume: 0.95 }), rightHand((i % 4) + 1, { volume: 1 }));
       await page.waitForTimeout(250);
       const { samples } = await recordAudio(page, 150);
       for (const s of samples) peak = Math.max(peak, Math.abs(s));

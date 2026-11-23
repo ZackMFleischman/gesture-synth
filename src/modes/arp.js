@@ -12,6 +12,8 @@
 import { createArpVoice } from "./arp-voice.js";
 import { arpNoteAt, midiToHz, PATTERNS, PATTERN_LABELS } from "./arp-patterns.js";
 import { RATES, MIN_BPM, MAX_BPM } from "../services/clock.js";
+import { drawEnergy } from "./chords.js";
+import { drawX2Pill } from "../ui/hand-overlays.js";
 
 export const ARP_COLOR = "#4fb3ff"; // placeholder accent (see requirements: mode colors TBD)
 const REBIND_MARGIN = 0.008; // s: steps starting later than now + this can still be re-bound
@@ -30,7 +32,17 @@ export function createArpMode() {
   const changeListeners = new Set();
   let params = null;
 
+  let tilt = 0;
   const notify = () => changeListeners.forEach((cb) => cb());
+
+  // Chord display / quality read these (Chords publishes them itself; in Arp the chord is the left hand's).
+  function publishChord() {
+    const bus = ctx?.bus;
+    if (!bus) return;
+    bus.set("chord", ctx.harmony.chord ?? null);
+    bus.set("voicing", ctx.harmony.chord ? voicing : 0);
+    bus.set("chords/octave", false);
+  }
 
   function noteKey() {
     const c = ctx.harmony.chord;
@@ -109,9 +121,9 @@ export function createArpMode() {
   function onNote(ev) {
     const bus = ctx?.bus;
     if (!bus) return;
-    if (ev.type === "on") bus.emit("note/on", { midi: ev.midi, voice: "arp", id: ev.id }, ev.time);
-    else if (ev.type === "off") bus.emit("note/off", { midi: ev.midi, voice: "arp", id: ev.id }, ev.time);
-    else bus.emit("note/cancel", { midi: ev.midi, voice: "arp", id: ev.id }, ev.time);
+    const name = ev.type === "on" ? "note/on" : ev.type === "off" ? "note/off" : "note/cancel";
+    if (bus.wants && !bus.wants(name)) return;
+    bus.emit(name, { midi: ev.midi, freq: ev.freq, voice: "arp", id: ev.id }, ev.time);
   }
 
   const mode = {
@@ -127,17 +139,27 @@ export function createArpMode() {
       { name: "arp/rate", type: "state" },
       { name: "arp/double", type: "state" },
       { name: "voicing", type: "state" },
+      { name: "filter", type: "continuous" }, // right tilt (ctx.audio.setFilter publishes it)
+      { name: "chord", type: "state" }, // the left-hand chord (chord display, energy wave)
     ],
     menuItems: [],
+    guide: [["✊", "Menu"], ["↕", "Gate"], ["👍", "Double time"], ["🤏", "Tempo"]],
+    rightTrack: { param: "arp/gate", label: "Gate" },
 
     enter(c) {
       ctx = c;
+      // Coming from another mode via the menu: the voicing is shared (harmony.voicing) and the gate
+      // starts at the locked right-hand height, so the router's crossfade to the live hand is seamless.
+      const hv = ctx.harmony?.voicing;
+      if (hv >= 1 && hv <= 4) voicing = hv;
+      const locked = ctx.rightLocked;
+      const gate0 = locked ? clamp01(locked.height) : params?.gate.value ?? 0.35;
       params = {
-        gate: ctx.param("arp/gate", { type: "continuous", value: params?.gate.value ?? 0.35, min: 0, max: 1 }),
+        gate: ctx.param("arp/gate", { type: "continuous", value: gate0, min: 0, max: 1 }),
         pattern: ctx.param("arp/pattern", { type: "state", value: params?.pattern.value ?? "up" }),
         octaves: ctx.param("arp/octaves", { type: "state", value: params?.octaves.value ?? 1, min: 1, max: 3 }),
       };
-      voice = createArpVoice(ctx.audio.ac, ctx.audio.out, { waveform: ctx.audio.waveform, onNote });
+      voice = createArpVoice(ctx.audio.ac, ctx.audio.out, { waveform: ctx.audio.waveform, onNote, nextId: ctx.audio.nextNoteId });
       unsub = [ctx.clock.onStep(onStep), ctx.clock.onStepChange(onStepChange), ctx.clock.onStop(cancelPending)];
       thumbWas = null;
       if (!ctx.clock.running) ctx.clock.start();
@@ -147,7 +169,7 @@ export function createArpMode() {
       unsub.forEach((u) => u());
       unsub = [];
       cancelPending();
-      voice?.releaseAll(0.08); // sounding notes ring out briefly; the clock keeps running (shared)
+      voice?.releaseAll(0.15); // sounding notes ring out briefly (overlapping the next mode); the clock keeps running (shared)
     },
 
     update(right, c = ctx) {
@@ -158,8 +180,12 @@ export function createArpMode() {
           // Restore the voicing from ~0.3 s before the pinch started (HandInput should provide it).
         } else {
           if (right.voicingCount >= 1 && right.voicingCount <= 4) voicing = right.voicingCount;
-          params.gate.value = clamp01(right.height);
+          if (ctx.harmony) ctx.harmony.voicing = voicing;
+          // A screen control listed in `ui/override` wins until the hand moves (the panel decides that).
+          const ov = ctx.bus?.get?.("ui/override");
+          if (!(Array.isArray(ov) && ov.includes("arp/gate"))) params.gate.value = clamp01(right.height);
           ctx.audio.setFilter(right.tilt);
+          tilt = right.tilt;
           const thumb = !!right.fingers?.thumb;
           if (thumb !== thumbWas) {
             // Edge-triggered so the screen toggle still works while the hand is up.
@@ -171,6 +197,14 @@ export function createArpMode() {
       }
       // Right hand null: keep the last values. Chord null (left fist): steps rest (in onStep).
       rebind();
+      publishChord();
+    },
+
+    /** Menu holds the right hand: keep the locked values; left-hand chord changes still land on the next step. */
+    hold(c = ctx) {
+      ctx = c;
+      rebind();
+      publishChord();
     },
 
     /** Programmatic setters (screen controls, lab). */
@@ -217,6 +251,29 @@ export function createArpMode() {
     },
 
     draw(g, c = ctx) {
+      // The energy wave stays in every mode (docs/ui-integration.md §3): gate = thickness here.
+      const ch = c.harmony?.chord;
+      drawEnergy(g, params?.gate.value ?? 0, ch ? voicing : 0, tilt, ch ? ch.roman : null);
+      // Tempo / beat / step dots are src/ui/transport.js in the app; here only the x2 pill at the hand
+      // (docs/ui-integration.md §6: shown with the thumb out, hidden while the menu holds the hand or the hand is lost).
+      const clock = c.clock;
+      const bus = c.bus;
+      if (!clock || !(clock.doubleTime || clock.doubleTimeActive) || bus.get("right/held")) return;
+      const pos = bus.get("right/pos");
+      const size = bus.get("right/size");
+      if (!pos || !(size > 0)) return;
+      const p = c.toCanvas(pos);
+      drawX2Pill(g, {
+        x: p.x,
+        y: p.y,
+        hs: size * g.canvas.height * 1.9, // hand span in px (same as src/ui/mode-ui.js)
+        color: ARP_COLOR,
+        filled: !!(clock.doubleTimeActive && clock.doubleTime),
+      });
+    },
+
+    /** The old minimal tempo/beat/step bar (labs/arp-lab.html; the app uses src/ui/transport.js). */
+    drawTransport(g, c = ctx) {
       drawArp(g, c, steps);
     },
   };
@@ -285,6 +342,19 @@ function buildControls(mode, container, ctx) {
   const bpm = el("span", { class: "arp-bpm", "data-control": "bpm" });
   minus.addEventListener("click", () => set({ bpm: ctx.clock.bpm - 1 }));
   plus.addEventListener("click", () => set({ bpm: ctx.clock.bpm + 1 }));
+  // Tap tempo: the average interval of the last taps (a pause > 2 s starts over).
+  const tap = el("button", { type: "button", class: "arp-btn", "aria-label": "Tap tempo", text: "Tap", "data-control": "bpm-tap" });
+  const taps = [];
+  tap.addEventListener("click", () => {
+    const t = performance.now();
+    if (taps.length && t - taps[taps.length - 1] > 2000) taps.length = 0;
+    taps.push(t);
+    if (taps.length > 5) taps.shift();
+    if (taps.length >= 2) {
+      const bpmTapped = 60000 / ((taps[taps.length - 1] - taps[0]) / (taps.length - 1));
+      set({ bpm: Math.max(MIN_BPM, Math.min(MAX_BPM, Math.round(bpmTapped))) });
+    }
+  });
 
   const rate = segmented("rate", RATES.map((r) => [r, RATE_LABELS.get(r)]), (r) => set({ rate: r }));
   const pattern = segmented("pattern", PATTERNS.map((p) => [p, PATTERN_LABELS[p]]), (p) => set({ pattern: p }));
@@ -299,7 +369,7 @@ function buildControls(mode, container, ctx) {
   const style = el("style", { text: CONTROLS_CSS });
   const panel = el("div", { class: "arp-controls" }, [
     style,
-    row("Tempo", el("div", { class: "arp-row" }, [minus, bpm, plus])),
+    row("Tempo", el("div", { class: "arp-row" }, [minus, bpm, plus, tap])),
     row("Rate", rate.el),
     row("Pattern", pattern.el),
     row("Octaves", octaves.el),

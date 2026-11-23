@@ -60,5 +60,6 @@ Node lives at `~/.local/node/bin` on this machine (not on the default PATH):
   host (see `src/services/analytics.js`). `tests/analytics.spec.js` asserts nothing is sent locally.
 
 ## Known issues (tracked by tests)
-- Output clips: 4 full-scale oscillators summed at gain ≤1 exceed ±1 above ~30% volume.
-  `audio.spec.js › output never clips` is marked `test.fail()`; remove that when fixed.
+- (fixed in M1) Output clipping: the master now has a limiter + soft clipper; `audio.spec.js › output never clips` passes.
+- Audio-continuity tests record through a main-thread ScriptProcessor tap; under heavy parallel load it can drop a render
+  quantum (spike/gap on a 128-sample join). `tests/m1-integration.spec.js` ignores quantum joins; lab timing tests can flake.

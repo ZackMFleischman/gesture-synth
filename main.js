@@ -3,18 +3,18 @@
 //   shared services (src/services) + signal bus (src/core/bus.js) reach modes through ctx.
 import { setupCamera, setupHandLandmarker } from "./src/input/camera.js";
 
-import { bus, createParam } from "./src/core/bus.js";
+import { bus } from "./src/core/bus.js";
 import { registry, registerMode } from "./src/core/registry.js";
-import { createHandInput, makeView } from "./src/input/hand-input.js";
-import { createRouter } from "./src/router.js";
-import { SynthEngine, createAudioFacade } from "./src/services/audio.js";
-import { createHarmony } from "./src/services/harmony.js";
+import { createAppContext } from "./src/core/app-context.js";
+import { makeView } from "./src/input/hand-input.js";
 import { initAnalytics, trackClarityEvent } from "./src/services/analytics.js";
 import { drawFrame } from "./src/ui/overlay.js";
 import { mountIndicators } from "./src/ui/indicators.js";
 import { mountControls } from "./src/ui/controls.js";
 import { mountModeUI } from "./src/ui/mode-ui.js";
+import { createRadialMenu, playTick } from "./src/menu/radial-menu.js";
 import chordsMode from "./src/modes/chords.js";
+import arpMode from "./src/modes/arp.js";
 import { mountStatusChip } from "./src/output/status-chip.js"; // M3 output hook (see below)
 
 initAnalytics();
@@ -37,32 +37,25 @@ if (import.meta.env.DEV) {
   window.__gsTest = { results: { landmarks: [], handedness: [] } };
 }
 
-// ---- Services ----
-const synth = new SynthEngine({ bus, onFirstSound: () => trackClarityEvent("first_sound") });
-const audio = createAudioFacade(synth);
-const harmony = createHarmony();
-const handInput = createHandInput({ bus });
-
-const ctx = {
-  audio,
-  clock: null, // milestone 1.1 (src/services/clock.js)
-  harmony,
-  bus,
-  param: (name, opts) => createParam(bus, name, { owner: router?.modeId ?? undefined, ...opts }),
-  toCanvas: (p) => ({ x: p.x * canvasEl.width, y: p.y * canvasEl.height }),
-  now: 0,
-  masterVolume: 1, // milestone 1.3: from left height
-};
-
-// Container for the active mode's screen controls (empty for Chords).
+// ---- Services + ctx + router (src/core/app-context.js; the labs use the same wiring) ----
+// Container for the active mode's screen controls (empty for Chords). The router mounts the mode's
+// rows here; the Controls panel (src/ui/controls-panel.js) adopts this node.
 const modeControlsEl = document.createElement("div");
 modeControlsEl.id = "modeControls";
 stageEl.appendChild(modeControlsEl);
 
-const router = createRouter({ bus, registry, harmony, ctx, controlsContainer: modeControlsEl });
+const { synth, audio, harmony, handInput, ctx, router } = createAppContext({
+  bus,
+  registry,
+  canvasEl,
+  controlsContainer: modeControlsEl,
+  onFirstSound: () => trackClarityEvent("first_sound"),
+});
 
 // ---- UI ----
 mountControls({ harmony, audio, synth, canvasEl });
+// indicators.js renders `volume` (now the master) on the meter too; src/ui/readouts.js (mounted with the
+// modes UI below, after it) re-renders the meter from the active mode's rightTrack param.
 mountIndicators(bus);
 
 // ---- OUTPUT HOOK (milestone 3) ----
@@ -72,11 +65,23 @@ const outputChip = mountStatusChip({ bus, ctx, parent: stageEl });
 // ---- end OUTPUT HOOK ----
 
 // ---- Modes ----
+// Menu directions: Chords up, Arp right (Lead left lands in milestone 2; down stays free).
 registerMode(chordsMode);
+registerMode(arpMode);
 router.setMode("chords");
 const modeUI = mountModeUI({ bus, ctx, registry, router, canvas: canvasEl, output: outputChip });
 
+// ---- Radial menu (right fist) ----
+router.setMenu(
+  createRadialMenu({
+    items: () => (audio.ac ? registry.menuItems(router.modeId) : []), // modes need the AudioContext
+    currentId: () => router.modeId,
+    onTick: () => { if (audio.ac) playTick(audio.ac, audio.out); },
+  })
+);
+
 if (import.meta.env.DEV) {
+  window.__gsTest.registry = registry;
   window.__gsTest.synth = synth;
   window.__gsTest.bus = bus;
   window.__gsTest.router = router;
@@ -122,20 +127,25 @@ async function main() {
   // Latest HandFrames; refreshed only when a new video frame arrives.
   let left = null;
   let right = null;
+  let lastResults = { landmarks: [], handedness: [] };
 
   function loop() {
+    // Schedule the next frame first: an exception in one drawing layer must never stop the
+    // router (sound, left hand). It still surfaces as an uncaught error (and fails the tests).
+    requestAnimationFrame(loop);
     const timestampNow = performance.now();
 
-    // 1. New camera frame -> landmarks -> HandFrames (+ draw video and landmark dots)
+    // 1. New camera frame -> landmarks -> HandFrames
     if (videoEl.currentTime !== lastVideoTime) {
       lastVideoTime = videoEl.currentTime;
 
-      const results = handLandmarker.detectForVideo(videoEl, timestampNow);
-      drawFrame(g, videoEl, results, canvasEl.width, canvasEl.height);
-
+      lastResults = handLandmarker.detectForVideo(videoEl, timestampNow);
       syncView();
-      ({ left, right } = handInput.process(results, timestampNow));
+      ({ left, right } = handInput.process(lastResults, timestampNow));
     }
+    // Video + landmark dots are redrawn every animation frame: this clears the canvas, so the
+    // translucent mode/menu drawings below never build up between camera frames.
+    drawFrame(g, videoEl, lastResults, canvasEl.width, canvasEl.height);
 
     // 2. Router: left hand -> chord, right hand -> menu / active mode
     router.update(left, right, timestampNow);
@@ -143,8 +153,6 @@ async function main() {
     // 3. Mode (and menu) drawing on top of the video
     router.draw(g);
     modeUI.draw(g);
-
-    requestAnimationFrame(loop);
   }
 
   loop();

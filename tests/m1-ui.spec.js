@@ -212,12 +212,16 @@ test.describe("modes UI behavior", () => {
     await setHands(...scene(DESKTOP, { rightOpts: { tilt: -0.3 } }));
     await expect(page.locator("#distortionDisplay")).toHaveText("Filter: -30%");
     await expect(page.locator("#distortionDisplay")).toHaveCSS("color", "rgb(79, 179, 255)");
-    await bus.set(page, "menu", { state: "open" });
+    // Real hold (M1 wiring): a right fist opens the menu; Arp publishes `filter` itself, so only a
+    // real hold (mode.update not called) freezes it.
+    await setHands(...scene(DESKTOP, { right: "fist", rightOpts: { tilt: 0.6 } }));
+    await expect.poll(() => bus.get(page, "menu").then((m) => m?.state)).toBe("open");
     await expect(page.locator("#distortionDisplay")).toHaveCSS("opacity", "0.4");
-    await setHands(...scene(DESKTOP, { rightOpts: { tilt: 0.6 } }));
     await frames(page, 4);
     await expect(page.locator("#distortionDisplay")).toHaveText("Filter: -30%"); // frozen while held
-    await bus.set(page, "menu", { state: "closed" });
+    // Open hand in the center zone: the menu cancels and the filter crossfades to the live tilt.
+    await setHands(...scene(DESKTOP, { rightOpts: { tilt: 0.6 } }));
+    await expect.poll(() => bus.get(page, "menu")).toBe(null);
     await expect(page.locator("#distortionDisplay")).toHaveText("Filter: +60%");
   });
 

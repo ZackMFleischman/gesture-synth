@@ -130,3 +130,36 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
   latched for the pinch; null when not pinching. Use it instead of `voicingCount` while `pinch`. Pinch is decided before the
   finger count. Thumb has hysteresis ±THUMB_BAND (0.08 hand sizes) when stateful. Thresholds: `setThresholds()/getThresholds()`.
   New files: `src/input/camera.js`, `src/input/replay.js`, `labs/gesture-test.html`.
+- M1 wiring (ws/m1-wiring):
+  - Audio graph: chord oscillators -> per-chord instance gain -> `chordGain` (Chords' right-height volume, `audio.setVolume`) ->
+    `out` (PRE-FILTER waveshaper; every voice connects here) -> filter -> `master` (left height only, `audio.setMasterVolume`)
+    -> limiter (DynamicsCompressor, -6 dB, 20:1, 1 ms) -> soft clipper (|y| < 0.95) -> destination. Chord oscillators are
+    trimmed to `CHORD_LEVEL` 0.42 each.
+  - ctx.audio adds: `waveform` (getter), `chordGain`, `masterVolume`, `releaseChord(fadeS)` (equal-power fade of the Chords
+    pad; the next `playChord` starts a fresh chord with a 30 ms fade-in), `setMasterVolume(v)` (router only), `nextNoteId()`.
+    `setFilter(tilt)` also publishes `filter`.
+  - ctx: `clock` is a getter: one shared `createClock()` made with the AudioContext (null before the first user gesture);
+    Arp's `enter` starts it, nothing stops it. `masterVolume` 0..1 (router). `rightLocked`: the right HandFrame locked when
+    the menu opened (the last open-hand frame), for `enter()` of the next mode. `src/core/app-context.js` builds services +
+    ctx + router for main.js and the labs alike.
+  - Mode plugin optional `hold(ctx)`: called every frame INSTEAD of `update` while the menu holds the right hand (left hand
+    live: chord changes, master volume). The router never passes a fist frame to a mode (it repeats the last open-hand frame).
+    After the countdown or a cancel, the router crossfades frame `height`/`tilt` from `rightLocked` to the live hand over
+    `RESUME_MS` (200 ms). On confirm: `mode` is set, `old.exit()`, `new.enter()` (same frame = countdown start).
+  - `harmony.voicing` is shared across modes (Chords and Arp read/write it). `VOICING_SEMITONES` / `voicingSemitones()` live in
+    `src/services/harmony.js`; the createChordStabilizer() function has `.prime(state, now)`.
+  - Bus: `volume` = MASTER volume (left height; dead zone 0.04, ~140 ms smoothing, 0 at height <= 0.1, 1 at >= 0.7; 1 before a
+    left hand was seen). Chords' right height = `chords/volume`. `menu` (state): `{state, hoverId, selectedId, progress}` while
+    open/countdown, `null` when closed. `right/held` (state, bool). `bpm` declared at startup. Note events carry
+    `{freq, midi, voice, id}`; `note/on` pairs with `note/off` or `note/cancel` by the globally unique `id`.
+  - Router option `aspect()` (canvas w/h): the menu gets `handSize / aspect` (HandFrame.handSize is in display-HEIGHT units,
+    the menu measures in canvas-WIDTH units).
+  - For the modes UI: `menu` also has `confirmedId` during the countdown; `held` (state) = `{right: true, [rightTrack.param]:
+    heldValue}` while the menu holds the right hand, `{[param]: heldValue}` during the 200 ms crossfade back, else null;
+    hand input publishes `left/size`, `right/size` (handSize, display-height units). `ctx.setMasterVolume(v)` (router) =
+    Controls slider: wins while bus `ui/override` lists `"master"`. Modes skip hand writes for params listed in `ui/override`
+    (Arp: `arp/gate`). Arp publishes `filter` + `chord` + `voicing`; its bottom bar moved to `arp.drawTransport()` (lab only;
+    the app uses src/ui/transport.js); `draw()` = energy wave + x2 pill at the hand (`drawX2Pill`). Tap tempo is in Arp's
+    controls (`data-control="bpm-tap"`).
+  - main.js redraws the video frame every animation frame (no build-up of translucent overlays) and schedules the next frame
+    first, so an exception in a drawing layer never stops the router/sound.

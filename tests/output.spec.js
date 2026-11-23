@@ -11,9 +11,10 @@ const VIDEOS = "test-results/videos";
 const SIGNAL = `ws://localhost:${process.env.PW_SIGNAL_PORT}`;
 const CODE_RE = /^[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{2}$/;
 // On-screen indicators (src/ui/indicators.js) are the one consumer that always exists.
-// On-screen consumers: indicators.js (chord, chords/octave, filter, voicing, volume) and the modes UI
-// (src/ui/mode-ui.js: `mode`, plus the right-track param, = volume in Chords). Everything else is read with bus.get().
-const INDICATOR_SIGNALS = ["chord", "chords/octave", "filter", "mode", "voicing", "volume"];
+// On-screen consumers: indicators.js (chord, chords/octave, filter, voicing, volume = master) and the modes UI
+// (src/ui/mode-ui.js: `mode`, `beat`, plus the right-track param = chords/volume in Chords). Everything else is
+// read with bus.get().
+const INDICATOR_SIGNALS = ["beat", "chord", "chords/octave", "chords/volume", "filter", "mode", "voicing", "volume"];
 
 // Headless Chrome hides local IPs behind mDNS names; resolve them as plain host candidates.
 test.use({
@@ -184,7 +185,9 @@ test("visualizer gets manifest, full state, fast frames, timed events, periodic 
   }));
   expect(cont.ch).toBe("fast");
   expect(Array.isArray(cont.pos) && cont.pos.length === 2).toBe(true);
-  expect(cont.volume).toBeCloseTo(0.4, 1);
+  // M1 1.3: /gs/volume = master volume (left height 0.5 -> 2/3); right height = /gs/chords/volume.
+  expect(cont.volume).toBeCloseTo(2 / 3, 1);
+  expect(await v.page.evaluate(() => window.__viz.cont["/gs/chords/volume"])).toBeCloseTo(0.4, 1);
   expect(cont.filter).toBeCloseTo(-0.5, 1);
   expect(cont.maxKeys).toBeGreaterThanOrEqual(3); // several values batched in one message
 
@@ -193,7 +196,7 @@ test("visualizer gets manifest, full state, fast frames, timed events, periodic 
     const out = [];
     for (const vol of [0.2, 0.9, 0.3, 0.8, 0.5]) {
       const t0 = await s.page.evaluate((r) => { window.__gsTest.results = r; return Date.now(); }, results(leftHand(4), rightHand(3, { volume: vol })));
-      await v.page.waitForFunction((vol) => Math.abs((window.__viz.cont["/gs/volume"] ?? -1) - vol) < 0.02, vol);
+      await v.page.waitForFunction((vol) => Math.abs((window.__viz.cont["/gs/chords/volume"] ?? -1) - vol) < 0.02, vol);
       out.push(Date.now() - t0);
     }
     return out;
@@ -267,22 +270,18 @@ test("beat grid lights up when ctx.clock exists; visualizer beats follow the syn
   const v = await openViz(browser, code);
   await expect(s.page.locator("#outputChip")).toHaveAttribute("data-state", "connected");
   await expect.poll(() => v.page.evaluate(() => window.__viz.snapshots)).toBeGreaterThanOrEqual(1);
-  expect(await v.page.evaluate(() => window.__viz.beatgrid)).toBeNull(); // no clock yet (ctx.clock === null)
+  // M1: ctx.clock always exists once audio is on (shared clock), but it only runs in Arp.
+  expect(await v.page.evaluate(() => window.__viz.beatgrid?.running ?? false)).toBe(false);
 
-  // Stand-in for the Arp clock (milestone 1): 120 BPM on the AudioContext timeline.
+  // Start the shared clock (what Arp's enter() does): 120 BPM on the AudioContext timeline.
   await s.page.evaluate(() => {
-    const ac = window.__gsTest.synth.ctx;
-    const period = 0.5;
-    window.__gsTest.ctx.clock = {
-      bpm: 120,
-      beatsPerBar: 4,
-      nextBeatTime: () => Math.ceil(ac.currentTime / period) * period,
-      beatAt: (t) => Math.round(t / period),
-    };
-    window.__gsTest.bus.declare("bpm", { type: "state", owner: "clock" });
-    window.__gsTest.bus.set("bpm", 120);
+    const clock = window.__gsTest.ctx.clock;
+    clock.bpm = 120;
+    clock.start();
   });
-  await expect.poll(() => v.page.evaluate(() => window.__viz.beatgrid?.bpm)).toBe(120);
+  // The grid is re-sent with the periodic state (the clock start itself is not a bus change).
+  await expect.poll(() => v.page.evaluate(() => window.__viz.beatgrid?.running), { timeout: 5000 }).toBe(true);
+  expect(await v.page.evaluate(() => window.__viz.beatgrid?.bpm)).toBe(120);
   expect(await v.page.evaluate(() => window.__viz.state["/gs/bpm"])).toBe(120);
   await v.page.evaluate(() => (window.__viz.beatsShown.length = 0));
   await v.page.waitForTimeout(2600);
@@ -308,7 +307,7 @@ test("beat grid lights up when ctx.clock exists; visualizer beats follow the syn
     const synthBeatEpoch = await s.page.evaluate(() => {
       const ac = window.__gsTest.synth.ctx;
       const ts = ac.getOutputTimestamp();
-      const next = Math.ceil(ac.currentTime / 0.5) * 0.5;
+      const next = window.__gsTest.ctx.clock.nextBeatTime(); // real shared clock (M1)
       return performance.timeOrigin + ts.performanceTime + (next - ts.contextTime) * 1000;
     });
     const phaseErr = (((synthBeatEpoch - vizBeatEpoch) % 500) + 500) % 500;

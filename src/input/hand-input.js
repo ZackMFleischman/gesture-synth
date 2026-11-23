@@ -310,8 +310,8 @@ export function buildHandFrame(landmarks, handedness, {
 
 // Bus names published by hand input (precomputed: no string building per frame).
 const SIDE_SIGNALS = {
-  Left: { height: "left/height", tilt: "left/tilt", pos: "left/pos", fist: "left/fist", pinch: "left/pinch" },
-  Right: { height: "right/height", tilt: "right/tilt", pos: "right/pos", fist: "right/fist", pinch: "right/pinch" },
+  Left: { height: "left/height", tilt: "left/tilt", pos: "left/pos", fist: "left/fist", pinch: "left/pinch", size: "left/size" },
+  Right: { height: "right/height", tilt: "right/tilt", pos: "right/pos", fist: "right/fist", pinch: "right/pinch", size: "right/size" },
 };
 
 const HISTORY_MS = 1000; // voicing history kept per hand (must exceed PINCH_LOOKBACK_MS)
@@ -346,6 +346,7 @@ export function createHandInput({ bus = sharedBus } = {}) {
     bus.declare(side.pos, { type: "continuous", owner: "hand-input" });
     bus.declare(side.fist, { type: "state", owner: "hand-input" });
     bus.declare(side.pinch, { type: "state", owner: "hand-input" });
+    bus.declare(side.size, { type: "continuous", owner: "hand-input" }); // handSize, display-height units
   }
 
   const state = { Left: newHandState(), Right: newHandState() };
@@ -375,6 +376,7 @@ export function createHandInput({ bus = sharedBus } = {}) {
     bus.set(s.pos, f ? f.pos : null);
     bus.set(s.fist, f ? f.fist : false);
     bus.set(s.pinch, f ? f.pinch : false);
+    bus.set(s.size, f ? f.handSize : null);
   }
 
   return {

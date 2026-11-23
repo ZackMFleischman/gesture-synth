@@ -1,30 +1,13 @@
 // Pure arp music logic: which notes a chord gives, and which of them each step plays.
 // No DOM / Web Audio here, so it runs in Node tests.
 
+import { voicingSemitones } from "../services/harmony.js";
+
 export const PATTERNS = ["up", "down", "updown", "random"];
 export const PATTERN_LABELS = { up: "Up", down: "Down", updown: "Up-down", random: "Random" };
 
-// The 4 right-hand voicings of Chords mode (main.js getChordTones + getSolidNotes), as semitones
-// above the chord root. TODO(harmony): move to src/services/harmony.js and share with Chords.
-const VOICINGS = {
-  major: {
-    1: [0, 7, 12, 16], // root, fifth, octave, octave third
-    2: [4, 7, 12, 16], // 1st inversion
-    3: [0, 4, 7, 11], // maj7
-    4: [0, 4, 7, 10], // dominant 7
-  },
-  minor: {
-    1: [0, 7, 12, 15],
-    2: [3, 7, 12, 15],
-    3: [0, 3, 7, 10], // m7
-    4: [0, 3, 6, 9], // dim7
-  },
-};
-
-export function voicingSemitones(isMajor, voicing) {
-  const v = Math.max(1, Math.min(4, Math.round(voicing) || 1));
-  return VOICINGS[isMajor ? "major" : "minor"][v];
-}
+// The voicing table lives in the harmony service (shared with Chords).
+export { voicingSemitones };
 
 export const midiToHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
