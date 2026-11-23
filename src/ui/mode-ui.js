@@ -14,6 +14,10 @@
 // their producers stay free: left|right/{pos,height,size,pinch,tilt}, menu (fallback:
 // router.menu.snapshot()), held ({right?:bool, [param]: heldValue}), bpm, arp/rate, arp/double,
 // lead/noteset. Missing signals degrade gracefully.
+// Lead layer (docs/architecture.md "Lead layer"): bus `mode` = the base (Chords / Arp), `layer` = "lead" | null.
+// S.modeId / S.mode / S.rightTrack / S.color describe the mode the RIGHT hand drives (the layer while it is on);
+// S.baseId / S.base / S.baseRightTrack the base underneath; S.layerId the layer. body[data-mode] = base,
+// body[data-layer] = layer (+ class gs-layer); --gs-mode = the right-hand mode's color, --gs-base-mode = the base's.
 // Publishes: ui/override (state: names of screen controls currently winning over the hand);
 //   ui/sides (state: {chord, expr} = screen edge of the chord hand / of the right-hand control), so a mode
 //   that draws its own edge control (Lead's ladder) can put it on the expression side.
@@ -58,6 +62,14 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
 
   /** Shared, read-only for the sub-modules (they get it as `S`). */
   const S = {
+    baseId: null,
+    base: null,
+    baseName: "",
+    baseColor: MODE_COLORS.chords,
+    baseRightTrack: DEFAULT_RIGHT_TRACK.chords,
+    layerId: null,
+    /** What the 8-bar meter shows: the right-hand mode's track, else (Lead layer) the base's held one. */
+    meterTrack: DEFAULT_RIGHT_TRACK.chords,
     modeId: null,
     name: "",
     mode: null,
@@ -103,19 +115,36 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
 
   const listeners = new Set(); // sub-module hooks: fn(kind: "set"|"event", name, value, playTime)
 
-  function applyMode(id) {
-    if (!id) return;
-    const mode = registry?.getMode?.(id) || null;
+  const trackOf = (mode, id) => (mode && "rightTrack" in mode ? mode.rightTrack : DEFAULT_RIGHT_TRACK[id] || null);
+  const nameOf = (mode, id) => mode?.name || id[0].toUpperCase() + id.slice(1);
+
+  /** base = bus `mode`, layer = bus `layer` (Lead on top of the base) or null. */
+  function applyMode(baseId, layerId = S.layerId) {
+    if (!baseId) return;
+    const base = registry?.getMode?.(baseId) || null;
+    S.baseId = baseId;
+    S.base = base;
+    S.baseName = nameOf(base, baseId);
+    S.baseColor = MODE_COLORS[baseId] || base?.color || MODE_COLORS.chords;
+    S.baseRightTrack = trackOf(base, baseId);
+    S.layerId = layerId || null;
+    const id = S.layerId || baseId; // the mode the right hand drives
+    const mode = S.layerId ? registry?.getMode?.(id) || null : base;
     if (id !== S.modeId) S.overrides.clear(); // a screen value never carries into another mode
     S.modeId = id;
     S.mode = mode;
-    S.name = mode?.name || id[0].toUpperCase() + id.slice(1);
+    S.name = nameOf(mode, id);
     S.color = MODE_COLORS[id] || mode?.color || MODE_COLORS.chords;
-    S.rightTrack = mode && "rightTrack" in mode ? mode.rightTrack : DEFAULT_RIGHT_TRACK[id] || null;
-    body.dataset.mode = id;
+    S.rightTrack = trackOf(mode, id);
+    S.meterTrack = S.rightTrack || (S.layerId ? S.baseRightTrack : null);
+    body.dataset.mode = baseId;
+    if (S.layerId) body.dataset.layer = S.layerId;
+    else delete body.dataset.layer;
+    body.classList.toggle("gs-layer", !!S.layerId);
     if (MODE_COLORS[id]) body.style.removeProperty("--gs-mode");
     else body.style.setProperty("--gs-mode", S.color);
-    body.classList.toggle("gs-no-right-track", !S.rightTrack);
+    body.style.setProperty("--gs-base-mode", S.baseColor);
+    body.classList.toggle("gs-no-right-track", !S.meterTrack);
   }
 
   function setHand(side, field, v) {
@@ -178,20 +207,21 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
     {
       onSet(name, v) {
         if (name === "mode") applyMode(v);
+        else if (name === "layer") applyMode(S.baseId || bus.get("mode") || router?.modeId, v);
         listeners.forEach((fn) => fn("set", name, v));
       },
       onEvent(name, data, playTime) {
         listeners.forEach((fn) => fn("event", name, data, playTime));
       },
     },
-    ["mode", "beat"]
+    ["mode", "layer", "beat"]
   );
   function pollHands() {
     for (const name in HAND_SIGNALS) setHand(...HAND_SIGNALS[name], bus.get(name) ?? null);
   }
 
   // Initial values (signals published before we subscribed).
-  applyMode(bus.get("mode") || router?.modeId || "chords");
+  applyMode(bus.get("mode") || router?.modeId || "chords", bus.get("layer") ?? router?.layerId ?? null);
   pollHands();
 
   bus.declare("ui/override", { type: "state", owner: "ui" });
@@ -310,6 +340,8 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
         menu: S.menu,
         firstUse: guide.firstUseVisible(),
         overrides: [...S.overrides.keys()],
+        base: S.baseId,
+        layer: S.layerId,
         tracks: S.tracks,
         panel,
       };
@@ -334,8 +366,10 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
       for (const p of parts) p.destroy?.();
       safeArea.destroy();
       layer.remove();
-      body.classList.remove("gs-modes", "gs-right-held", "gs-no-right-track");
+      body.classList.remove("gs-modes", "gs-right-held", "gs-no-right-track", "gs-layer");
       delete body.dataset.mode;
+      delete body.dataset.layer;
+      body.style.removeProperty("--gs-base-mode");
     },
   };
 }

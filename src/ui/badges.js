@@ -1,6 +1,8 @@
 // Mode badge (row 1, right of the key select) + Lead note-set badge (docs/ui-integration.md D7).
 // Reads `mode` (via S) and `lead/noteset`. The badge takes the mode color as soon as `mode` changes,
 // which the router does at the START of the countdown. Click/tap opens the controls panel.
+// Lead layer: two parts, `● Arp + ● Lead` (each in its mode color, the base part quieter); the badge border is the
+// right-hand mode's color. During a countdown it already shows what the selection will give.
 
 import { MODE_COLORS } from "./theme.js";
 
@@ -8,7 +10,7 @@ import { MODE_COLORS } from "./theme.js";
 const SET_NAMES = ["Chord notes", "Five notes", "Full scale", "All notes"];
 const FLASH_MS = 150;
 
-export function createBadges({ S, bus, doc }) {
+export function createBadges({ S, bus, doc, registry = null }) {
   const key = doc.getElementById("keySelect");
   const badge = doc.createElement("button");
   badge.id = "modeBadge";
@@ -31,18 +33,43 @@ export function createBadges({ S, bus, doc }) {
   badge.addEventListener("click", () => clickHandlers.forEach((fn) => fn()));
 
   function update() {
-    // During the countdown the badge already shows the target mode (spec: switches at countdown start).
-    const id = S.menu.state === "countdown" && S.menu.targetId ? S.menu.targetId : S.modeId;
+    // During the countdown the badge already shows the target (spec: switches at countdown start): a layer target
+    // goes on top of the current base, a base target replaces the base and ends the layer.
+    let base = S.baseId ?? S.modeId;
+    let lay = S.layerId ?? null;
+    const target = S.menu.state === "countdown" && S.menu.targetId ? S.menu.targetId : null;
+    if (target) {
+      if (registry?.getMode?.(target)?.layer && base !== target) lay = target;
+      else {
+        base = target;
+        lay = null;
+      }
+    }
+    const id = `${base || ""}+${lay || ""}`;
     if (id !== shown) {
       shown = id;
-      const name = id === S.modeId ? S.name : id ? id[0].toUpperCase() + id.slice(1) : "";
-      badge.innerHTML = `<span class="gs-dot"></span><span class="gs-name"></span>`;
-      badge.querySelector(".gs-name").textContent = name;
-      badge.dataset.mode = id || "";
-      badge.style.setProperty("--gs-mode", (id && MODE_COLORS[id]) || S.color);
-      badge.setAttribute("aria-label", `Mode: ${name}. Open controls`);
+      const nameOf = (m) => (m === S.baseId && S.baseName ? S.baseName : m === S.modeId ? S.name : m ? m[0].toUpperCase() + m.slice(1) : "");
+      const colorOf = (m) => (m && MODE_COLORS[m]) || (m === S.baseId ? S.baseColor : S.color);
+      const part = (m, cls) =>
+        `<span class="gs-part ${cls}" style="--gs-mode:${colorOf(m)}"><span class="gs-dot"></span><span class="gs-name"></span></span>`;
+      if (lay) {
+        badge.innerHTML = `${part(base, "gs-part-base")}<span class="gs-plus" aria-hidden="true">+</span>${part(lay, "gs-part-layer")}`;
+        const names = badge.querySelectorAll(".gs-name");
+        names[0].textContent = nameOf(base);
+        names[1].textContent = nameOf(lay);
+      } else {
+        badge.innerHTML = `<span class="gs-dot"></span><span class="gs-name"></span>`;
+        badge.querySelector(".gs-name").textContent = nameOf(base);
+      }
+      const label = lay ? `${nameOf(base)} + ${nameOf(lay)}` : nameOf(base);
+      badge.dataset.mode = base || "";
+      if (lay) badge.dataset.layer = lay;
+      else delete badge.dataset.layer;
+      badge.classList.toggle("gs-two", !!lay);
+      badge.style.setProperty("--gs-mode", colorOf(lay || base));
+      badge.setAttribute("aria-label", `Mode: ${label}. Open controls`);
     }
-    const set = S.modeId === "lead" ? bus.get("lead/noteset") : null;
+    const set = S.modeId === "lead" ? bus.get("lead/noteset") : null; // S.modeId = the right-hand mode (layer)
     const on = typeof set === "number";
     if (set !== shownSet) {
       const changed = on && typeof shownSet === "number";

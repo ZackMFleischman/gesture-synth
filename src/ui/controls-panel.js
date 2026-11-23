@@ -11,6 +11,10 @@
 // Screen controls vs gestures (spec "Gesture test page and screen controls"): a row shows a small hand
 // mark while a gesture owns its value. If the player moves a screen control, the screen control wins
 // until that hand moves again (S.overrides; published as `ui/override`).
+//
+// Lead layer: the Mode row lights the base AND Lead; choosing Lead turns the layer on (router.setMode), choosing a
+// base turns it off. The router mounts the base's rows and Lead's rows in labelled groups; the base's rows (its
+// held values: gate, tempo, …) stay usable and never show the hand mark (the right hand plays Lead).
 
 import { MIN_BPM, MAX_BPM } from "../services/clock.js";
 
@@ -80,6 +84,7 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc, output
       b.type = "button";
       b.dataset.value = m.id;
       b.textContent = m.name || m.id;
+      if (m.color) b.style.setProperty("--gs-mode", m.color); // base + Lead can both be lit: each in its color
       b.addEventListener("click", () => router?.setMode?.(m.id));
       seg.append(b);
     }
@@ -147,7 +152,8 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc, output
   const taps = [];
   function setBpm(bpm) {
     const b = Math.max(MIN_BPM, Math.min(MAX_BPM, Math.round(bpm)));
-    if (typeof S.mode?.set === "function") S.mode.set({ bpm: b });
+    const base = S.base ?? S.mode; // tempo belongs to the base (Arp), also under the Lead layer
+    if (typeof base?.set === "function") base.set({ bpm: b });
     else if (ctx.clock) ctx.clock.bpm = b;
   }
   function onTap() {
@@ -172,9 +178,10 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc, output
 
   // ---- Hand marks: which rows a gesture owns right now ----
   const OWNED = [
-    { sel: '[data-control="gate"]', owned: () => !!S.hands.right.pos && !S.rightHeld && !S.rightReturn && !S.overrides.has("arp/gate") },
-    { sel: '[data-control="double"]', owned: () => !!S.hands.right.pos && !S.rightHeld },
-    { sel: '[data-control="bpm"]', owned: () => !!S.hands.right.pos && !!S.hands.right.pinch },
+    // Arp rows: not owned while the Lead layer has the right hand (their values are held).
+    { sel: '[data-control="gate"]', owned: () => !S.layerId && !!S.hands.right.pos && !S.rightHeld && !S.rightReturn && !S.overrides.has("arp/gate") },
+    { sel: '[data-control="double"]', owned: () => !S.layerId && !!S.hands.right.pos && !S.rightHeld },
+    { sel: '[data-control="bpm"]', owned: () => !S.layerId && !!S.hands.right.pos && !!S.hands.right.pinch },
     { sel: '[data-control="master"]', owned: () => !!S.hands.left.pos && !S.overrides.has("master") },
     // Lead: finger count = note set, pinch on an arrow = octave.
     { sel: '[data-control="noteset"]', owned: () => !!S.hands.right.pos && !S.rightHeld },
@@ -209,7 +216,7 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc, output
       name: "arp/gate",
       hand: "right",
       read: () => bus.get("arp/gate"),
-      apply: (v) => S.mode?.set?.({ gate: v }),
+      apply: (v) => (S.base ?? S.mode)?.set?.({ gate: v }),
     },
     master: { name: "master", hand: "left", read: () => ctx.masterVolume, apply: setMaster },
   };
@@ -293,7 +300,7 @@ export function createControlsPanel({ S, bus, ctx, registry, router, doc, output
     if (!isOpen()) return;
     buildSeg();
     for (const b of seg.children) {
-      const on = b.dataset.value === S.modeId;
+      const on = b.dataset.value === (S.baseId ?? S.modeId) || b.dataset.value === S.layerId;
       if (b.classList.contains("on") !== on) {
         b.classList.toggle("on", on);
         b.setAttribute("aria-pressed", String(on));

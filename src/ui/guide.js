@@ -48,6 +48,13 @@ export function createGuide({ S, doc }) {
     head.className = "gs-guide-head gs-guide-ext";
     head.textContent = S.name;
     frag.append(sep, head);
+    if (S.layerId && S.baseName) {
+      // Lead layer: say what is underneath (spec deviation, docs/spec/requirements.md "Decided after real-camera testing").
+      const note = doc.createElement("div");
+      note.className = "gs-guide-note gs-guide-ext";
+      note.textContent = `${S.name} plays on top of ${S.baseName} (left hand: its chords)`;
+      frag.append(note);
+    }
     for (const [emoji, label] of rows) {
       const row = doc.createElement("div");
       row.className = "gesture-guide-row gs-guide-mode gs-guide-ext";
@@ -61,8 +68,9 @@ export function createGuide({ S, doc }) {
       frag.append(row);
     }
     guideEl.append(frag);
-    renderedFor = S.modeId;
+    renderedFor = renderKey();
   }
+  const renderKey = () => `${S.modeId}|${S.layerId ? S.baseId : ""}`;
 
   // controls.js replaces the guide's innerHTML on key change: put our rows back.
   const observer = new MutationObserver(() => {
@@ -73,7 +81,7 @@ export function createGuide({ S, doc }) {
   const isOpen = () => !!guideEl && !guideEl.classList.contains("hidden");
 
   function update() {
-    if (S.modeId !== renderedFor) append();
+    if (renderKey() !== renderedFor) append();
     const labels = FIRST_USE[S.modeId];
     if (labels && !seen.has(S.modeId) && S.hands.right.pos) {
       seen.add(S.modeId);

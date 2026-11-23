@@ -22,6 +22,8 @@ body.gs-modes {
 body.gs-modes[data-mode="chords"] { --gs-mode: #e8a13d; }
 body.gs-modes[data-mode="arp"] { --gs-mode: #4fb3ff; }
 body.gs-modes[data-mode="lead"] { --gs-mode: #c08cff; }
+/* Lead layer (Lead on top of the base): the right-hand accent is Lead's; --gs-base-mode (inline) = the base's color. */
+body.gs-modes[data-layer="lead"] { --gs-mode: #c08cff; }
 
 /* R1: existing edge controls move in by 8px to free a 20px gutter for the edge tracks. */
 body.gs-modes #keySelect,
@@ -214,6 +216,27 @@ body.gs-modes #outputPopover { top: 46px; right: var(--gs-gutter); }
 #controlsPanel .lead-hint { align-items: flex-start; font-size: 11px; color: var(--gs-quiet); }
 #controlsPanel .lead-hint > span:last-child { white-space: normal; line-height: 1.35; }
 
+
+/* ---- Lead layer ---- */
+/* Badge: `● Arp + ● Lead`, each part in its own color (inline --gs-mode), the base part quieter. */
+#modeBadge.gs-two { gap: 6px; padding: 0 11px 0 9px; }
+#modeBadge .gs-part { display: inline-flex; align-items: center; gap: 6px; color: var(--gs-mode); }
+#modeBadge .gs-part-base { opacity: 0.72; font-weight: 500; }
+#modeBadge .gs-plus { color: var(--gs-quiet); font-weight: 400; }
+/* The 8-bar meter shows the base's HELD right-hand value (dimmed, base color). */
+body.gs-modes.gs-layer #volumeMeter { opacity: 0.4; }
+body.gs-modes.gs-layer .vol-bar.lit { background: var(--gs-base-mode, var(--gs-mode)); }
+/* The base's transport keeps its own color under the layer. */
+body.gs-modes.gs-layer #transport .gs-beats i.on { background: var(--gs-base-mode); border-color: var(--gs-base-mode); }
+/* Controls panel: the base's rows and the layer's rows in labelled groups (router mountControls()). */
+#controlsPanel .gs-ctl-group { --gs-mode: var(--gs-group); display: flex; flex-direction: column; gap: 8px; }
+#controlsPanel .gs-ctl-group + .gs-ctl-group { border-top: 1px solid #3a3428; padding-top: 8px; }
+#controlsPanel .gs-ctl-head { display: flex; align-items: center; gap: 6px; font: 600 12px monospace; color: var(--gs-mode); }
+#controlsPanel .gs-ctl-head .gs-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gs-mode); }
+#controlsPanel .gs-ctl-note { color: var(--gs-quiet); font-weight: 400; }
+#controlsPanel .gs-ctl-group[data-group="base"] .gs-ctl-note::before { content: "· "; }
+#controlsPanel .gs-ctl-group[data-group="layer"] .gs-ctl-note::before { content: "· "; }
+.gs-guide-note { color: var(--gs-quiet); font-size: 12px; line-height: 1.3; }
 
 /* ---- Transport (clocked modes): centered above the chord display, clear of the energy wave ---- */
 #transport {

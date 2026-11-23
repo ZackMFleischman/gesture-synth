@@ -193,10 +193,22 @@ export function mountMobileUI(o = {}) {
     const note = key?.selectedOptions?.[0]?.dataset.note || key?.value || "";
     pill.querySelector(".gs-pill-key").textContent = note;
     const id = body.dataset.mode;
+    const layer = body.dataset.layer || "";
     const badge = $("modeBadge");
-    const name = MODE_NAMES[id] || (badge ? badge.textContent.trim() : "");
-    pill.querySelector(".gs-pill-mode").textContent = name;
+    const name = MODE_NAMES[id] || (badge ? badge.querySelector(".gs-name")?.textContent.trim() || badge.textContent.trim() : "");
+    const modeEl = pill.querySelector(".gs-pill-mode");
+    // Lead layer: "Arp + Lead" (base quieter, each in its color), the same as the desktop badge.
+    const modeKey = `${name}|${layer}`;
+    if (modeEl.dataset.key !== modeKey) {
+      modeEl.dataset.key = modeKey;
+      if (layer) {
+        modeEl.innerHTML = `<span class="gs-pill-base"></span><span class="gs-pill-plus">+</span><span class="gs-pill-layer"></span>`;
+        modeEl.querySelector(".gs-pill-base").textContent = name;
+        modeEl.querySelector(".gs-pill-layer").textContent = MODE_NAMES[layer] || layer;
+      } else modeEl.textContent = name;
+    }
     pill.classList.toggle("no-mode", !name);
+    pill.classList.toggle("gs-pill-two", !!layer);
     syncSheets();
   }
 
@@ -274,7 +286,7 @@ export function mountMobileUI(o = {}) {
   const mo = new win.MutationObserver(() => refresh());
   const watch = () => {
     mo.disconnect();
-    mo.observe(body, { attributes: true, attributeFilter: ["data-mode"] });
+    mo.observe(body, { attributes: true, attributeFilter: ["data-mode", "data-layer"] });
     for (const id of ["controlsPanel", "gestureGuide", "helpModal"]) {
       const e = $(id);
       if (e) mo.observe(e, { attributes: true, attributeFilter: ["class"] });

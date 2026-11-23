@@ -68,6 +68,10 @@ body.gs-mobile #gsBar.open {
 #gsPill .gs-pill-key { color: var(--gs-m-ink); }
 #gsPill .gs-pill-mode { color: var(--gs-m-accent); }
 #gsPill.no-mode .gs-pill-mode { display: none; }
+/* Lead layer: "Arp + Lead" (base quieter in the base color; Lead in Lead's = --gs-mode). */
+#gsPill .gs-pill-base { color: var(--gs-base-mode, var(--gs-m-accent)); opacity: 0.75; font-weight: 500; }
+#gsPill .gs-pill-plus { color: var(--gs-m-ink); opacity: 0.5; margin: 0 3px; font-weight: 400; }
+#gsPill .gs-pill-layer { color: var(--gs-m-accent); }
 #gsPill .gs-caret {
   width: 0; height: 0; margin-left: 1px;
   border-left: 5px solid transparent; border-right: 5px solid transparent;
