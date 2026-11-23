@@ -136,6 +136,32 @@ test.describe("pos and handSize", () => {
     expect(d.pos.y).toBeCloseTo(0.4, 6);
   });
 
+  test("pinchPoint = thumb tip / index tip midpoint in display space while pinching, else null; box holds the hand", () => {
+    for (const view of [undefined, DESKTOP_VIEW]) {
+      const h = pinch({ pos: { x: 0.3, y: 0.45 }, view });
+      const f = frameOf(h, { view });
+      expect(f.pinch).toBe(true);
+      const t = toDisplay(h.landmarks[4], view);
+      const i = toDisplay(h.landmarks[8], view);
+      expect(f.pinchPoint.x).toBeCloseTo((t.x + i.x) / 2, 9);
+      expect(f.pinchPoint.y).toBeCloseTo((t.y + i.y) / 2, 9);
+      for (const p of h.landmarks.map((l) => toDisplay(l, view))) {
+        expect(p.x).toBeGreaterThanOrEqual(f.box.x0);
+        expect(p.x).toBeLessThanOrEqual(f.box.x1);
+        expect(p.y).toBeGreaterThanOrEqual(f.box.y0);
+        expect(p.y).toBeLessThanOrEqual(f.box.y1);
+      }
+      expect(frameOf(rightHand(1, { pos: { x: 0.3, y: 0.45 }, view }), { view }).pinchPoint).toBeNull();
+    }
+    // Published as right/pinchpt (null when not pinching).
+    const bus = createBus();
+    const input = createHandInput({ bus });
+    input.process(results(pinch({ pos: { x: 0.3, y: 0.45 } })), 0);
+    expect(bus.get("right/pinchpt")).toEqual(expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }));
+    input.process(results(rightHand(1)), 20);
+    expect(bus.get("right/pinchpt")).toBeNull();
+  });
+
   test("pos accounts for the cover crop like drawFrame", () => {
     // 640x480 video on a 1280x800 canvas: full width shown, 40px cropped top and bottom.
     const v = makeView(640, 480, 1280, 800);
