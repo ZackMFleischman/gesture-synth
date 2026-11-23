@@ -18,18 +18,19 @@ import {
   OCTAVE_MAX,
 } from "./lead-notes.js";
 import { createLeadVoice } from "./lead-voice.js";
+import { MODE_COLORS, COLORS, FONT as THEME_FONT, MOTION, withAlpha, easeOut } from "../ui/theme.js";
 
-// ---- Look (mirrors the tokens in src/ui/theme.js from the UI pass; swap to imports once it lands) ----
-export const LEAD_COLOR = "#c08cff";
+// ---- Look: shared tokens from src/ui/theme.js; Lead-specific geometry below ----
+export const LEAD_COLOR = MODE_COLORS.lead;
 const C = {
-  ink: "#f3efe7",
-  quiet: "rgba(243, 239, 231, 0.5)",
-  faint: "rgba(243, 239, 231, 0.22)",
-  plate: "rgba(20, 20, 20, 0.62)",
-  halo: "rgba(0, 0, 0, 0.55)",
-  warn: "#ff5a5f", // hand lost (UI pass: coral, not amber)
+  ink: COLORS.ink,
+  quiet: COLORS.quiet,
+  faint: COLORS.faint,
+  plate: COLORS.plate,
+  halo: COLORS.halo,
+  warn: COLORS.warn, // hand lost (UI pass D2: coral, not amber)
 };
-const FONT = "monospace";
+const FONT = THEME_FONT.family;
 const LOOK = {
   edgeInset: 8, // ladder lines end this far from the right edge
   lineThin: 40, // scale-note line length
@@ -43,22 +44,18 @@ const LOOK = {
   cursorR: 12,
   nameSize: 28,
   badge: { x: 200, y: 25 }, // top-left status row, right of the mode badge slot
-  lineMoveMs: 150, // chord-note lines move to the new chord
-  slideMs: 200, // ladder slide on an octave change
-  flashMs: 150, // confirm flash
+  lineMoveMs: MOTION.base, // chord-note lines move to the new chord (150 ms)
+  slideMs: MOTION.slow, // ladder slide on an octave change (200 ms)
+  flashMs: MOTION.base, // confirm flash
   badgeLingerMs: 500, // at-hand badge after a confirmed set change
   dimDuringHold: 0.4,
 };
 
+const MENU_HELD_MS = 150;
+
 const STEP_KEYS = ["KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK", "KeyL", "Semicolon", "Quote",
   "KeyQ", "KeyW", "KeyE", "KeyR", "KeyT", "KeyY", "KeyU", "KeyI", "KeyO", "KeyP", "BracketLeft", "BracketRight"];
 
-const easeOut = (t) => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 3);
-
-function withAlpha(hex, a) {
-  const n = parseInt(hex.slice(1, 7), 16);
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
-}
 
 /** Ladder geometry in canvas px. */
 export function ladderGeometry(W, H) {
@@ -92,6 +89,8 @@ const virt = {
 
 // What draw() renders.
 const view = {
+  lastUpdateAt: -Infinity, // the router skips update() while the radial menu holds the right hand
+  domBadge: false, // a DOM #noteSetBadge exists (src/ui/badges.js): skip the canvas status badge
   hand: null, // {x,y} canvas px of the right palm (null = none / screen control)
   handSize: 0,
   usingVirtual: false,
@@ -376,6 +375,7 @@ const lead = {
   ],
 
   enter(ctx) {
+    view.domBadge = typeof document !== "undefined" && !!document.getElementById("noteSetBadge");
     ensureParams(ctx);
     if (!voice) voice = createLeadVoice(ctx.audio, { bus: ctx.bus });
     masterApplied = null;
@@ -396,6 +396,7 @@ const lead = {
   update(right, ctx) {
     const now = ctx.now;
     view.now = now;
+    view.lastUpdateAt = now;
     if (!voice) lead.enter(ctx);
     applyMaster(ctx);
     ctrl.setContext(ctx.harmony.keyName, ctx.harmony.chord, now);
@@ -443,9 +444,15 @@ const lead = {
     captureLadderChange(now);
     const lines = currentLines(now);
     const span = geo.bottom - geo.top;
-    const holding = S.setHoldTarget != null && S.setHoldProgress > 0;
+    // Held: the radial menu has the right hand (update() not called). Ladder dims, nothing sounds.
+    const menuHeld = now - view.lastUpdateAt > MENU_HELD_MS;
+    if (menuHeld && S.pinchMode !== "none") {
+      ctrl.release();
+      if (voice) voice.noteOff();
+    }
+    const holding = !menuHeld && S.setHoldTarget != null && S.setHoldProgress > 0;
     const lostNow = !S.present && S.lostSince != null;
-    const ladderAlpha = holding || lostNow ? LOOK.dimDuringHold : 1;
+    const ladderAlpha = holding || lostNow || menuHeld ? LOOK.dimDuringHold : 1;
 
     g.save();
     // ---- Soft dark backing so the ladder reads over bright video ----
@@ -549,7 +556,7 @@ const lead = {
       const playing = S.pinchMode === "note" && !lost;
       const nameRight = geo.right - LOOK.lineChord - 12;
       // Dotted guide from the hand to the cursor (stops at the name plate).
-      if (view.hand && !lost && !onArrow && view.hand.x < nameRight - 90) {
+      if (view.hand && !lost && !menuHeld && !onArrow && view.hand.x < nameRight - 90) {
         g.save();
         g.beginPath();
         g.moveTo(view.hand.x, view.hand.y);
@@ -614,9 +621,9 @@ const lead = {
       if (lost) plateLabel(g, "Hand lost", nameRight, cy, { size: 13, weight: 700, color: C.warn, align: "right", stroke: withAlpha(C.warn, 0.7) });
     }
 
-    // ---- Note-set badge (status, top left row) ----
+    // ---- Note-set badge (status, top left row; canvas fallback until the DOM #noteSetBadge exists) ----
     const setFlash = Math.max(0, 1 - (now - S.setChangedAt) / LOOK.flashMs);
-    {
+    if (!view.domBadge) {
       const bx = LOOK.badge.x;
       const by = LOOK.badge.y;
       const label = NOTE_SETS[S.setId].name;
@@ -639,7 +646,7 @@ const lead = {
 
     // ---- At-hand note-set badge (hand only): approach fill, selected rim + flash, then fade ----
     const since = now - S.setChangedAt;
-    if (view.hand && !lost && (holding || since < LOOK.badgeLingerMs)) {
+    if (view.hand && !lost && !menuHeld && (holding || since < LOOK.badgeLingerMs)) {
       const alpha = holding ? 1 : 1 - easeOut(Math.max(0, since - LOOK.flashMs) / (LOOK.badgeLingerMs - LOOK.flashMs));
       const target = holding ? S.setHoldTarget : null;
       const label = NOTE_SETS[holding ? S.setHoldTarget : S.setId].name;
@@ -819,6 +826,16 @@ const lead = {
   },
 
   menuItems: [],
+  /** The right edge shows the note ladder (drawn here), not a generic track. */
+  rightTrack: null,
+  /** Right-hand rows for the gesture guide. */
+  guide: [
+    ["🤏", "Pinch: play"],
+    ["↕️", "Height: note"],
+    ["☝️✌️", "Fingers: notes"],
+    ["🔼", "Arrow: octave"],
+    ["↔️", "Tilt: filter"],
+  ],
 
   /** Test/debug hook: controller state + what draw() renders (canvas px). Not part of the mode contract. */
   _debug(now = view.now) {

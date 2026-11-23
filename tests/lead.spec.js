@@ -814,6 +814,32 @@ test.describe("mode switch", () => {
   });
 });
 
+test.describe("radial menu hold", () => {
+  test("while the menu holds the right hand, the note stops and the ladder dims (held state)", async ({ lab: page }) => {
+    await setNoteSet(page, 2);
+    await setHands(page, preview(0.5));
+    await settle(page, 80);
+    await setHands(page, play(0.5));
+    await settle(page, 150);
+    expect((await dbg(page)).sounding).not.toBe(null);
+    await page.evaluate(() => {
+      window.__menuHold = true;
+      window.__gsTest.router.setMenu({ update: () => ({}), isHoldingRight: () => window.__menuHold, draw() {} });
+    });
+    await settle(page, 300);
+    const d = await dbg(page);
+    expect(d.sounding).toBe(null);
+    expect(d.pinchMode).toBe("none");
+    await page.screenshot({ path: `${SCREENS}/lead-menu-held.png` });
+    await page.evaluate(() => (window.__menuHold = false));
+    await setHands(page, preview(0.5));
+    await settle(page, 120);
+    await setHands(page, play(0.5));
+    await settle(page, 120);
+    expect((await dbg(page)).sounding).not.toBe(null);
+  });
+});
+
 test.describe("visual states", () => {
   test("screenshot: hand lost (dashed warning cursor)", async ({ lab: page }) => {
     await setNoteSet(page, 3);
