@@ -28,8 +28,10 @@ import {
   SET_SHAPES,
   OCTAVE_MIN,
   OCTAVE_MAX,
+  ARROW_ENTER,
 } from "./lead-notes.js";
 import { createLeadVoice } from "./lead-voice.js";
+import { leadConfig, setLeadConfig } from "./lead-config.js";
 import { drawEnergy } from "./chords.js";
 import { MODE_COLORS, COLORS, FONT as THEME_FONT, MOTION, withAlpha, easeOut, confirmPhase, drawLabel, rectsOverlap } from "../ui/theme.js";
 import { createSafeArea } from "../ui/mobile/safe-area.js";
@@ -77,6 +79,9 @@ const LOOK = {
   slideMs: MOTION.slow, // ladder slide on an octave change (200 ms)
   flashMs: MOTION.base, // octave-arrow confirm flash (the confirm toasts use CONFIRM from theme.js)
   dimDuringHold: 0.4,
+  markerTauMs: 35, // hand marker display smoothing (critically damped, display only)
+  bandAlpha: 0.13, // sweet-spot band fill
+  leanPx: 0.45, // cursor ring lean toward the approached neighbour, x cursorR at the switch point
 };
 
 const STEP_KEYS = ["KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK", "KeyL", "Semicolon", "Quote",
@@ -213,7 +218,36 @@ const view = {
   octaveToast: null, // octave confirm toast drawn this frame {rect, alpha, scale, flash}
   drawnAt: -Infinity, // ctx.now of the last draw()
   band: null, // the right hand's reach zone (bus `right/zone`, display fractions; last known)
+  marker: null, // hand marker drawn this frame {y, targetY} (display-smoothed), null = hidden
+  markerAt: -Infinity,
+  sweet: null, // sweet-spot band drawn this frame {top, bottom}
+  nearEdge: null, // edge feedback drawn this frame {midi (neighbour), amount 0..1, lean px}
 };
+
+/** Edge feedback geometry for the current note (null = nothing to show). Uses the final ladder positions. */
+function proximityView(geo, lines, idx) {
+  if (idx == null || S.pitch == null) return null;
+  const notes = S.ladder.notes;
+  const cur = notes[idx];
+  if (!cur) return null;
+  const lineU = (n) => (n ? lines.find((l) => l.midi === n.midi && !l.old)?.u ?? n.u : null);
+  const yC = uToY(geo, lineU(cur));
+  const up = notes[idx + 1], dn = notes[idx - 1];
+  const yUp = up ? uToY(geo, lineU(up)) : null;
+  const yDn = dn ? uToY(geo, lineU(dn)) : null;
+  const gUp = yUp != null ? yC - yUp : yDn != null ? yDn - yC : 0;
+  const gDn = yDn != null ? yDn - yC : gUp;
+  const sw = leadConfig.sweetBand;
+  const toward = S.proximityTo != null ? notes[S.proximityTo] : null;
+  return {
+    yC,
+    top: yC - sw * gUp,
+    bottom: yC + sw * gDn,
+    toward,
+    towardY: toward ? uToY(geo, lineU(toward)) : null,
+    lean: S.lean,
+  };
+}
 
 function ensureParams(ctx) {
   if (filterParam) return;
@@ -519,7 +553,7 @@ function currentPlateLayout(g, geo, lines, cur, labeled) {
  * the safe notes are the ones to aim for; the current note always shows.
  * Returns [{midi, text, rect, size, color, chord}] for _debug / layout tests.
  */
-function drawLadderLabels(g, geo, lines, alphaMul, { skipMidi = null, avoid = [], labeled }) {
+function drawLadderLabels(g, geo, lines, alphaMul, { skipMidi = null, avoid = [], labeled, emphasis = null }) {
   const L = labelLook(geo.sz);
   const x = labelColumnX(geo);
   const align = geo.dir > 0 ? "left" : "right";
@@ -538,8 +572,9 @@ function drawLadderLabels(g, geo, lines, alphaMul, { skipMidi = null, avoid = []
     const h = L.size * 1.15;
     const r = { x: align === "left" ? x : x - w, y: y - h / 2, w, h };
     if (!l.old && (avoid.some((b) => rectsOverlap(r, b, 0.5)) || placed.some((b) => rectsOverlap(r, b, 0.5)))) continue;
-    const color = l.isChord ? "rgba(243, 239, 231, 0.92)" : "rgba(243, 239, 231, 0.6)";
-    drawLabel(g, text, x, y, { size: L.size, weight: l.isChord ? 600 : 400, color, align, alpha: a });
+    const emph = emphasis && !l.old && emphasis.midi === l.midi && emphasis.amount > 0.2 ? emphasis.amount : 0;
+    const color = emph ? withAlpha(LEAD_COLOR, 0.55 + 0.45 * emph) : l.isChord ? "rgba(243, 239, 231, 0.92)" : "rgba(243, 239, 231, 0.6)";
+    drawLabel(g, text, x, y, { size: L.size, weight: emph || l.isChord ? 600 : 400, color, align, alpha: a });
     if (!l.old) {
       placed.push(r);
       out.push({ midi: l.midi, text, rect: r, size: L.size, color, chord: l.isChord });
@@ -812,6 +847,17 @@ const lead = {
       g.fill();
     }
 
+    // ---- Edge feedback (current note): sweet-spot band under the lines ----
+    const pIdx = S.pinchMode === "note" ? S.playIdx : S.preview;
+    const pv = !menuHeld && S.present && !S.hover ? proximityView(geo, lines, pIdx) : null;
+    view.sweet = null;
+    if (pv) {
+      roundRect(g, Math.min(geo.edge, ox(geo, sz.lineChord)), pv.top, sz.lineChord, Math.max(2, pv.bottom - pv.top), 4);
+      g.fillStyle = withAlpha(LEAD_COLOR, LOOK.bandAlpha);
+      g.fill();
+      view.sweet = { top: pv.top, bottom: pv.bottom };
+    }
+
     // ---- Ladder lines (clipped to the ladder band during slides) ----
     g.save();
     g.beginPath();
@@ -834,6 +880,26 @@ const lead = {
     }
     g.restore();
     g.globalAlpha = 1;
+    // Approaching a neighbour (hand past the sweet band): its line lights up in the mode color with closeness.
+    view.nearEdge = null;
+    if (pv && pv.toward && pv.lean > 0) {
+      const len = pv.toward.isChord ? sz.lineChord : sz.lineThin;
+      g.save();
+      g.lineCap = "round";
+      g.globalAlpha = 0.25 + 0.75 * pv.lean;
+      g.beginPath();
+      g.moveTo(ox(geo, len), pv.towardY);
+      g.lineTo(geo.edge, pv.towardY);
+      const w = (pv.toward.isChord ? sz.widthChord : sz.widthThin) + 1.5 * pv.lean;
+      g.lineWidth = w + 7; // soft glow (visible on chord lines, which are already in the mode color)
+      g.strokeStyle = withAlpha(LEAD_COLOR, 0.3);
+      g.stroke();
+      g.lineWidth = w;
+      g.strokeStyle = LEAD_COLOR;
+      g.stroke();
+      g.restore();
+      view.nearEdge = { midi: pv.toward.midi, amount: pv.lean, lean: 0 };
+    }
 
     // ---- Octave arrows + marks ----
     const hoverUp = S.hover === "up" && S.present && !menuHeld;
@@ -928,6 +994,7 @@ const lead = {
       skipMidi: plate ? cl.midi : null,
       avoid: plate ? [plate.rect, marksRect] : [marksRect],
       labeled,
+      emphasis: view.nearEdge,
     });
     if (view.labels.length) {
       const xs = view.labels.flatMap((l) => [l.rect.x, l.rect.x + l.rect.w]);
@@ -937,7 +1004,7 @@ const lead = {
 
     view.current = null;
     if (cl || onArrow) {
-      const cy = onArrow ? (S.hover === "up" ? geo.upY : geo.downY) : uToY(geo, cl.u);
+      let cy = onArrow ? (S.hover === "up" ? geo.upY : geo.downY) : uToY(geo, cl.u);
       const cx = geo.cx;
       const nameX = plate ? plate.x : ox(geo, sz.lineChord + labelLook(sz).gap + 7);
       // Dotted guide from the hand to the cursor (stops at the name plate's inner edge).
@@ -960,6 +1027,15 @@ const lead = {
       }
       if (!onArrow) {
         const r = sz.cursorR;
+        // Edge feedback: the ring leans toward the neighbour being approached (0 inside the sweet band).
+        let cyR = cy;
+        if (pv && pv.toward && pv.lean > 0 && !lost) {
+          const lean = Math.sign(pv.towardY - cy) * pv.lean * r * LOOK.leanPx;
+          cyR = cy + lean;
+          if (view.nearEdge) view.nearEdge.lean = lean;
+        }
+        const cy0 = cy;
+        cy = cyR;
         g.save();
         if (menuHeld) g.globalAlpha = LOOK.dimDuringHold;
         if (lost) {
@@ -993,6 +1069,7 @@ const lead = {
           g.fill();
           strokeHalo(g, LEAD_COLOR, 3);
         }
+        cy = cy0; // the name plate stays on the note's line
         if (plate) {
           // Preview: mode-colored name on a dark plate with a mode-colored rim; playing: filled in the mode color.
           const color = playing ? "#111" : LEAD_COLOR;
@@ -1016,6 +1093,33 @@ const lead = {
         reg("lead-lost", "hand", plateLabel(g, "Hand lost", nameX, cy, { size: 13, weight: 700, color: C.warn, align: alignIn, stroke: withAlpha(C.warn, 0.7) }));
         g.restore();
       }
+    }
+
+    // ---- Hand marker: the hand's exact (unsnapped) height, a small pointer at the screen edge of the ladder ----
+    if (pv && leadConfig.showHandMarker && !lost) {
+      const ty = uToY(geo, Math.max(-0.06, Math.min(1.06, S.u)));
+      const dt = now - view.markerAt;
+      const k = view.marker && dt > 0 && dt < 250 ? 1 - Math.exp(-dt / LOOK.markerTauMs) : 1;
+      const y = view.marker ? view.marker.y + (ty - view.marker.y) * k : ty;
+      view.marker = { y, targetY: ty };
+      view.markerAt = now;
+      const tip = ox(geo, 11);
+      const base = geo.edge + dir * 1;
+      g.save();
+      g.beginPath();
+      g.moveTo(tip, y);
+      g.lineTo(base, y - 5);
+      g.lineTo(base, y + 5);
+      g.closePath();
+      g.lineJoin = "round";
+      g.lineWidth = 3;
+      g.strokeStyle = C.halo;
+      g.stroke();
+      g.fillStyle = "rgba(255,255,255,0.95)";
+      g.fill();
+      g.restore();
+    } else {
+      view.marker = null;
     }
 
     // ---- Note-set badge: approach fill, then the confirmed state (pop, ~1 s, fade) ----
@@ -1111,9 +1215,17 @@ const lead = {
     pad.addEventListener("pointerleave", () => { virt.inside = false; });
     pad.addEventListener("pointerdown", (e) => {
       virt.y = yOf(e);
-      virt.down = true;
       virt.keyIdx = null;
       touchVirtual();
+      // A click / tap on an octave arrow steps the octave at once (no 0.3 s hold: that is for the pinch only).
+      const u = yToU(lastGeo, virt.y * lastGeo.H);
+      const arrowDir = u > 1 + ARROW_ENTER ? 1 : u < -ARROW_ENTER ? -1 : 0;
+      if (arrowDir) {
+        stepOct(arrowDir);
+        e.preventDefault();
+        return;
+      }
+      virt.down = true;
       try { pad.setPointerCapture(e.pointerId); } catch {}
       if (ctx.audio.synth && ctx.audio.synth.ensureContext) ctx.audio.synth.ensureContext();
       e.preventDefault();
@@ -1224,6 +1336,14 @@ const lead = {
       current: view.current ? { ...view.current, rect: { ...view.current.rect } } : null,
       setBadge: view.setBadge ? { ...view.setBadge, rect: { ...view.setBadge.rect } } : null,
       octaveToast: view.octaveToast ? { ...view.octaveToast, rect: { ...view.octaveToast.rect } } : null,
+      // Edge feedback (lead-proximity): controller values + what draw() showed.
+      proximity: S.proximity,
+      proximityTo: S.proximityTo != null ? S.ladder.notes[S.proximityTo]?.midi ?? null : null,
+      lean: S.lean,
+      handU: S.u,
+      marker: view.marker ? { ...view.marker } : null,
+      sweet: view.sweet ? { ...view.sweet } : null,
+      nearEdge: view.nearEdge ? { ...view.nearEdge } : null,
     };
   },
   /** Ladder y (canvas px) -> display-normalized y, for tests placing the hand on a note. */
@@ -1233,6 +1353,9 @@ const lead = {
     return n ? uToY(geo, n.u) / geo.H : null;
   },
   _controller: ctrl,
+  /** Live Lead tunables (src/modes/lead-config.js) until the Tweaks panel binds them. */
+  _config: leadConfig,
+  _setConfig: setLeadConfig,
 };
 
 export default lead;
