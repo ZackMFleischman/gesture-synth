@@ -281,6 +281,9 @@ test.describe("2.3 pinch to play", () => {
         await setNoteSet(page, 3);
         const notes = await page.evaluate(() => window.__gsTest.lead._controller.state.ladder.notes.map((n) => n.midi));
         const path = [notes[4], notes[6], notes[5], notes[8], notes[4]];
+        // The ladder spans the right hand's reach zone (src/input/reach-zones.js): place it with the hand in view.
+        await setHands(page, preview(0.5));
+        await settle(page, 300);
         const ys = [];
         for (const m of path) ys.push(await yFor(page, m));
         await setHands(page, preview(ys[0]));
