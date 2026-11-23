@@ -18,6 +18,7 @@ import chordsMode from "./src/modes/chords.js";
 import arpMode from "./src/modes/arp.js";
 import leadMode from "./src/modes/lead.js";
 import { mountStatusChip } from "./src/output/status-chip.js"; // M3 output hook (see below)
+import { tweaksRequested } from "./src/tweaks/flag.js";
 
 initAnalytics();
 
@@ -86,6 +87,16 @@ router.setMenu(
     onTick: () => { if (audio.ac) playTick(audio.ac, audio.out); },
   })
 );
+
+// ---- Tweaks panel (developer settings, src/tweaks/) ----
+// Only with ?tweaks / ?tweaks=true: a lazy chunk (nothing loaded otherwise). Without it every tweakable value stays
+// at its code default, even if tweaks were saved in this browser before.
+if (tweaksRequested(location.search)) {
+  import("./src/tweaks/index.js")
+    .then(({ mountTweaks }) => mountTweaks({ synth }))
+    .then((t) => { if (import.meta.env.DEV) window.__gsTest.tweaks = t; })
+    .catch((err) => console.error("[tweaks]", err));
+}
 
 if (import.meta.env.DEV) {
   window.__gsTest.registry = registry;

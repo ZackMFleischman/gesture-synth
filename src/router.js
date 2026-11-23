@@ -25,7 +25,7 @@
 import { classifyChord } from "./input/hand-input.js";
 
 /** Left-height master volume tuning (pure; see createMasterVolume). */
-export const MASTER_VOLUME = Object.freeze({
+export const MASTER_VOLUME = { // mutable: Tweaks may change LOW / HIGH at runtime (createMasterVolume reads them live)
   DEAD_ZONE: 0.04, // height units: movements smaller than this (backlash) never change the volume
   TAU_MS: 140, // one-pole smoothing time constant (right height uses ~30-50 ms in the audio graph)
   LOW: 0.1, // height at/below which the master is 0 (low left hand = rest)
@@ -33,7 +33,7 @@ export const MASTER_VOLUME = Object.freeze({
   // keeps about today's loudness after the gain re-staging that keeps voices out of the limiter (src/services/audio.js).
   HIGH: 0.55,
   INITIAL: 1, // before a left hand was ever seen (e.g. a right-hand-only Lead melody); the first left frame sets it directly
-});
+};
 
 /** Crossfade from locked right-hand values to the live hand after the menu releases it. */
 export const RESUME_MS = 200;
@@ -43,11 +43,12 @@ export const RESUME_MS = 200;
  * update(height|null, nowMs) -> volume 0..1. A null height (hand not visible) holds the volume.
  */
 export function createMasterVolume(opts = {}) {
-  const o = { ...MASTER_VOLUME, ...opts };
+  // Read live (not copied): the Tweaks panel may change MASTER_VOLUME fields while playing; `opts` still override.
+  const o = new Proxy(opts, { get: (t, k) => (k in t ? t[k] : MASTER_VOLUME[k]) });
   let anchor = null; // dead-zoned height
   let value = o.INITIAL;
   let lastT = null;
-  const map = (h) => Math.max(0, Math.min(1, (h - o.LOW) / (o.HIGH - o.LOW)));
+  const map = (h) => Math.max(0, Math.min(1, (h - o.LOW) / Math.max(1e-6, o.HIGH - o.LOW)));
   return {
     update(height, now) {
       if (height == null || !Number.isFinite(height)) {

@@ -46,7 +46,20 @@ import { bus as sharedBus } from "../core/bus.js";
 
 const CHORD_VOICE = "chords";
 /** Level of each chord oscillator (4 summed). Worst case stays under the limiter threshold (see header). */
-export const CHORD_LEVEL = 0.13;
+export let CHORD_LEVEL = 0.13; // live binding: setChordLevel() (Tweaks panel)
+/** Tweaks: change the chord oscillator level; a sounding chord glides to it, the next chord starts at it. */
+export function setChordLevel(v, synth = null) {
+  if (!(Number.isFinite(v) && v >= 0)) return;
+  CHORD_LEVEL = v;
+  const ac = synth?.ctx;
+  if (ac && synth.chordInstance) synth.chordInstance.gain.setTargetAtTime(v, ac.currentTime, 0.02);
+}
+/** Tweaks: change the master limiter threshold (dBFS) live. */
+export function setLimiterThreshold(db, synth = null) {
+  if (!Number.isFinite(db)) return;
+  LIMITER.threshold = db;
+  if (synth?.limiter) synth.limiter.threshold.value = db;
+}
 /** Fade-in of a chord that starts from silence (no previous chord sounding). */
 const CHORD_ATTACK = 0.03;
 /** Soft clipper: linear below KNEE, saturates towards CEIL. Inputs beyond ±1 map to the curve ends. */
@@ -58,7 +71,7 @@ const CLIP_CEIL = 0.09; // headroom above the knee (curve end ≈ 0.972)
 export const BASE_UNDER_LAYER = 0.8;
 const LAYER_MIX_TAU = 0.12;
 /** Master limiter: a safety net for transients only (steady playing stays below the threshold). */
-export const LIMITER = Object.freeze({ threshold: -2, knee: 1, ratio: 20, attack: 0.001, release: 0.1 });
+export const LIMITER = { threshold: -2, knee: 1, ratio: 20, attack: 0.001, release: 0.1 }; // mutable: setLimiterThreshold() (Tweaks)
 /**
  * Drive (0..1 -> saturation). G_MIN..G_MAX = tanh pre-gain (curve ~linear at G_MIN); REF = level (peak, at the
  * waveshaper input) kept constant by the makeup gain: a loud chord at full right volume peaks ~0.3-0.5 there;

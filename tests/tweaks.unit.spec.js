@@ -204,7 +204,47 @@ test.describe("tweaks: persistence", () => {
   });
 });
 
-test("tweaksRequested: ?tweaks, ?tweaks=true, not =false / absent", () => {
+test.describe("tweaks: disabled store (shared store without ?tweaks)", () => {
+  test("defines record only: no apply, no storage access, defaults; enable() applies stored values", () => {
+    let reads = 0;
+    const s = memStorage({ [STORAGE_KEY]: JSON.stringify({ version: 1, values: { "menu.holdMs": 300 } }) });
+    const spy = { ...s, getItem: (k) => (reads++, s.getItem(k)) };
+    const t = createTweaks({ enabled: false });
+    const applied = defineSet(t);
+    expect(applied).toEqual({});
+    expect(t.getTweak("menu.holdMs")).toBe(0);
+    expect(t.setTweak("menu.holdMs", 100)).toBe(0); // no effect while disabled
+    expect(() => t.importTweaks({ "menu.holdMs": 1 })).toThrow(/off/);
+    expect(applied).toEqual({});
+    expect(reads).toBe(0);
+
+    const seen = [];
+    t.onTweak("menu.holdMs", (v) => seen.push(v));
+    t.enable({ storage: spy });
+    expect(reads).toBe(1);
+    expect(t.getTweak("menu.holdMs")).toBe(300);
+    expect(applied["menu.holdMs"]).toEqual([300]);
+    expect(applied["menu.requireOpen"]).toEqual([false]); // every tweak applied once on enable
+    expect(seen).toEqual([300]);
+    t.setTweak("menu.holdMs", 50);
+    expect(stored(s).values).toEqual({ "menu.holdMs": 50 });
+  });
+
+  test("order independent: tweaks defined after enable() apply at once and fire onDefine", () => {
+    const s = memStorage({ [STORAGE_KEY]: JSON.stringify({ version: 1, values: { "lead.releaseMs": 80 } }) });
+    const t = createTweaks({ enabled: false });
+    const defined = [];
+    t.onDefine((d) => defined.push(d.key));
+    t.enable({ storage: s });
+    const got = [];
+    t.defineTweak({ group: "Lead", key: "lead.releaseMs", type: "slider", default: 40, min: 0, max: 500, apply: (v) => got.push(v) });
+    expect(got).toEqual([80]);
+    expect(defined).toEqual(["lead.releaseMs"]);
+    expect(t.groups()).toEqual(["Lead"]);
+  });
+});
+
+test("tweaksRequested:?tweaks, ?tweaks=true, not =false / absent", () => {
   expect(tweaksRequested("?tweaks")).toBe(true);
   expect(tweaksRequested("?tweaks=true")).toBe(true);
   expect(tweaksRequested("?mockHands&tweaks=1")).toBe(true);

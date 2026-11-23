@@ -1,7 +1,11 @@
 // Tweaks: developer settings for trying out variations (constants, thresholds, behavior switches).
-// Pure (no DOM): unit-testable in Node. The panel (panel.js) and the app's tweak definitions (defs.js) are loaded
-// only when the URL has `?tweaks` (main.js, dynamic import), so normal players always get the code defaults and
-// persisted tweak values never apply without `?tweaks` (lead decision; CLAUDE.md "Conventions: Tweaks").
+// Pure (no DOM, no side effects on import): unit-testable in Node, and any module may call defineTweak at load time.
+// The shared store starts DISABLED: definitions are recorded, values stay at the code defaults, `apply` is not called
+// and localStorage is not read. The panel (panel.js) and the app's own definitions (defs.js) are a lazy chunk loaded
+// only when the URL has `?tweaks` (main.js -> index.js), which calls enableTweaks(): stored values apply then, and
+// tweaks defined later (by any module, in any order) apply and appear in the panel at once. So normal players always
+// get the code defaults and persisted tweak values never apply without `?tweaks` (lead decision; CLAUDE.md
+// "Conventions: Tweaks").
 //
 //   defineTweak({ group, key, label, type, default, min, max, step, unit, options, info, apply })
 //     type: "toggle" (boolean) | "slider" | "number" (finite number, clamped to [min, max], snapped to step)
@@ -67,17 +71,25 @@ export function validateTweakValue(def, v, mode = "clamp") {
 
 /**
  * A tweaks store. The app uses the shared one (functions exported below); tests make their own.
- * @param {{storage?: Storage|null, storageKey?: string, onError?: (err:any, where:string) => void}} [opts]
+ * @param {{storage?: Storage|null, storageKey?: string, enabled?: boolean,
+ *          onError?: (err:any, where:string) => void}} [opts]
  *   storage: default localStorage; null = no persistence (values live for this page only).
+ *   enabled: default true. A disabled store only records definitions: values stay at their defaults, `apply` is not
+ *   called and storage is never touched, until enable() (the shared store is disabled until `?tweaks` mounts the panel,
+ *   so modules can call defineTweak at load time with no effect for normal players).
  */
 export function createTweaks(opts = {}) {
-  const storage = "storage" in opts ? opts.storage : defaultStorage();
+  let enabled = opts.enabled ?? true;
+  let storage = null;
+  const resolveStorage = (o) => ("storage" in o ? o.storage : defaultStorage());
+  if (enabled) storage = resolveStorage(opts);
   const storageKey = opts.storageKey ?? STORAGE_KEY;
   const onError = opts.onError ?? ((err, where) => console.error(`[tweaks] ${where}:`, err));
   const defs = new Map(); // key -> definition (in definition order)
   const values = new Map(); // key -> current value
   const listeners = new Map(); // key -> Set(cb)
   const anyListeners = new Set(); // cb(key, value) for every change (the panel)
+  const defineListeners = new Set(); // cb(def) for every new definition (the panel: order-independent rows)
 
   function readStored() {
     if (!storage) return {};
@@ -92,10 +104,10 @@ export function createTweaks(opts = {}) {
       return {}; // corrupted JSON or storage that throws: defaults
     }
   }
-  let stored = readStored();
+  let stored = enabled ? readStored() : {};
 
   function persist() {
-    if (!storage) return;
+    if (!enabled || !storage) return;
     const out = {};
     // Keep stored values of tweaks not defined (yet) on this page, so a page that defines fewer tweaks doesn't erase them.
     for (const [k, v] of Object.entries(stored)) if (!defs.has(k)) out[k] = v;
@@ -110,7 +122,7 @@ export function createTweaks(opts = {}) {
   }
 
   function runApply(def, v) {
-    if (typeof def.apply !== "function") return;
+    if (!enabled || typeof def.apply !== "function") return;
     try {
       def.apply(v);
     } catch (err) {
@@ -136,6 +148,7 @@ export function createTweaks(opts = {}) {
   }
 
   function assign(key, v, { save = true } = {}) {
+    if (!enabled) return values.get(key); // disabled store: defaults only (see createTweaks)
     const def = defs.get(key);
     const changed = values.get(key) !== v;
     values.set(key, v);
@@ -174,7 +187,45 @@ export function createTweaks(opts = {}) {
       }
       values.set(def.key, v);
       runApply(def, v); // on load, always (even at the default) so the live system and the tweak agree
+      for (const cb of defineListeners) {
+        try {
+          cb(def);
+        } catch (err) {
+          onError(err, "onDefine");
+        }
+      }
       return v;
+    },
+
+    /** cb(def) after each new definition (also after the panel mounted). Returns an unsubscribe function. */
+    onDefine(cb) {
+      defineListeners.add(cb);
+      return () => defineListeners.delete(cb);
+    },
+
+    isEnabled: () => enabled,
+
+    /**
+     * Turn a disabled store on: read storage, then apply every tweak defined so far (stored value if valid, else
+     * the default); later definitions apply at once. No-op when already enabled.
+     * @param {{storage?: Storage|null}} [o] default localStorage
+     */
+    enable(o = {}) {
+      if (enabled) return;
+      enabled = true;
+      storage = resolveStorage(o);
+      stored = readStored();
+      for (const [k, def] of defs) {
+        let v = values.get(k);
+        if (Object.prototype.hasOwnProperty.call(stored, k)) {
+          const s = validateTweakValue(def, stored[k], "strict");
+          if (s.ok) v = s.value;
+        }
+        const changed = v !== values.get(k);
+        values.set(k, v);
+        runApply(def, v);
+        if (changed) notify(k, v);
+      }
     },
 
     getTweak(key) {
@@ -221,6 +272,7 @@ export function createTweaks(opts = {}) {
      * Out-of-range numbers are clamped. Throws on unparseable JSON or a wrong shape.
      */
     importTweaks(json) {
+      if (!enabled) throw new Error("importTweaks: tweaks are off (open the page with ?tweaks)");
       const data = typeof json === "string" ? JSON.parse(json) : json;
       if (!data || typeof data !== "object") throw new Error("importTweaks: not an object");
       if (data.version !== undefined && data.version !== TWEAKS_VERSION) {
@@ -267,13 +319,19 @@ export function createTweaks(opts = {}) {
 }
 
 // ---- The shared store (the app's tweaks) ----
+// Disabled until enableTweaks() (src/tweaks/index.js, only with ?tweaks): any module may call defineTweak at load
+// time; without ?tweaks that only records the definition (no apply, no storage), so players get the code defaults.
 let shared = null;
-/** The app's tweaks store (created on first use, with localStorage). */
+/** The app's tweaks store (created on first use). */
 export function sharedTweaks() {
-  if (!shared) shared = createTweaks();
+  if (!shared) shared = createTweaks({ enabled: false });
   return shared;
 }
+/** Turn the shared store on (reads localStorage, applies stored values). Called by the panel's entry with ?tweaks. */
+export const enableTweaks = (o) => sharedTweaks().enable(o);
+export const tweaksEnabled = () => sharedTweaks().isEnabled();
 export const defineTweak = (spec) => sharedTweaks().defineTweak(spec);
+export const onDefineTweak = (cb) => sharedTweaks().onDefine(cb);
 export const getTweak = (key) => sharedTweaks().getTweak(key);
 export const setTweak = (key, v) => sharedTweaks().setTweak(key, v);
 export const onTweak = (key, cb) => sharedTweaks().onTweak(key, cb);
