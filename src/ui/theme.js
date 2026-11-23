@@ -166,7 +166,8 @@ function strokeHalo(g, color, width, { dash = null, alpha = 1, halo = true } = {
 }
 
 function roundRectPath(g, x, y, w, h, r) {
-  const rr = Math.min(r, w / 2, h / 2);
+  // Clamp at 0: a zero-height fill (value 0) would otherwise give arcTo a negative radius, which throws.
+  const rr = Math.max(0, Math.min(r, w / 2, h / 2));
   g.beginPath();
   g.moveTo(x + rr, y);
   g.arcTo(x + w, y, x + w, y + h, rr);
