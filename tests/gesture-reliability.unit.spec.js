@@ -1,15 +1,14 @@
-// Gesture reliability (M0 0.3): synthetic but adversarial sequences through createHandInput.
+// Gesture reliability (M0 0.3): synthetic but adversarial sequences through createHandInput (Node, no browser).
+// Browser parts: the gesture test page -> gesture-test.int.spec.js; ?replay in the app -> app-input.e2e.spec.js.
 // Noise is seeded Gaussian jitter on every landmark (x, y), in normalized image units unless noted
 // (0.004 ~ 2.5 px on a 640 px camera; MediaPipe on a still hand is typically ~1 px).
 import { test, expect } from "@playwright/test";
-import fs from "node:fs";
 import {
   buildHandFrame, createHandInput, PINCH_START, PINCH_END, getThresholds, setThresholds, DEFAULT_THRESHOLDS,
 } from "../src/input/hand-input.js";
 import { createBus } from "../src/core/bus.js";
-import { test as appTest, SCREENS_DIR } from "./fixtures.js";
 import { hand, fist, pinch, leftHand, rightHand, results } from "./helpers/hands.js";
-import { SAMPLE_RECORDING, replayUrl, replayThrough, loadRecordingFile } from "./helpers/replay.js";
+import { SAMPLE_RECORDING, replayThrough, loadRecordingFile } from "./helpers/replay.js";
 
 // ---------------------------------------------------------------- noise + pose tools
 
@@ -351,68 +350,4 @@ test.describe("record / replay", () => {
     expect(pinched.every((f) => f.right.voicingBeforePinch === 2)).toBe(true);
     expect(frames.every((f) => f.left && f.left.fingerCount === 1)).toBe(true);
   });
-
-  appTest("?replay drives the app: chord appears", async ({ page }) => {
-    await page.goto(replayUrl(SAMPLE_RECORDING));
-    await page.locator("#startOverlay").click();
-    await expect(page.locator("#chordDisplay")).toHaveText("A(I)");
-    await expect(page.locator("#qualityDisplay")).toHaveText("Major 1st Inv");
-    await expect.poll(() => page.evaluate(() => window.__gsTest.bus.get("right/pinch")), { timeout: 5000 }).toBe(true);
-    // after the recording ends the hands are gone
-    await expect(page.locator("#chordDisplay")).toHaveText("--", { timeout: 8000 });
-  });
-
-  appTest("?replay drives the gesture test page", async ({ page }) => {
-    await page.goto(replayUrl(SAMPLE_RECORDING, "/labs/gesture-test.html", { loop: true }));
-    await expect(page.locator("#source")).toContainText("replay");
-    await expect(page.locator('[data-testid="Right-pinch-state"]')).toHaveText("PINCH", { timeout: 6000 });
-  });
-
-  appTest("Record button saves a replayable recording", async ({ page }) => {
-    await page.goto("/labs/gesture-test.html?mockHands");
-    await page.evaluate((r) => (window.__gsTest.results = r), results(leftHand(3), rightHand(2)));
-    await page.locator("#recSecs").fill("1");
-    const download = page.waitForEvent("download");
-    await page.locator("#recBtn").click();
-    const file = await (await download).path();
-    const rec = JSON.parse(fs.readFileSync(file, "utf8"));
-    expect(rec.format).toBe("gesture-synth-recording");
-    expect(rec.frames.length).toBeGreaterThan(10);
-    const frames = replayThrough(rec);
-    expect(frames.at(-1).left.fingerCount).toBe(3);
-    expect(frames.at(-1).right.voicingCount).toBe(2);
-  });
-});
-
-// ---------------------------------------------------------------- the test page itself
-
-appTest("gesture test page shows live values (mockHands) — screenshot", async ({ page }) => {
-  await page.goto("/labs/gesture-test.html?mockHands");
-  await expect(page.locator("#source")).toContainText("mockHands");
-  const set = (...hands) => page.evaluate((r) => (window.__gsTest.results = r), results(...hands));
-
-  // a voicing first, then a pinch (so "restore" and "Last event" have something to show)
-  await set(leftHand(5, { tilt: 0.4 }), rightHand(4, { volume: 0.7, tilt: -0.3 }));
-  await expect(page.locator("#hand-Right .dot.on")).toHaveCount(4);
-  await expect(page.locator("#hand-Left .dot.on")).toHaveCount(5);
-  await page.waitForTimeout(400);
-  await set(leftHand(5, { tilt: 0.4 }), pinch({ distance: 0.18, volume: 0.7, tilt: -0.3 }));
-  await expect(page.locator('[data-testid="Right-pinch-state"]')).toHaveText("PINCH");
-  await expect(page.locator("#hand-Right")).toContainText("voi 4"); // restored voicing
-  await expect(page.locator("#hand-Right")).toContainText("Last event: pinch start");
-
-  // sliders live-edit hand-input thresholds; copy readout follows
-  await page.locator("#thr-PINCH_START").fill("0.12");
-  await expect(page.locator("#copyOut")).toHaveValue(/PINCH_START = 0\.12/);
-  expect(await page.evaluate(() => window.__gsTest.getThresholds().PINCH_START)).toBe(0.12);
-  await page.locator("#thr-PINCH_START").fill("0.3");
-
-  await page.waitForTimeout(300);
-  fs.mkdirSync(SCREENS_DIR, { recursive: true });
-  await page.screenshot({ path: `${SCREENS_DIR}/gesture-test.png` });
-
-  // fist: never a pinch, shown as FIST
-  await set(leftHand(1), fist({ thumb: true }));
-  await expect(page.locator("#hand-Right")).toContainText("FIST");
-  await expect(page.locator('[data-testid="Right-pinch-state"]')).not.toHaveText("PINCH");
 });
