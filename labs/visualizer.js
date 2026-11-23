@@ -8,7 +8,7 @@
 // Notes pair by id: a /gs/note/on is drawn from its play time until the /gs/note/off with the same id
 // (also scheduled at its play time); a /gs/note/cancel (sent before the note would have played) removes the
 // pending on/off of that id. /gs/menu events drive the ring (open, arc under the fist, progress, close);
-// /gs/mode shows the active mode in its color.
+// /gs/mode shows the active mode in its color (+ /gs/layer: "Arp + Lead" while Lead plays on top).
 
 import { createViewerClient } from "../src/output/viewer-client.js";
 import { SYS, defaultSignalUrl, normalizeRoomCode } from "../src/output/protocol.js";
@@ -263,21 +263,31 @@ let shownMode = null;
 let menuClosedAt = null;
 let lastMenuClose = null;
 
+const cap = (m) => (m ? m[0].toUpperCase() + m.slice(1) : "");
 function renderMode() {
   const mode = viz.state["/gs/mode"] ?? null;
-  if (mode !== shownMode) {
-    shownMode = mode;
-    if (mode != null) viz.modeLog.push({ mode, recvLocal: performance.now() });
+  const layer = viz.state["/gs/layer"] ?? null; // Lead layer on top of the base mode
+  const key = `${mode}+${layer}`;
+  if (key !== shownMode) {
+    shownMode = key;
+    if (mode != null) viz.modeLog.push({ mode, layer, recvLocal: performance.now() });
     const el = $("modeName");
-    el.textContent = mode ? mode[0].toUpperCase() + mode.slice(1) : "—";
+    if (mode && layer) {
+      el.innerHTML = `<span class="base"></span> + <span class="layer"></span>`;
+      el.querySelector(".base").textContent = cap(mode);
+      el.querySelector(".base").style.color = MODE_COLORS[mode] || "";
+      el.querySelector(".layer").textContent = cap(layer);
+      el.querySelector(".layer").style.color = MODE_COLORS[layer] || "";
+    } else el.textContent = mode ? cap(mode) : "—";
     el.dataset.mode = mode || "";
-    el.style.setProperty("--mode", MODE_COLORS[mode] || "var(--ink)");
+    el.dataset.layer = layer || "";
+    el.style.setProperty("--mode", MODE_COLORS[layer || mode] || "var(--ink)");
   }
   const parts = [];
   const st = viz.state;
   if (st["/gs/voicing"]) parts.push(`voicing ${st["/gs/voicing"]}`);
   if (mode === "arp" && st["/gs/bpm"]) parts.push(`${st["/gs/bpm"]} BPM`);
-  if (mode === "lead") {
+  if (mode === "lead" || layer === "lead") {
     if (st["/gs/noteset"] != null) parts.push(`note set ${st["/gs/noteset"]}`);
     if (st["/gs/octave"] != null) parts.push(`octave ${st["/gs/octave"]}`);
   }
@@ -307,7 +317,7 @@ function drawMenu(now) {
     const a0 = ang - Math.PI / 4 + 0.06, a1 = ang + Math.PI / 4 - 0.06;
     const hover = m && m.arc === id;
     const selected = (m && (m.selected === id || m.confirmed === id)) || (!m && fade > 0 && lastMenuClose?.confirmed === id);
-    const current = viz.state["/gs/mode"] === id;
+    const current = viz.state["/gs/mode"] === id || viz.state["/gs/layer"] === id;
     mg.globalAlpha = alpha * (hover || selected ? 1 : 0.45);
     // arc band
     mg.beginPath();
@@ -350,7 +360,7 @@ function drawMenu(now) {
 
 function renderState() {
   renderMode();
-  const keys = ["/gs/mode", "/gs/chord", "/gs/voicing", "/gs/bpm", "/gs/noteset", "/gs/octave"];
+  const keys = ["/gs/mode", "/gs/layer", "/gs/chord", "/gs/voicing", "/gs/bpm", "/gs/noteset", "/gs/octave"];
   const rest = Object.keys(viz.state).filter((k) => !keys.includes(k)).sort();
   $("state").innerHTML = [...keys, ...rest]
     .map((k) => `<tr><td>${esc(k.replace("/gs/", ""))}</td><td>${esc(fmt(viz.state[k]))}</td></tr>`)
@@ -512,7 +522,7 @@ function drawHands() {
   if (chord && chord.name) g.fillText(chord.name, 16, 40);
   g.font = "13px monospace";
   g.fillStyle = "#8a8f98";
-  if (mode) g.fillText(`mode: ${mode}${viz.state["/gs/voicing"] ? ` · voicing ${viz.state["/gs/voicing"]}` : ""}`, 16, 62);
+  if (mode) g.fillText(`mode: ${mode}${viz.state["/gs/layer"] ? ` + ${viz.state["/gs/layer"]}` : ""}${viz.state["/gs/voicing"] ? ` · voicing ${viz.state["/gs/voicing"]}` : ""}`, 16, 62);
 }
 
 renderState();
