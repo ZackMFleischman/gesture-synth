@@ -13,6 +13,7 @@ import { initAnalytics, trackClarityEvent } from "./src/services/analytics.js";
 import { drawFrame } from "./src/ui/overlay.js";
 import { mountIndicators } from "./src/ui/indicators.js";
 import { mountControls } from "./src/ui/controls.js";
+import { mountModeUI } from "./src/ui/mode-ui.js";
 import chordsMode from "./src/modes/chords.js";
 
 initAnalytics();
@@ -66,6 +67,7 @@ mountIndicators(bus);
 // ---- Modes ----
 registerMode(chordsMode);
 router.setMode("chords");
+const modeUI = mountModeUI({ bus, ctx, registry, router, canvas: canvasEl });
 
 if (import.meta.env.DEV) {
   window.__gsTest.synth = synth;
@@ -132,6 +134,7 @@ async function main() {
 
     // 3. Mode (and menu) drawing on top of the video
     router.draw(g);
+    modeUI.draw(g);
 
     requestAnimationFrame(loop);
   }

@@ -1,0 +1,259 @@
+/*
+ * Modes UI: ADDITIVE CSS (docs/ui-integration.md §8). Imported by src/ui/mode-ui.js.
+ * Everything is scoped under body.gs-modes (set by mountModeUI) so it is inert until the modes UI mounts.
+ * Existing selectors/markup in index.html are not edited; only the 8px edge shift (R1), the guide toggle
+ * min-width and the meter/readout color override existing rules, and only under body.gs-modes.
+ */
+
+body.gs-modes {
+  --gs-brand: #e8a13d;          /* existing accent; = Chords mode color */
+  --gs-mode: #e8a13d;           /* set per mode: chords #e8a13d, arp #4fb3ff, lead #c08cff */
+  --gs-ink: #f3efe7;
+  --gs-quiet: rgba(243, 239, 231, 0.5);
+  --gs-plate: rgba(20, 20, 20, 0.85);   /* same as existing #helpButton */
+  --gs-control-bg: #1a1a1a;     /* same as existing selects */
+  --gs-control-border: #3a3428; /* same as existing selects */
+  --gs-warn: #ff5a5f;
+  --gs-good: #5ad17a;
+  --gs-gutter: 20px;            /* LAYOUT.gutter in src/ui/theme.js */
+  --gs-fast: 120ms;
+  --gs-base: 150ms;
+}
+body.gs-modes[data-mode="chords"] { --gs-mode: #e8a13d; }
+body.gs-modes[data-mode="arp"] { --gs-mode: #4fb3ff; }
+body.gs-modes[data-mode="lead"] { --gs-mode: #c08cff; }
+
+/* R1: existing edge controls move in by 8px to free a 20px gutter for the edge tracks. */
+body.gs-modes #keySelect,
+body.gs-modes #toneSelect,
+body.gs-modes #guideToggle,
+body.gs-modes #gestureGuide,
+body.gs-modes #helpButton { left: var(--gs-gutter); }
+body.gs-modes #volumeMeter,
+body.gs-modes #distortionDisplay { right: var(--gs-gutter); }
+
+/* "Open Guide" / "Close Guide" keep one width so the Controls toggle never crowds it. */
+body.gs-modes #guideToggle { min-width: 112px; }
+
+/* Right-hand readouts (meter + filter readout) take the mode color; amber in Chords = unchanged. */
+body.gs-modes .vol-bar { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); }
+body.gs-modes .vol-bar.lit { background: var(--gs-mode); }
+body.gs-modes #distortionDisplay {
+  color: var(--gs-mode);
+  /* Legible over bright video: soft plate + shadow (fresh-eyes review). */
+  background: rgba(20, 20, 20, 0.6);
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+  transition: opacity var(--gs-fast);
+}
+body.gs-modes #volumeMeter { transition: opacity var(--gs-fast); }
+/* Held (menu open / pinch) or right hand lost: right-hand readouts dim, value frozen. */
+body.gs-modes.gs-right-held #volumeMeter,
+body.gs-modes.gs-right-held #distortionDisplay { opacity: 0.4; }
+/* No right track in this mode (Lead: right height is the note, the ladder shows it). */
+body.gs-modes.gs-no-right-track #volumeMeter { display: none; }
+
+/* ---- Top row: mode badge (+ Lead note-set badge) right of the key select ---- */
+.gs-badge {
+  position: absolute;
+  top: 12px;
+  height: 26px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px 0 9px;
+  border-radius: 13px;
+  font: 600 14px monospace;
+  color: var(--gs-mode);
+  background: color-mix(in srgb, var(--gs-mode) 15%, rgba(20, 20, 20, 0.85));
+  border: 1.5px solid var(--gs-mode);
+  cursor: pointer;
+  z-index: 5;
+  transition: color var(--gs-base), border-color var(--gs-base), background var(--gs-base);
+}
+#modeBadge { left: 110px; }
+.gs-badge .gs-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gs-mode); }
+#noteSetBadge { gap: 3px; padding: 0 9px; cursor: default; }
+#noteSetBadge.hidden { display: none; }
+#noteSetBadge i {
+  display: block; width: 9px; height: 8px; border-radius: 2px;
+  border: 1px solid color-mix(in srgb, var(--gs-mode) 60%, transparent);
+}
+#noteSetBadge i.on { background: var(--gs-mode); border-color: var(--gs-mode); }
+
+/* ---- Connection chip (milestone 3, src/output/status-chip.js): top right, left of the meter ---- */
+#outputChip {
+  position: absolute;
+  top: 12px;
+  right: calc(var(--gs-gutter) + 70px + 12px); /* gutter + meter width + gap */
+  height: 26px;
+  box-sizing: border-box;
+  display: flex; align-items: center; gap: 7px;
+  padding: 0 11px 0 9px;
+  border-radius: 13px;
+  border: 1px solid var(--gs-quiet);
+  background: var(--gs-plate);
+  color: var(--gs-ink);
+  font: 13px monospace;
+  cursor: pointer;
+  z-index: 5;
+}
+#outputChip .gs-dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--gs-ink); box-sizing: border-box; }
+#outputChip.direct { border-color: var(--gs-good); background: color-mix(in srgb, var(--gs-good) 14%, rgba(20,20,20,0.85)); }
+#outputChip.direct .gs-dot { background: var(--gs-good); border-color: var(--gs-good); }
+#outputChip.relayed { border-color: var(--gs-warn); background: color-mix(in srgb, var(--gs-warn) 14%, rgba(20,20,20,0.85)); }
+#outputChip.relayed .gs-dot { background: var(--gs-warn); border-color: var(--gs-warn); }
+#outputChip.waiting { border-style: dashed; }
+@media (max-width: 519px) {
+  #outputChip { width: 26px; padding: 0; justify-content: center; }
+  #outputChip .gs-text { display: none; }
+}
+
+/* ---- Third row: "Controls" toggle next to the existing "Open Guide" ---- */
+#controlsToggle {
+  position: absolute;
+  top: 90px;
+  left: calc(var(--gs-gutter) + 112px + 8px); /* guide toggle min-width + gap */
+  background: #1a1a1a;
+  color: #e8a13d;
+  border: 1px solid #3a3428;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 14px;
+  padding: 4px 8px;
+  cursor: pointer;
+  z-index: 5;
+}
+#controlsToggle[aria-pressed="true"] { border-color: #e8a13d; }
+
+/* ---- Screen controls panel: same slot + look as #gestureGuide; the two are mutually exclusive ---- */
+#controlsPanel {
+  position: absolute;
+  top: 128px;
+  left: var(--gs-gutter);
+  width: min(340px, calc(100vw - 2 * var(--gs-gutter)));
+  max-height: calc(100dvh - 128px - 76px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 10px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(20,20,20,0.95), rgba(20,20,20,0.86));
+  font-family: monospace;
+  font-size: 13px;
+  color: var(--gs-ink);
+  z-index: 5;
+}
+#controlsPanel.hidden { display: none; }
+#controlsPanel .gs-k { color: #e8a13d; white-space: nowrap; }
+#controlsPanel .gs-v { display: flex; align-items: center; gap: 6px; min-width: 0; }
+#controlsPanel .gs-sep { grid-column: 1 / -1; height: 1px; background: #3a3428; margin: 1px 0; }
+#controlsPanel .gs-full { grid-column: 1 / -1; }
+.gs-hand {
+  display: inline-flex; margin-left: auto; padding-left: 4px; color: var(--gs-quiet);
+  visibility: hidden;
+}
+.gs-hand svg { width: 13px; height: 13px; display: block; }
+.gs-owned > .gs-hand, .gs-owned .gs-hand { visibility: visible; }
+.gs-seg { display: flex; border: 1px solid #3a3428; border-radius: 4px; overflow: hidden; }
+.gs-seg button {
+  background: #1a1a1a; color: var(--gs-quiet); border: 0; border-right: 1px solid #3a3428;
+  font: 12px monospace; padding: 4px 7px; cursor: pointer;
+}
+.gs-seg button:last-child { border-right: 0; }
+.gs-seg button.on { background: color-mix(in srgb, var(--gs-mode) 22%, #1a1a1a); color: var(--gs-mode); font-weight: 600; }
+.gs-btn {
+  background: #1a1a1a; color: #e8a13d; border: 1px solid #3a3428; border-radius: 4px;
+  font: 12px monospace; padding: 3px 8px; cursor: pointer;
+}
+.gs-range { width: 140px; min-width: 0; accent-color: var(--gs-mode); }
+.gs-range.master { accent-color: var(--gs-ink); }
+.gs-switch {
+  width: 30px; height: 16px; border-radius: 8px; border: 1px solid #3a3428; background: #1a1a1a; position: relative;
+  padding: 0; cursor: pointer; flex: none;
+}
+.gs-switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--gs-quiet);
+}
+.gs-switch[aria-pressed="true"] { border-color: var(--gs-good); }
+.gs-switch[aria-pressed="true"]::after { left: 16px; background: var(--gs-good); }
+.gs-switch:disabled { opacity: 0.5; cursor: default; }
+.gs-note { color: var(--gs-quiet); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The active mode's own rows (mode.controls(container, ctx)) restyled to the panel's look. */
+#controlsPanel #modeControls { display: contents; }
+#controlsPanel .gs-mode-host { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 8px; }
+#controlsPanel .gs-mode-host:not(:has(.arp-row, [data-control])) { display: none; }
+#controlsPanel .gs-mode-host:not(:has(.arp-row, [data-control])) + .gs-sep { display: none; }
+#controlsPanel .arp-controls { font: 13px monospace; color: var(--gs-ink); gap: 8px; --arp: var(--gs-mode); }
+#controlsPanel .arp-controls > .arp-row { flex-wrap: nowrap; gap: 10px; }
+#controlsPanel .arp-controls > .arp-row > .arp-label {
+  min-width: 84px; width: 84px; flex: none; opacity: 1; color: #e8a13d; white-space: nowrap;
+}
+#controlsPanel .arp-controls .arp-row .arp-row { gap: 6px; }
+#controlsPanel .arp-seg { border: 1px solid #3a3428; border-radius: 4px; }
+#controlsPanel .arp-seg button { padding: 4px 7px; font: 12px monospace; color: var(--gs-quiet); background: #1a1a1a; }
+#controlsPanel .arp-seg button + button { border-left: 1px solid #3a3428; }
+#controlsPanel .arp-seg button.on { background: color-mix(in srgb, var(--gs-mode) 22%, #1a1a1a); color: var(--gs-mode); font-weight: 600; }
+#controlsPanel .arp-btn {
+  border: 1px solid #3a3428; border-radius: 4px; background: #1a1a1a; color: #e8a13d;
+  font: 12px monospace; padding: 3px 8px; min-width: 0;
+}
+#controlsPanel .arp-toggle[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--gs-mode) 22%, #1a1a1a); border-color: var(--gs-mode); color: var(--gs-mode);
+}
+#controlsPanel .arp-bpm { font: 600 14px monospace; min-width: 3ch; }
+#controlsPanel .arp-controls input[type="range"] { width: 140px; min-width: 0; accent-color: var(--gs-mode); }
+
+/* Narrow screens: compact rows so the panel ends above the hands (hand overlays also hide while open). */
+@media (max-width: 519px) {
+  #controlsPanel { gap: 6px 8px; padding: 10px 12px; font-size: 12px; grid-template-columns: 74px minmax(0, 1fr); }
+  #controlsPanel .arp-controls { gap: 6px; }
+  #controlsPanel .arp-controls > .arp-row > .arp-label { min-width: 74px; width: 74px; }
+  #controlsPanel .arp-seg button, .gs-seg button { padding: 3px 6px; font-size: 11px; }
+  #controlsPanel .arp-controls input[type="range"], .gs-range { width: 120px; }
+}
+
+/* ---- Transport (clocked modes): centered above the chord display, clear of the energy wave ---- */
+#transport {
+  position: absolute;
+  bottom: 118px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 13px;
+  background: rgba(20, 20, 20, 0.7);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+  font: 600 13px monospace;
+  color: var(--gs-ink);
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 4;
+}
+#transport.hidden { display: none; }
+#transport .gs-bpm { display: flex; align-items: baseline; gap: 4px; }
+#transport .gs-bpm span { color: var(--gs-quiet); font-weight: 400; }
+#transport .gs-delta { color: var(--gs-mode); font-style: normal; font-weight: 600; }
+#transport .gs-delta:empty { display: none; }
+#transport .gs-beats, #transport .gs-steps { display: flex; align-items: center; gap: 6px; }
+#transport .gs-beats i { width: 8px; height: 8px; border-radius: 50%; box-sizing: border-box; border: 1px solid var(--gs-quiet); display: block; }
+#transport .gs-beats i.on { background: var(--gs-mode); border-color: var(--gs-mode); }
+#transport .gs-steps { gap: 4px; }
+#transport .gs-steps i { width: 5px; height: 5px; border-radius: 50%; background: rgba(243,239,231,0.3); display: block; }
+#transport .gs-steps i.on { background: var(--gs-ink); }
+#transport .gs-steps i.rest { background: rgba(243,239,231,0.55); }
+#transport .gs-div { width: 1px; height: 12px; background: rgba(243,239,231,0.25); }
+
+/* ---- Gesture guide extension: right-hand rows for the active mode (appended to #gestureGuide) ---- */
+.gs-guide-sep { height: 1px; background: #3a3428; margin: 4px 0 2px; }
+.gs-guide-head { color: var(--gs-mode); font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.gs-guide-head::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--gs-mode); }
+.gs-guide-label { color: var(--gs-ink); font-size: 13px; opacity: 0.85; }
+.gesture-guide-row.gs-guide-mode .gesture-guide-gesture { width: 28px; text-align: center; font-size: 18px; }
