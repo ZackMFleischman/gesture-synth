@@ -22,7 +22,9 @@ export const MASTER_VOLUME = Object.freeze({
   DEAD_ZONE: 0.04, // height units: movements smaller than this (backlash) never change the volume
   TAU_MS: 140, // one-pole smoothing time constant (right height uses ~30-50 ms in the audio graph)
   LOW: 0.1, // height at/below which the master is 0 (low left hand = rest)
-  HIGH: 0.7, // height at/above which the master is 1
+  // Height at/above which the master is 1. 0.55 (was 0.7): a mid-frame left hand (0.5) gives 0.89, so typical play
+  // keeps about today's loudness after the gain re-staging that keeps voices out of the limiter (src/services/audio.js).
+  HIGH: 0.55,
   INITIAL: 1, // before a left hand was ever seen (e.g. a right-hand-only Lead melody); the first left frame sets it directly
 });
 

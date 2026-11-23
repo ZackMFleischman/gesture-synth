@@ -5,6 +5,11 @@
 // 5-8 index, 9-12 middle, 13-16 ring, 17-20 pinky (mcp, pip, dip, tip).
 
 import { makeView } from "../../src/input/hand-input.js";
+import { MASTER_VOLUME } from "../../src/router.js";
+
+/** Master volume the router maps a left hand at `volume` (= height) to; the default leftHand() is at 0.5. */
+export const masterAt = (volume = 0.5) =>
+  Math.max(0, Math.min(1, (volume - MASTER_VOLUME.LOW) / (MASTER_VOLUME.HIGH - MASTER_VOLUME.LOW)));
 
 const FINGER_ORDER = ["index", "middle", "ring", "pinky"];
 const MCP_X_OFFSET = { index: -0.06, middle: -0.02, ring: 0.02, pinky: 0.06 };

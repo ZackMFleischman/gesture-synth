@@ -4,7 +4,17 @@
 //   arp / lead / noteOn() voices ─────────────────────────────────────────────────────────────────────────┤
 //                                                                                                         v
 //   out (waveshaper, pass-through; the PRE-FILTER bus) -> lowpass filter -> masterGain (left height, all modes)
-//     -> limiter (DynamicsCompressor) -> clipper (soft-clip waveshaper, |y| < 0.95) -> destination
+//     -> limiter (DynamicsCompressor) -> clipper (soft-clip waveshaper, |y| < 0.98) -> destination
+//
+// Gain staging (docs/architecture.md, "Accepted amendments"): normal playing never reaches the limiter.
+// Worst steady state = master 1, right volume 1, sawtooth, filter fully open (tilt +1: 5 kHz, Q 5.2), every
+// key/degree/voicing incl. close voicings summing in phase: 4 oscillators at level 1 peak at 5.15 after the
+// filter (square: 6.1, triangle: 4.0; measured offline over all 1344 chords). CHORD_LEVEL 0.13 puts that
+// at 0.67 (-3.5 dBFS), 1.5 dB under the limiter threshold. Arp (gate 1, x2) peaks ~0.5 and Lead (lead +
+// pad) ~0.36 at master 1 with their own level constants. The limiter (-2 dBFS, 20:1, 1 ms) only catches
+// transients/overshoot; the soft clipper (linear to 0.9) is the last guard, so the output never exceeds ±1.
+// Note: DynamicsCompressor adds a fixed makeup gain below threshold (Chrome: (1/fullRangeGain)^0.6, about
+// +1.0 dB at -2 dB / knee 1 / 20:1, measured; it was +2.9 dB at the old -6 dB / knee 3). Linear, so part of the staging.
 //
 // SynthEngine keeps the original chord behavior (oscillators, filter curve, waveform). Additions:
 //  - chordGain (chord-voice volume, setVolume) is separate from masterGain (setMasterVolume)
@@ -15,13 +25,15 @@
 import { bus as sharedBus } from "../core/bus.js";
 
 const CHORD_VOICE = "chords";
-/** Level of each chord oscillator (4 summed). Leaves headroom for the limiter; see tests/audio.spec.js. */
-export const CHORD_LEVEL = 0.42;
+/** Level of each chord oscillator (4 summed). Worst case stays under the limiter threshold (see header). */
+export const CHORD_LEVEL = 0.13;
 /** Fade-in of a chord that starts from silence (no previous chord sounding). */
 const CHORD_ATTACK = 0.03;
 /** Soft clipper: linear below KNEE, saturates towards CEIL. Inputs beyond ±1 map to the curve ends. */
-const CLIP_KNEE = 0.8;
-const CLIP_CEIL = 0.18; // headroom above the knee (curve end ≈ 0.944)
+const CLIP_KNEE = 0.9;
+const CLIP_CEIL = 0.09; // headroom above the knee (curve end ≈ 0.972)
+/** Master limiter: a safety net for transients only (steady playing stays below the threshold). */
+export const LIMITER = Object.freeze({ threshold: -2, knee: 1, ratio: 20, attack: 0.001, release: 0.1 });
 
 let noteIdCounter = 0;
 /** Globally unique note id (pairs note/on with note/off or note/cancel across all voices). */
@@ -82,15 +94,11 @@ export class SynthEngine {
     this.masterGain = ac.createGain();
     this.masterGain.gain.value = this.masterVolume;
 
-    // Gentle limiter: fast attack, high ratio, threshold a few dB below full scale.
+    // Limiter: fast attack, high ratio, threshold just below full scale. Steady playing stays under it.
     this.limiter = ac.createDynamicsCompressor();
-    this.limiter.threshold.value = -6;
-    this.limiter.knee.value = 3;
-    this.limiter.ratio.value = 20;
-    this.limiter.attack.value = 0.001;
-    this.limiter.release.value = 0.1;
+    for (const k of ["threshold", "knee", "ratio", "attack", "release"]) this.limiter[k].value = LIMITER[k];
 
-    // Safety net for the limiter's attack/lookahead overshoot: a soft clip that cannot exceed ±0.95.
+    // Safety net for the limiter's attack/lookahead overshoot: a soft clip that cannot exceed ±0.98.
     this.clipper = ac.createWaveShaper();
     this.clipper.curve = softClipCurve();
     this.clipper.oversample = "2x";

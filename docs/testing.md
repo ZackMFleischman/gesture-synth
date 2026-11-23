@@ -78,6 +78,7 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `app-input.e2e.spec.js` | e2e | From `hand-input` + `gesture-reliability` (`?replay` and view geometry in the app). |
 | `audio.spec.js` | e2e | Right place: Chords pitches/expression on recorded audio. In-flight (m1-wiring). `output never clips` is `test.fail()` until the limiter lands. |
 | `bus.spec.js` | e2e (legacy) | **Mixed**: 7 Node unit tests + 3 app tests in one file. Split the `bus (unit)` block into `bus.unit.spec.js` after m1-wiring merges (it edits this file). |
+| `gain-staging.e2e.spec.js` | e2e | Gain staging around the master limiter: every chord (1344, offline render of the real engine) under the threshold at max settings; loudness linear in right volume and master; no limiting in steady loud Chords/Arp/Lead; peak <= 1. |
 | `gestures.spec.js` | e2e | Right place (gesture → UI mapping in the app). Overlaps `hand-input.unit` on purpose: unit proves classification, this proves the wiring. |
 | `m1-ui.spec.js` | e2e | Milestone spec, right place. |
 | `mobile-ui.e2e.spec.js` | e2e | The app's mobile system: before/after audit, tray/sheets/guide strip/minimal HUD with the real handlers, first visit, blocked storage, phone first-use labels, desktop inert, real-app screens + video. |
