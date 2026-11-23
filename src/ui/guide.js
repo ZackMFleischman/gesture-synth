@@ -12,14 +12,14 @@ import { trackX } from "./edge-tracks.js";
 export const DEFAULT_GUIDE = {
   chords: [["✊", "Menu"], ["↕", "Volume"], ["👍", "Octave down"]],
   arp: [["✊", "Menu"], ["↕", "Gate"], ["👍", "Double time"], ["🤏", "Tempo"]],
-  lead: [["✊", "Menu"], ["↕", "Note"], ["🤏", "Play"], ["☝️", "Note set"], ["🔼", "Pinch arrow: octave"]],
+  lead: [["✊", "Menu"], ["↕", "Note"], ["🤏", "Play"], ["1️⃣2️⃣3️⃣🤘", "Note set"], ["🔼", "Pinch arrow: octave"]],
 };
 
 /** First-use labels per mode (≤ 2 words). Placement keys: track | arc | thumb | under. */
 export const FIRST_USE = {
   arp: [["track", "Gate"], ["arc", "Filter"], ["thumb", "Thumb: x2"], ["under", "Pinch: tempo"]],
   // Lead: the ladder is the right-height control (no track), so "Height: note" sits above the hand.
-  lead: [["arc", "Height: note"], ["thumb", "Fingers: notes"], ["under", "Pinch: play"]],
+  lead: [["arc", "Height: note"], ["thumb", "1–3 or 🤘: notes"], ["under", "Pinch: play"]],
 };
 /** On phones only the labels at the edge / above the hand show: the others land on the player's torso. */
 export const PHONE_FIRST_USE = new Set(["track", "arc"]);
@@ -104,6 +104,10 @@ export function createGuide({ S, doc }) {
         [x, y, align] = [trackX(exprSide, G) + inw * (LAYOUT.gutter + 2), R.y - 18, inw > 0 ? "left" : "right"];
       } else if (where === "arc") {
         [x, y, align] = [R.x, R.y - G.hs * 0.95 - 16, "center"];
+        // Never over the filter value label above the arc (hand-overlays.js): stack above it.
+        const fl = S.filterLabel;
+        const lh = size * 1.15 + 6;
+        if (fl && y + lh / 2 > fl.y - 2) y = Math.min(y, fl.y - 4 - lh / 2);
       } else if (where === "thumb") {
         // Thumb side = towards the screen center.
         [x, y, align] = [R.x + inw * G.hs * 0.62, R.y + G.hs * 0.18, inw > 0 ? "left" : "right"];

@@ -2,11 +2,12 @@
 // Reads `mode` (via S) and `lead/noteset`. The badge takes the mode color as soon as `mode` changes,
 // which the router does at the START of the countdown. Click/tap opens the controls panel.
 
-import { MODE_COLORS } from "./theme.js";
+import { MODE_COLORS, CONFIRM } from "./theme.js";
+import { SET_SHAPES } from "../modes/lead-notes.js";
 
 /** Lead note sets (lead/noteset 1..4; names as in src/modes/lead-notes.js NOTE_SETS). */
 const SET_NAMES = ["Chord notes", "Five notes", "Full scale", "All notes"];
-const FLASH_MS = 150;
+const FLASH_MS = CONFIRM.popMs; // the confirm pop (scale + white rim), same timing as the canvas confirm
 
 export function createBadges({ S, bus, doc }) {
   const key = doc.getElementById("keySelect");
@@ -51,7 +52,8 @@ export function createBadges({ S, bus, doc }) {
       if (on) {
         noteSet.innerHTML = SET_NAMES.map((_, i) => `<i class="${i + 1 === set ? "on" : ""}"></i>`).join("");
         const name = SET_NAMES[set - 1] || "";
-        noteSet.title = `Note set: ${name}`;
+        const shape = SET_SHAPES[set];
+        noteSet.title = shape ? `Note set: ${name} (hand: ${shape.emoji} ${shape.label})` : `Note set: ${name}`;
         noteSet.setAttribute("aria-label", `Note set ${set} of 4: ${name}`);
         noteSet.dataset.set = String(set);
         // Short confirm flash on a change (spec: "a short flash confirms the change").
