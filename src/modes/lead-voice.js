@@ -67,7 +67,9 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
     env.gain.value = 0;
     osc.connect(tone);
     tone.connect(env);
-    env.connect(out);
+    // Lead layer: the lead goes through its own tilt filter (ctx.audio.layerOut -> layerFilter -> master), so the
+    // base mode underneath keeps the shared filter at its held value. The pad stays on the shared bus.
+    env.connect(audio.layerOut || out);
     osc.start();
 
     const padTone = ac.createBiquadFilter();

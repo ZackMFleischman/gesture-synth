@@ -291,8 +291,28 @@ export default {
     drawEnergy(g, view.volume, view.qualityIndex, view.tilt, view.chord);
   },
 
-  controls() {
-    return () => {};
+  /**
+   * No screen rows while the right hand plays Chords. Under the Lead layer (ctx.layerBase === "chords") the right
+   * hand plays the lead and Chords' volume is held: a Volume row sets the held value.
+   */
+  controls(container, ctx) {
+    if (!ctx || ctx.layerBase !== "chords" || !container) return () => {};
+    ensureParams(ctx);
+    const doc = container.ownerDocument;
+    const wrap = doc.createElement("div");
+    wrap.className = "arp-controls chords-controls";
+    wrap.innerHTML =
+      '<div class="arp-row"><span class="arp-label">Volume</span>' +
+      '<input type="range" min="0" max="1" step="0.01" aria-label="Chords volume (held)" data-control="chords-volume"></div>';
+    const input = wrap.querySelector("input");
+    input.value = String(held.volume);
+    input.addEventListener("input", () => {
+      held.volume = Math.max(0, Math.min(1, Number(input.value)));
+      volumeParam.value = held.volume; // meter + bus; hold() plays it on the next frame
+      view.volume = held.volume;
+    });
+    container.append(wrap);
+    return () => wrap.remove();
   },
 
   menuItems: [],

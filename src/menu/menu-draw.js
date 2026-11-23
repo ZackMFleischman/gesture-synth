@@ -300,7 +300,8 @@ export function createMenuRenderer(themeOverrides = {}) {
         }
 
         const [vx, vy] = DIR_VEC[it.direction];
-        // current-mode marker: small dot on the arc's outer edge
+        // current-mode marker: small dot on the arc's outer edge; an item still running under the current one
+        // (`secondary`, e.g. the base mode under the Lead layer) gets a hollow ring instead
         if (isCur) {
           g.beginPath();
           g.arc(cx + vx * R, cy + vy * R, TH.markerR, 0, Math.PI * 2);
@@ -309,6 +310,15 @@ export function createMenuRenderer(themeOverrides = {}) {
           g.stroke();
           g.fillStyle = rgba(TH.ink, base * (1 - 0.4 * a.dim));
           g.fill();
+        } else if (it.secondary) {
+          g.beginPath();
+          g.arc(cx + vx * R, cy + vy * R, TH.markerR + 0.5, 0, Math.PI * 2);
+          g.lineWidth = 3.5;
+          g.strokeStyle = rgba(TH.shadow, 0.5 * base);
+          g.stroke();
+          g.lineWidth = 1.5;
+          g.strokeStyle = rgba(TH.ink, base * (1 - 0.4 * a.dim));
+          g.stroke();
         }
 
         // label outside the ring, in the direction of movement
@@ -364,7 +374,7 @@ export function createMenuRenderer(themeOverrides = {}) {
       const sel = items.find((i) => i.id === snap.selectedId);
       let hint = "Move to choose";
       if (!snap.tracking) hint = "Hand lost";
-      else if (sel) hint = sel.id === snap.currentId ? "Already active" : "Open hand to confirm";
+      else if (sel) hint = sel.id === snap.currentId ? "Already active" : sel.confirmHint || "Open hand to confirm";
       const down = items.find((i) => i.direction === "down");
       const hy = cy + R + 24 + (down ? labelStart0 + labelBox(down).h : 0);
       g.font = `${sel ? 600 : 500} ${TH.hintPx}px ${TH.font}`;

@@ -32,19 +32,17 @@ export const DIRECTIONS = Object.freeze({ right: 0, down: 90, left: 180, up: -90
 const DIR_NAMES = Object.keys(DIRECTIONS);
 
 /**
- * Item types. Only "mode" is implemented; submenu/setting/action/custom plug in here later.
- * confirm() decides what opening the hand on a selected item does:
+ * Item types: "mode" and "layer" (a mode that plays on top of the current one, e.g. Lead); submenu/setting/
+ * action/custom plug in here later. confirm() decides what opening the hand on a selected item does:
  *   "countdown" -> confirmed, flash + get-ready countdown, then closed
  *   "same"      -> no change (closes like a cancel)
+ * Generic item metadata (all optional): `secondary: true` = also running, under the current item (hollow
+ * marker; choosing it IS a change), `confirmHint` = the hint under the ring while it is selected.
  */
+const sameIfCurrent = (item, { currentId }) => (item.id === currentId ? "same" : "countdown");
 const ITEM_TYPES = new Map([
-  [
-    "mode",
-    {
-      selectable: true,
-      confirm: (item, { currentId }) => (item.id === currentId ? "same" : "countdown"),
-    },
-  ],
+  ["mode", { selectable: true, confirm: sameIfCurrent }],
+  ["layer", { selectable: true, confirm: sameIfCurrent }],
 ]);
 
 /** Register a new menu item type (future: submenu, setting, action, custom). */
