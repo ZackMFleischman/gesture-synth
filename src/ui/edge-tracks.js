@@ -9,7 +9,7 @@
 // Markers are level with the hand's palm (no numbers).
 
 import {
-  COLORS, LAYOUT, STROKE, edgeTrackX, drawEdgeTrack, drawPlate, drawRing, FONT,
+  COLORS, LAYOUT, STROKE, edgeTrackX, drawEdgeTrack, drawLabel, drawPlate, drawRing, FONT,
 } from "./theme.js";
 
 const MEET_PX = 6; // return state ends when the hand marker is this close to the held marker
@@ -157,7 +157,12 @@ export function createEdgeTracks({ S, bus }) {
       const v = S.rightTrack ? bus.get(S.rightTrack.param) : null;
       heldY = S.rightHeld ? (typeof v === "number" ? valueToY(G, v) : heldY) : null;
     }
-    if (S.rightHeld && !wasHeld) heldY = S.heldValue != null ? valueToY(G, S.heldValue) : lastRightY ?? liveY;
+    if (S.rightHeld && !wasHeld) {
+      // Arp pinch (menu closed): the hollow marker stays where the solid one was (hand level at the pinch
+      // start), so nothing jumps; the menu shows the held value on the track.
+      const pinchHold = S.menu.state === "closed" && lastRightY != null;
+      heldY = pinchHold ? lastRightY : S.heldValue != null ? valueToY(G, S.heldValue) : lastRightY ?? liveY;
+    }
     if (!S.rightHeld) heldY = null;
     wasHeld = S.rightHeld;
     if (liveY != null && !S.rightHeld) lastRightY = liveY;
@@ -174,6 +179,17 @@ export function createEdgeTracks({ S, bus }) {
       track(g, G, { name: "right-track", side: exprSide, color: S.color, hand: R, lostNow: true, markerY: lastRightY, fillY: lastRightY });
     } else if (S.rightHeld) {
       track(g, G, { name: "right-track", side: exprSide, color: S.color, hand: R, markerY: null, heldY, fillY: heldY, dim: true });
+      // Pinch (menu closed): say what is held next to the hollow marker ("Gate held", mock §3).
+      if (S.menu.state === "closed" && heldY != null && S.rightTrack.label) {
+        const inward = exprSide === "left" ? 1 : -1;
+        const x = edgeTrackX(exprSide, G.W) + inward * (LAYOUT.markerLength / 2 + 10);
+        const y = Math.max(LAYOUT.trackTop + 10, Math.min(G.H - LAYOUT.trackBottom - 10, heldY));
+        const r = drawLabel(g, `${S.rightTrack.label} held`, x, y, {
+          size: 12, weight: 600, color: COLORS.ink, align: inward > 0 ? "left" : "right", plate: true,
+        });
+        S.tracks["right-track"].heldLabel = `${S.rightTrack.label} held`;
+        G.reg("right-held-label", "hand", r);
+      }
     } else {
       track(g, G, {
         name: "right-track",
@@ -182,7 +198,8 @@ export function createEdgeTracks({ S, bus }) {
         hand: R,
         markerY: liveY,
         heldY: hollow,
-        guideTo: rPos ? handEdgePoint(G, rPos, exprSide) : null,
+        // No guide while the big BPM shows next to the hand (Arp pinch + ~1 s): it would cross the number.
+        guideTo: rPos && !bus.get("arp/tempo") ? handEdgePoint(G, rPos, exprSide) : null,
       });
     }
   }
