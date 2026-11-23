@@ -33,8 +33,13 @@ Node lives at `~/.local/node/bin` on this machine (not on the default PATH):
 - **Tests: read `docs/testing.md` before writing any.** Four layers chosen by file name: `*.unit.spec.js` (Node,
   pure src/), `*.int.spec.js` (a lab page), `*.e2e.spec.js` / `mN-*.spec.js` (the real app), `*.build.spec.js`
   (vite build + preview). Playwright with headless system Chrome + fake webcam; own port per worktree (`PW_PORT`).
-  - **Merge gate: `PW_PORT=52xx npm run verify`** (unit -> integration -> e2e -> build, prints per-layer times). ~2 min.
-  - `npm test` (unit+int+e2e), `npm run test:unit` (~2 s, no server), `test:int`, `test:e2e`, `test:build`,
+  - **Edit loop: `PW_PORT=52xx npm test`** = the FAST run (< ~60 s): unit + integration + e2e minus `@full`-tagged
+    tests and the `FULL_ONLY` files (playwright.config.js). Test speed is a resource: new slow tests (long audio
+    recordings, variant sweeps) get `{ tag: "@full" }` + a cheap fast test of the same journey; demo videos / WAVs /
+    screenshot sets get `@media` (`npm run test:media`, never gating). docs/testing.md "Fast run vs full gate".
+  - **Merge gate: `PW_PORT=52xx npm run verify`** (unit -> integration -> e2e -> build, everything but `@media`; prints
+    per-layer times + the 25 slowest tests). ~3 min.
+  - `npm run test:full` (the gate minus build), `npm run test:unit` (~2 s, no server), `test:int`, `test:e2e`, `test:build`,
     `test:pages` (every page incl. auto-discovered labs), `test:visual` (pixel baselines; `-- --update-snapshots`
     after an intended UI change), `test:ui`, `test:audio`, `test:smoke` (real MediaPipe, needs network).
 - `npm run signal` — visualizer output signaling/relay server (ws://localhost:5417; `SIGNAL_PORT`). Turn the output

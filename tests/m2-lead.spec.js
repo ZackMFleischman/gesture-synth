@@ -57,7 +57,9 @@ async function setNoteSet(page, n) {
   expect((await dbg(page)).setId).toBe(n);
 }
 
-test.describe.configure({ mode: "default" }); // audio measurements: keep this file's tests off each other's CPU
+// Full gate: this file's tests run one after another (its @full audio measurements stay off each other's CPU).
+// Fast run (PW_TIER=fast, no @full tests here): parallel, so the file is not one long serial job.
+test.describe.configure({ mode: process.env.PW_TIER === "fast" ? "parallel" : "default" });
 
 // =====================================================================================================
 // Menu journeys + sound continuity
@@ -106,7 +108,7 @@ test.describe("Lead in the fist menu", () => {
   });
 
   for (const [from, to, dir] of [["chords", "lead", "left"], ["lead", "chords", "up"], ["lead", "arp", "right"], ["arp", "lead", "left"]]) {
-    test(`no click or gap across ${from} -> ${to} while the left hand holds a chord`, async ({ context }, info) => {
+    test(`no click or gap across ${from} -> ${to} while the left hand holds a chord`, { tag: "@full" }, async ({ context }, info) => {
       test.setTimeout(90_000);
       await retryOnCaptureGlitch(info, async ({ track }) => {
         const page = await openApp(context);
@@ -184,7 +186,7 @@ test.describe("Lead UX checks in the app", () => {
     }
   });
 
-  test("2.2 the cursor does not flicker when the hand is still (camera jitter at a note edge)", async ({ synthPage: page }) => {
+  test("2.2 the cursor does not flicker when the hand is still (camera jitter at a note edge)", { tag: "@full" }, async ({ synthPage: page }) => {
     await setHandsOn(page, SC.preview(0.5));
     await enterLeadByPanel(page);
     for (const set of [1, 4]) {
@@ -206,7 +208,7 @@ test.describe("Lead UX checks in the app", () => {
     }
   });
 
-  test("2.3 the note that plays is the previewed note (FFT pitch, every set); note events carry app-wide ids", async ({ synthPage: page }) => {
+  test("2.3 the note that plays is the previewed note (FFT pitch, every set); note events carry app-wide ids", { tag: "@full" }, async ({ synthPage: page }) => {
     await setHandsOn(page, SC.preview(0.5));
     await enterLeadByPanel(page);
     await page.evaluate(() => {
@@ -429,7 +431,7 @@ test.describe("Lead with the menu and the master", () => {
     expect(d.sounding).toBeCloseTo(midiToFreq(pv), 3);
   });
 
-  test("output never clips: Lead on top of Chords at full master, Bright tone, open resonant filter", async ({ synthPage: page }) => {
+  test("output never clips: Lead on top of Chords at full master, Bright tone, open resonant filter", { tag: "@full" }, async ({ synthPage: page }) => {
     const L = SC.left(5, { y: 0.1 }); // high left hand = master 1
     await setHandsOn(page, L, SC.preview(0.5));
     await enterLeadByPanel(page);
@@ -485,8 +487,8 @@ for (const [vpName, vp] of [["desktop", DESKTOP], ["mobile", MOBILE]]) {
         }, CONTROLS);
         expect(info.chordSide).toBe(sc.chordSide);
         expect(d.side).toBe(sc.exprSide);
-        // Under the Lead layer the meter shows the base's held value (desktop); the phone layout hides the meter.
-        expect(info.meterVisible, "meter = the base's held value under the Lead layer").toBe(vp.width >= 600);
+        // The top-right 8-bar meter is hidden in the modes UI on every layout (body.gs-modes; still in the DOM).
+        expect(info.meterVisible, "8-bar meter hidden in the modes UI").toBe(false);
         const lad = d.regions.find((r) => r.name === "lead-ladder").rect;
         const master = info.regions.find((r) => r.name === "master-track")?.rect;
         expect(master, "master track drawn").toBeTruthy();
@@ -539,7 +541,7 @@ test("help modal has a Lead section; gesture guide shows Lead rows; first-use la
 // Screenshots + real-time video (with sound)
 // =====================================================================================================
 
-test("screenshots m2-* and video test-results/videos/m2-lead.webm (Chords -> menu -> Lead play, note set, octave -> Chords)", async ({ synthPage: page, browser }) => {
+test("screenshots m2-* and video test-results/videos/m2-lead.webm (Chords -> menu -> Lead play, note set, octave -> Chords)", { tag: "@media" }, async ({ synthPage: page, browser }) => {
   test.setTimeout(120_000);
   fs.mkdirSync(SCREENS_DIR, { recursive: true });
   const shot = (name) => page.screenshot({ path: `${SCREENS_DIR}/m2-${name}.png` });

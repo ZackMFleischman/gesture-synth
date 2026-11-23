@@ -238,7 +238,7 @@ async function settleLimiterMeter(page) {
 }
 
 test.describe("Drive (right hand sideways)", () => {
-  test("brightness rises with right x, loudness stays within ±2 dB (default tone, filter neutral)", async ({ synthPage: page, setHands }) => {
+  test("brightness rises with right x, loudness stays within ±2 dB (default tone, filter neutral)", { tag: "@full" }, async ({ synthPage: page, setHands }) => {
     test.setTimeout(60_000);
     await setAxes(page, { drive: true });
     const L = leftHand(4, { volume: 0.7 });
@@ -266,7 +266,7 @@ test.describe("Drive (right hand sideways)", () => {
     await shot(page, "drive-full");
   });
 
-  test("full Drive on loud Chords (sawtooth, filter open, master 1, right 1): no limiting, loudness ±2 dB, peak <= 1", async ({ synthPage: page, setHands }) => {
+  test("full Drive on loud Chords (sawtooth, filter open, master 1, right 1): no limiting, loudness ±2 dB, peak <= 1", { tag: "@full" }, async ({ synthPage: page, setHands }) => {
     test.setTimeout(60_000);
     const th = await threshold(page);
     await setAxes(page, { drive: true });
@@ -289,7 +289,7 @@ test.describe("Drive (right hand sideways)", () => {
     }
   });
 
-  test("full Drive on loud Arp (gate 1, x2, max settings): no limiting, peak <= 1", async ({ synthPage: page, setHands }) => {
+  test("full Drive on loud Arp (gate 1, x2, max settings): no limiting, peak <= 1", { tag: "@full" }, async ({ synthPage: page, setHands }) => {
     const th = await threshold(page);
     await setAxes(page, { drive: true });
     await page.locator("#toneSelect").selectOption("sawtooth");
@@ -307,7 +307,7 @@ test.describe("Drive (right hand sideways)", () => {
     expect(m.peak).toBeLessThanOrEqual(1);
   });
 
-  test("Drive off (default, and switched off again): right x has no effect (same brightness as neutral)", async ({ synthPage: page, setHands }) => {
+  test("Drive off (default, and switched off again): right x has no effect (same brightness as neutral)", { tag: "@full" }, async ({ synthPage: page, setHands }) => {
     test.setTimeout(60_000);
     await page.locator("#toneSelect").selectOption("sawtooth");
     const L = leftHand(4, { volume: 0.95 });
@@ -349,7 +349,7 @@ test.describe("Space (left hand sideways)", () => {
     return { playing: playing.rms, tail: rms(seg), samples: rec.samples, sr, space: await bus(page, "space") };
   }
 
-  test("wet tail after note-off with left x high; none at neutral; dry level kept at neutral", async ({ synthPage: page, setHands }) => {
+  test("wet tail after note-off with left x high; none at neutral; dry level kept at neutral", { tag: "@full" }, async ({ synthPage: page, setHands }) => {
     test.setTimeout(60_000);
     await setAxes(page, { space: true });
     const dry = await tail(page, setHands, 0.5);
@@ -364,7 +364,7 @@ test.describe("Space (left hand sideways)", () => {
     expect(Math.abs(dB(wet.playing) - dB(dry.playing))).toBeLessThanOrEqual(2);
   });
 
-  test("full Space on loud Chords: no limiting, peak <= 1", async ({ synthPage: page, setHands }) => {
+  test("full Space on loud Chords: no limiting, peak <= 1", { tag: "@full" }, async ({ synthPage: page, setHands }) => {
     const th = await threshold(page);
     await setAxes(page, { space: true });
     await page.locator("#toneSelect").selectOption("sawtooth");
@@ -378,7 +378,7 @@ test.describe("Space (left hand sideways)", () => {
     expect(m.peak).toBeLessThanOrEqual(1);
   });
 
-  test("Space off (default, and switched off again): no tail", async ({ synthPage: page, setHands }) => {
+  test("Space off (default, and switched off again): no tail", { tag: "@full" }, async ({ synthPage: page, setHands }) => {
     test.setTimeout(60_000);
     const t = await tail(page, setHands, 1);
     expect(t.space).toBeUndefined(); // default off: not published
@@ -505,7 +505,7 @@ test.describe("at-hand indicators, guide, help", () => {
   });
 });
 
-test("video: reaching up/down and sideways (test-results/videos/reach-zones.webm)", async ({ synthPage: page, setHands, browser }) => {
+test("video: reaching up/down and sideways (test-results/videos/reach-zones.webm)", { tag: "@media" }, async ({ synthPage: page, setHands, browser }) => {
   test.setTimeout(90_000);
   const OUT = "test-results/videos/reach-zones.webm";
   await axesOn(page); // sideways = experimental Drive / Space, switched on for the video

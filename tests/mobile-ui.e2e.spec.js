@@ -14,7 +14,8 @@ test.describe("audit (before): app without the mobile system", () => {
     test.describe(size, () => {
       test.use(device(vp));
 
-      test(`today's app ${size}`, async ({ synthPage: page, setHands }) => {
+      // Screenshots + audit numbers of the app WITHOUT the mobile system (the "before"): media, nothing to assert.
+      test(`today's app ${size}`, { tag: "@media" }, async ({ synthPage: page, setHands }) => {
         // "Before" = the app without the mobile system (main.js mounts it; destroy() restores every node).
         await page.evaluate(() => window.__gsTest.mobile.destroy());
         await setHands(leftHand(6, { minor: true }), rightHand(3, { volume: 0.6, tilt: 0.3 }));
@@ -49,7 +50,8 @@ test.describe("real app + mobile system", () => {
     test.describe(size, () => {
       test.use(device(vp));
 
-      test(`playing collapsed ${size}: budget, clear area, real handlers`, async ({ synthPage: page, setHands }) => {
+      // Fast run: one portrait + one landscape phone; the full gate checks every size.
+      test(`playing collapsed ${size}: budget, clear area, real handlers`, { tag: ["390x844", "844x390"].includes(size) ? [] : "@full" }, async ({ synthPage: page, setHands }) => {
         await mountInApp(page);
         await setHands(leftHand(6, { minor: true }), rightHand(3, { volume: 0.6, tilt: 0.3 }));
         await expect(page.locator("#chordDisplay")).toHaveText("F#m(vi)");
@@ -182,8 +184,8 @@ for (const [size, vp] of Object.entries(APP_SIZES)) {
     test("states: playing-collapsed, tray-open, controls-sheet, guide-strip, minimal-hud", async ({ synthPage: page, setHands }) => {
       await appArp(page, setHands);
       await expect(page.locator("#gsPill")).toContainText("Arp");
-      // L1: the meter (same value as the right edge track) shows only while the tray is open; L5: the pill
-      // replaces the mode badge on phones.
+      // The 8-bar meter is hidden in the modes UI (body.gs-modes; collapsed or not); L5: the pill replaces the
+      // mode badge on phones.
       await expect(page.locator("#volumeMeter")).toBeHidden();
       await expect(page.locator("#modeBadge")).toBeHidden();
       await page.waitForTimeout(3300); // first-use labels gone
@@ -194,7 +196,7 @@ for (const [size, vp] of Object.entries(APP_SIZES)) {
 
       await page.locator("#gsPill").click();
       await expect(page.locator("#gsBar")).toHaveClass(/open/);
-      await expect(page.locator("#volumeMeter")).toBeVisible();
+      await expect(page.locator("#volumeMeter")).toBeHidden(); // also with the tray open
       await appShot(page, "tray-open", size);
 
       await page.locator("#controlsToggle").click();
@@ -231,18 +233,30 @@ for (const [size, vp] of Object.entries(APP_SIZES)) {
 test.describe("real app video 390x844", () => {
   test.use(device(MOBILE_SIZES["390x844"]));
 
-  test("tray -> auto-collapse -> controls sheet -> close (real time)", async ({ synthPage: page, setHands, browser }) => {
-    test.setTimeout(60_000);
-    const { createScreencast } = await import("./helpers/screencast.js");
-    const rec = createScreencast();
+  test("tray -> auto-collapse while hands play (> 1.5 s) -> controls sheet -> close", async ({ synthPage: page, setHands }) => {
     await appArp(page, setHands);
-    await rec.track(page, "phone");
-    await page.waitForTimeout(800);
     await page.locator("#gsPill").click();
     await expect(page.locator("#gsBar")).toHaveClass(/open/);
     const t0 = Date.now();
     await expect(page.locator("#gsBar")).not.toHaveClass(/open/, { timeout: 5000 }); // hands playing -> folds
     expect(Date.now() - t0).toBeGreaterThan(1500);
+    await page.locator("#gsPill").click();
+    await page.locator("#controlsToggle").click();
+    await expect(page.locator("#gsControlsSheet")).toBeVisible();
+    await page.locator("#gsControlsSheet .gs-close").click();
+    await expect(page.locator("#gsControlsSheet")).toBeHidden();
+  });
+
+  test("video: tray -> auto-collapse -> controls sheet -> close (real time)", { tag: "@media" }, async ({ synthPage: page, setHands, browser }) => {
+    test.setTimeout(60_000);
+    const { createScreencast } = await import("./helpers/screencast.js");
+    const rec = createScreencast();
+    await appArp(page, setHands);
+    await rec.track(page, "phone");
+    await page.waitForTimeout(800); // real time: the video shows each step
+    await page.locator("#gsPill").click();
+    await expect(page.locator("#gsBar")).toHaveClass(/open/);
+    await expect(page.locator("#gsBar")).not.toHaveClass(/open/, { timeout: 5000 });
     await page.waitForTimeout(600);
     await page.locator("#gsPill").click();
     await page.waitForTimeout(500);

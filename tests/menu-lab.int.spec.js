@@ -15,7 +15,7 @@ const step = (page, ms) => page.evaluate((ms) => window.__menuLab.step(ms), ms);
 const shot = (page, name) => page.screenshot({ path: `${SCREENS_DIR}/menu-${name}.png` });
 
 test.describe("radial menu lab", () => {
-  test("full flow: available -> approach -> selected -> confirmed -> countdown", async ({ page }) => {
+  test("full flow: available -> approach -> crossing auto-selects -> countdown (arc fades)", async ({ page }) => {
     await openLab(page);
     const cx = 640;
     const cy = 430;
@@ -30,31 +30,31 @@ test.describe("radial menu lab", () => {
     await step(page, 200);
     await shot(page, "available");
 
-    await page.mouse.move(cx + px(0.6), cy, { steps: 4 });
+    await page.mouse.move(cx + px(0.5), cy, { steps: 4 }); // inside the select radius (0.6)
     let r = await step(page, 200);
     expect(r.hoverId).toBe("arp");
     expect(r.selectedId).toBe(null);
+    expect(r.state).toBe("open");
     await shot(page, "approach");
 
+    // Auto-select: crossing the select radius chooses Arp at once (no open-hand confirm, no tick sound).
     await page.mouse.move(cx + px(1.0), cy, { steps: 4 });
-    r = await step(page, 200);
+    r = await step(page, 16);
+    expect(r.state).toBe("countdown");
     expect(r.selectedId).toBe("arp");
-    await expect(page.locator("#log")).toContainText("tick");
-    await shot(page, "selected");
-    await page.screenshot({ path: `${SCREENS_DIR}/menu-selected-crop.png`, clip: { x: 400, y: 230, width: 500, height: 380 } });
-
-    await page.mouse.up();
-    await step(page, 48);
     await expect(page.locator("#log")).toContainText("confirmed: arp");
+    await expect(page.locator("#log")).not.toContainText("tick");
     await expect(page.locator("#badge")).toHaveAttribute("data-mode", "arp");
-    expect(await page.evaluate(() => window.__menuLab.last.state)).toBe("countdown");
     await step(page, 30);
-    await shot(page, "confirmed");
+    await shot(page, "selected"); // bump + selection indicator on the chosen arc
+    await page.screenshot({ path: `${SCREENS_DIR}/menu-selected-crop.png`, clip: { x: 400, y: 230, width: 500, height: 380 } });
     await step(page, 250);
-    await shot(page, "countdown");
+    await shot(page, "countdown"); // the chosen arc fading out (no countdown ring)
+    await page.mouse.up(); // opening the hand during the countdown changes nothing
     await step(page, 400);
     expect(await page.evaluate(() => window.__menuLab.last.state)).toBe("closed");
     await expect(page.locator("#log")).toContainText("countdown done");
+    await expect(page.locator("#badge")).toHaveAttribute("data-mode", "arp");
   });
 
   test("cancel in the center zone fades with no change", async ({ page }) => {
@@ -72,18 +72,22 @@ test.describe("radial menu lab", () => {
     await expect(page.locator("#badge")).toHaveAttribute("data-mode", "chords");
   });
 
-  test("current item selected shows 'Already active' and changes nothing", async ({ page }) => {
+  test("crossing the current item closes quietly and changes nothing", async ({ page }) => {
     await openLab(page);
     await page.mouse.move(640, 430);
     await page.mouse.down();
     await step(page, 300);
+    await page.mouse.move(640, 430 - px(0.5), { steps: 4 });
+    let r = await step(page, 100);
+    expect(r.hoverId).toBe("chords");
+    await shot(page, "approach-current");
     await page.mouse.move(640, 430 - px(1.0), { steps: 4 });
-    const r = await step(page, 200);
-    expect(r.selectedId).toBe("chords");
-    await shot(page, "selected-current");
-    await page.mouse.up();
-    await step(page, 64);
+    r = await step(page, 16);
+    expect(r.state).toBe("closed");
     await expect(page.locator("#log")).toContainText("cancelled (same-item)");
+    await expect(page.locator("#log")).not.toContainText("confirmed:");
+    await expect(page.locator("#badge")).toHaveAttribute("data-mode", "chords");
+    await page.mouse.up();
   });
 
   test("lead selected (left) and small hand size", async ({ page }) => {
@@ -181,7 +185,7 @@ test.describe("radial menu lab: Sound sub-menu", () => {
     expect(s.currentId).toBe("warm");
   });
 
-  test("pick an instrument: approach, selected, flash, value pill; badge updates without a countdown", async ({ page }) => {
+  test("pick an instrument: approach, crossing = picked (flash), badge updates without a countdown", async ({ page }) => {
     await openLab(page);
     await enterSound(page);
     const c = await subCenterPx(page);
@@ -190,41 +194,37 @@ test.describe("radial menu lab: Sound sub-menu", () => {
     expect(r.hoverId).toBe("electric");
     expect(r.selectedId).toBe(null);
     await page.screenshot({ path: sub("approach") });
-    await to(page, c, 15, 0.9);
-    r = await step(page, 150);
+    await to(page, c, 15, 0.9); // crossing the select radius picks it at once
+    r = await step(page, 16);
+    expect(r.state).toBe("flash");
     expect(r.selectedId).toBe("electric");
-    await page.screenshot({ path: sub("selected") });
-    await page.screenshot({ path: sub("selected-crop"), clip: { x: c.x - 260, y: c.y - 220, width: 520, height: 400 } });
-
-    await page.mouse.up();
-    await step(page, 48);
     await expect(page.locator("#log")).toContainText("set sound/base: electric");
     await expect(page.locator("#badge")).toHaveAttribute("data-sound", "electric");
     await expect(page.locator("#badge")).toHaveAttribute("data-mode", "chords"); // mode unchanged
-    expect((await page.evaluate(() => window.__menuLab.last)).state).toBe("flash");
     await step(page, 40);
     await page.screenshot({ path: sub("flash") });
+    await page.screenshot({ path: sub("selected-crop"), clip: { x: c.x - 260, y: c.y - 220, width: 520, height: 400 } });
     await step(page, 120);
     expect((await page.evaluate(() => window.__menuLab.last)).state).toBe("closed");
     await expect(page.locator("#log")).toContainText("setting done");
     await step(page, 100);
     await page.screenshot({ path: sub("done") });
+    await page.mouse.up();
     await step(page, 400);
     await expect(page.locator("#log")).not.toContainText("confirmed:");
   });
 
-  test("current instrument shows the dot and 'Already set'; release changes nothing", async ({ page }) => {
+  test("crossing the current instrument closes quietly; nothing changes", async ({ page }) => {
     await openLab(page);
     await enterSound(page);
     const c = await subCenterPx(page);
     await to(page, c, -145, 0.9); // Warm (up-left) = current
-    const r = await step(page, 150);
-    expect(r.selectedId).toBe("warm");
-    await page.screenshot({ path: sub("selected-current") });
-    await page.mouse.up();
-    await step(page, 64);
+    const r = await step(page, 150); // (the sub-ring selects nothing until it has grown: LEVEL_ARM_MS)
+    expect(r.state).toBe("closed");
     await expect(page.locator("#log")).toContainText("cancelled (same-item)");
+    await expect(page.locator("#log")).not.toContainText("set sound/base");
     await expect(page.locator("#badge")).toHaveAttribute("data-sound", "warm");
+    await page.mouse.up();
   });
 
   test("moving up goes back to the main ring; open hand in the sub-ring center cancels all levels", async ({ page }) => {

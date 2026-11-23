@@ -12,7 +12,7 @@ const H = 800;
 const px = (s) => s * 0.12 * W; // hand sizes -> CSS px at the lab's default hand size
 const OUT = "test-results/videos/menu-sequence.webm";
 
-test("record enter -> approach -> select -> confirm -> countdown", async ({ page, context }) => {
+test("record enter -> approach -> select -> confirm -> countdown", { tag: "@media" }, async ({ page, context }) => {
   test.setTimeout(60_000);
   await page.goto("/labs/menu-lab.html");
   await page.waitForFunction(() => !!window.__menuLab);

@@ -29,15 +29,42 @@ item at the layer the user experiences it:
 ## Commands
 ```
 export PATH=$HOME/.local/node/bin:$PATH        # node is not on the default PATH here
-PW_PORT=52xx npm run verify      # THE merge gate: unit -> integration -> e2e -> build, per-layer times
-PW_PORT=52xx npm test            # unit + integration + e2e in one parallel run (no build)
+PW_PORT=52xx npm test            # FAST run (~45-60 s): unit + integration + e2e minus @full / FULL_ONLY (below)
+PW_PORT=52xx npm run verify      # THE merge gate (~3 min): unit -> integration -> e2e -> build, everything but @media
+PW_PORT=52xx npm run test:full   # the gate's unit + integration + e2e in one parallel run (no build, no summary)
+PW_PORT=52xx npm run test:media  # opt-in demo media only: videos, demo WAVs, screenshot sets (never gating)
 npm run test:unit                # Node only, no server
 PW_PORT=52xx npm run test:int | test:e2e | test:build | test:pages | test:visual
 PW_PORT=52xx npx playwright test --project=e2e audio -g "Dmaj7"     # one test
 ```
 Use your own `PW_PORT` per worktree (the dev server never reuses a port). Derived ports: signaling server
 PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every run (e.g. `--workers=4`).
-`npx playwright test` with no `--project` runs all four layers in parallel — fine, but `verify` is the gate.
+`verify` prints per-layer wall times, the 3 slowest tests per layer and the 25 slowest overall, and keeps the
+reports in `playwright-report/verify/` (`summary.json`: every test's duration; `test-results/` is wiped by each run).
+
+## Fast run vs full gate vs media
+Test speed is a resource: `npm test` is the edit loop, `verify` the merge gate.
+
+| Run | What | Not in it | Wall (20 cores, default 10 workers) |
+|---|---|---|---|
+| `npm test` (`PW_TIER=fast`) | every unit test; labs: menu-lab, lead-proximity, gesture-test, arp (pitches, bus, contract, screen controls); the app: every journey (chords + pitches on recorded audio, fist menu + Sound menu + Lead layer, Arp, pinch tempo, Lead, layout at desktop + phone in the real orientation, mobile system, output chip + zero-work-when-off, tweaks, every page boots) | `@full` tests + the `FULL_ONLY` files | 60 s at load ~12 (other agents); fewer on a quiet machine |
+| `npm run verify` | everything except `@media`, + the production build | `@media` | 195 s at load ~12-20 (was 277 s) |
+| `npm run test:media` | `@media`: demo videos (`test-results/videos/*.webm`), demo WAVs, screenshot sets, the mobile "before" audit | — | ~4 min, opt-in |
+
+- **`@full`** (`test("…", { tag: "@full" }, …)`): valuable but slow — long real-time audio measurements (arp ±3 ms
+  timing, no click/gap across switches, FFT pitch per note, gain staging, Drive/Space audio), visual-ish sweeps over
+  every variant (mirrored hand sides, every phone size). The fast run keeps a cheaper test of the same journey.
+- **`FULL_ONLY`** files (`playwright.config.js`): `smoke` (real MediaPipe, network), `visual.e2e` (pixel
+  baselines), `gain-staging.e2e`, `instruments.e2e`, `lead.spec` (Lead lab; the app journeys stay fast),
+  `mobile-ui.int` (prototype lab), `ui-lab.spec` (mock-ups, to be retired).
+- **`@media`**: tests whose product is a file for people to look at / listen to (video, WAV, screenshot set) with
+  little to assert. Their assertions are duplicated by gating tests. Also `npm run capture` (scripts/capture-media.mjs)
+  makes the summary-page media.
+- Files with `mode: "default"` (audio measurements kept off each other within the file) run `parallel` in the fast
+  run, where their @full audio tests are not present (`process.env.PW_TIER === "fast"`).
+- New test: put it in the fast run unless it is one of the above; if it records > ~2 s of audio or sweeps variants,
+  tag it `@full` and keep (or add) a fast test of the same journey. `suite-layout.unit` guards the lists.
+- Workers: default (50 % of cores). `--workers=16` was not faster on this machine and starved frame-sampling tests.
 
 ## Naming convention (enforced)
 - New spec files **must** end in `.unit.spec.js`, `.int.spec.js`, `.e2e.spec.js` or `.build.spec.js`.
@@ -65,17 +92,18 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `radial-menu.unit.spec.js` | unit | Split out of `radial-menu.spec.js`. |
 | `lead-layer.unit.spec.js` | unit | Lead layer rules: router (layer on top of the base, base held via hold(), same-base Return crossfade, other base = switch, layer alone without a base), registry `layer`/`secondary` items, menu same-item vs change. |
 | `recordings.unit.spec.js` | unit | New: every `tests/fixtures/**/*.expect.json` is a test. |
+| `smooth.unit.spec.js` | unit | Display smoothing (One-Euro): still-hand jitter >= 3x lower, fast step 90 % within ~120 ms, gap restart, shared vector cutoff, smoother bank. |
 | `suite-layout.unit.spec.js` | unit | New: convention guard. |
 | `reach-zones.unit.spec.js` | unit | Fixed band (palm y 12.5 % = 1 .. 87.5 % = 0, both sides; height from the palm alone at scales 0.5–2, four shapes, three views; a still palm keeps its exact height through size jitter / a closer hand / shape changes), clamping, horizontal band + dead zone, hand-input zone/x publishing (x only while its axis is on), axes table + switches (default off: nothing published, audio untouched), Drive gain math. |
 | `pinch-tempo.unit.spec.js` | unit | Pinch -> tempo mapping, the `pinch` bus event, `matchToScheduleAnyOffset` (helpers/schedule-match.js). |
-| `arp.spec.js` | integration | Right place for engine timing (±3 ms) on recorded audio. Lab-only: **app-level timing owed** (M1). Includes a WAV demo (not a gate-worthy assert; keep, it's cheap). |
+| `arp.spec.js` | integration | Engine timing (±3 ms) on recorded audio: 10 s at 1/8 (drift), 4 s at 1/16 (was 10 s: drift is rate-independent; scheduler math over 2 min in `arp-patterns`). Timing/gate/double/tempo/rest tests are `@full`; the WAV demo is `@media`. |
 | `gesture-test.int.spec.js` | integration | From `gesture-reliability.spec.js`. |
 | `lead.spec.js` | integration | Right place for Lead UX checks 2.1–2.5 in the lab (engine-level measurements: discrete note steps, retrigger, clicks). App journeys: `m2-lead.spec.js`. |
 | `lead-proximity.int.spec.js` | integration | Lead edge feedback in the lab: proximity rises from a note's centre to its edge with the snapped note held until the switch point, neighbour highlight, screens `lead-proximity-{center,near-edge,after-switch}.png`; release fade length/monotonic decay + click metric, re-pinch during the fade; mouse click on an octave arrow steps at once. First pass (more coverage to follow). |
-| `lead-demo.spec.js` | integration | Demo artifact (melody WAV + screenshots), 1 assert. Keep; candidate for a non-gating demo tag later. |
+| `lead-demo.spec.js` | integration | `@media`: demo artifact (melody WAV + video), 1 assert. |
 | `mobile-ui.int.spec.js` | integration | Mobile system prototype in `labs/mobile-lab.html` (+ planned chrome as the before): budgets, clear area, 2-tap reach, sheets, 44 px targets, auto-collapse. |
 | `menu-lab.int.spec.js` | integration | From `radial-menu.spec.js` (lab visuals). |
-| `radial-menu-video.spec.js` | integration | Demo video, few asserts, slowest integration test (~15 s). Same note as `lead-demo`. |
+| `radial-menu-video.spec.js` | integration | `@media`: demo video of the menu lab (~16 s), few asserts (menu-lab.int covers them). |
 | `ui-lab.spec.js` | integration | Layout contract on mock-ups. Duplicated by `m1-ui.spec.js` for every state the real app can show; after M1/M2 keep only states the app can't reach yet, then retire. |
 | `analytics.spec.js` | e2e | Right place (dev never loads Clarity). Production side is in `production.build.spec.js`. |
 | `app-input.e2e.spec.js` | e2e | From `hand-input` + `gesture-reliability` (`?replay` and view geometry in the app). |
@@ -88,12 +116,13 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `m1-pinch.spec.js` | e2e | Milestone spec (1.6 pinch = tempo): no jump at the start, voicing kept (bus + heard pitches), locks, Return, no lost/doubled step on recorded audio, visuals, screenshots + video. |
 | `m2-lead.spec.js` | e2e | Milestone spec: Lead in the app (fist menu, switches without a gap, 2.1–2.5, menu hold, clipping, layout both sides at 1280×800 / 390×844, screenshots + `test-results/videos/m2-lead.webm` with sound). Helpers: `helpers/m2-lead.js` (browser-only). |
 | `lead-layer.e2e.spec.js` | e2e | Lead layer in the app: Arp→Lead / Chords→Lead (held base values, left-hand chords reach the base, lead + base in the FFT, no gap/click), menu rules + Return crossfade, Controls panel while layered, badge/pill/meter/layout at 1280×800 + 390×844, screens `layer-*.png`, `test-results/videos/lead-layer.webm` with sound. Visualizer `/gs/layer`: in `m3-output.spec.js`. |
-| `output.spec.js` | e2e | Right place (app + visualizer, two contexts). Its demo-video test is the slowest e2e test (~19 s). |
+| `output.spec.js` | e2e | Right place (app + visualizer, two contexts). Fast: chip + zero work when off + mobile chip; `@full`: visualizer data, beat grid, relay; `@media`: the demo video. Chord `t` = heard time (adds `outputLatency`). |
 | `camera-feedback.e2e.spec.js` | e2e | Lead after the first real-camera session: set shapes (open hand never selects; 1/2/3 fingers + 🤘), confirm pop/linger/fade, ladder labels (both sides, 1280×800 + 390×844), discrete pitch steps (cycles + FFT per 85 ms, click metric), one filter visual per mode, screens `feedback-*.png` + `videos/camera-feedback-lead.webm`. Analysis: `helpers/lead-pitch.js` (pure). |
 | `m3-output.spec.js` | e2e | M3 3.3: output hooked into the modes app (beat grid, menu/mode, Arp notes, manifest, pinch, screens + video). |
 | `output-m3.unit.spec.js` | unit | M3 3.3 pure mapping + clock transport notifications. |
 | `reach-zones.e2e.spec.js` | e2e | The fixed 75 % band (palm at 12.5 / 50 / 87.5 % of the screen = 1 / 0.5 / 0, both hands, any size; band never changes), markers level with the palm on the band, Arp gate + Lead cursor/arrows at the band ends, no Range row, Drive / Space default OFF (nothing published, no sound change, no scales / guide / help lines) and every ON test switching them on first through the "Experimental" group, x bands, Drive (FFT brightness, ±2 dB, no limiting), Space (tail / none), switches, at-hand scales, phone, screens `reach-*.png` + `videos/reach-zones.webm`. |
 | `pages.e2e.spec.js` | e2e | New: every served page (auto-discovers `labs/*.html`). |
+| `tweaks.e2e.spec.js` | e2e | Tweaks panel smoke (TWEAKS_ALWAYS_ON): present by default, the menu select-radius slider changes the live menu geometry, persists over a reload, Reset all; `?tweaks=false` = no panel. |
 | `smoke.spec.js` | e2e | Real MediaPipe from the CDN: **needs network**. The only test of the real tracker. |
 | `ui.spec.js` | e2e | Right place. Overlaps `visual.e2e` (structure vs pixels) — intended. |
 | `visual.e2e.spec.js` | e2e | New: pixel baselines of stable chrome. |
@@ -196,7 +225,7 @@ integration level, and **one e2e journey in the real app**. Status:
 | Real-hand recordings (pinch, fist/menu entry, thumb flapping) with `.expect.json` | each milestone's dev-instance session (needs a person + camera) |
 
 ## Before a merge
-`PW_PORT=52xx npm run verify` is green (all four layers). New behavior has tests at the layers above; new
+`PW_PORT=52xx npm run verify` is green (all four layers; `npm test` alone is not the gate). New behavior has tests at the layers above; new
 pages are smoke-tested automatically (add a `PAGES` entry in `pages.e2e.spec.js` for their core interaction);
 intended visual changes come with updated baselines; no assert was loosened without a measurement.
 
@@ -204,9 +233,12 @@ intended visual changes come with updated baselines; no assert was loosened with
 - Unit: `radial-menu.unit.spec.js` / `submenu.unit.spec.js` cover auto-select, the 2 s re-arm cooldown, no tick,
   same-item quiet close, open-hand cancel, LEVEL_ARM_MS, hysteresis (no double-fire) and the live `menuConfig`
   (`requireRelease`, `holdMs`, runtime changes next frame); reset it in `afterEach` (`resetMenuConfig()`).
-- In-app / lab menu helpers that "select, then open the hand" still pass for a change of mode (the selection is the
-  confirm, `selectedId` stays set during the countdown), but a step that waits to SEE a selected arc without choosing it
-  (current item, screenshots of the selected state, tracking loss with the fist past the radius) must either stay inside
-  the radius or set `requireRelease: true` (`window.__gsTest`/lab: `import("/src/menu/menu-config.js")`).
+- In-app menu helpers wait for the CHOICE, not a selected arc: `menuChosen(page)` (`helpers/m2-lead.js`) reads the menu
+  snapshot (`confirmedId`, or the current item on a `same-item` close) — a setting's 150 ms flash and a same-item close
+  are over before a bus poll of `menu.selectedId` sees them. A step that must SEE the menu without choosing (approach
+  screenshots, tracking loss, cancel) stays inside the select radius (stop on `progress >= 0.6`), or sets
+  `requireRelease: true` (`window.__gsTest`/lab: `import("/src/menu/menu-config.js")`).
+- Hand-attached visuals are display-smoothed (`src/ui/smooth.js`, `smooth.unit.spec.js`): "marker level with the hand"
+  checks poll until the marker settles (`expect.poll`), never a fixed frame count.
 - Quick lab check + screenshots: dev server on a port, then `node scripts/menu-shots.mjs http://localhost:<port>` ->
   `test-results/screens/menu-autoselect-{approach,bump,countdown,setting-bump}.png`.

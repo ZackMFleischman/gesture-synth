@@ -56,14 +56,16 @@ async function setNoteSet(page, n) {
   expect((await dbg(page)).setId).toBe(n);
 }
 
-test.describe.configure({ mode: "default" }); // one audio test: keep this file's tests off each other's CPU
+// Full gate: this file's tests run one after another (its @full audio measurements stay off each other's CPU).
+// Fast run (PW_TIER=fast, no @full tests here): parallel, so the file is not one long serial job.
+test.describe.configure({ mode: process.env.PW_TIER === "fast" ? "parallel" : "default" });
 
 // =====================================================================================================
 // 1. Note-set shapes
 // =====================================================================================================
 
 test.describe("note-set shapes", () => {
-  test("releasing a pinch into an open hand (4 fingers, thumb either way) held 1 s never changes the note set", async ({ synthPage: page }) => {
+  test("releasing a pinch into an open hand (4 fingers, thumb either way) held 1 s never changes the note set", { tag: "@full" }, async ({ synthPage: page }) => {
     await setHandsOn(page, SC.preview(0.5));
     await enterMode(page, "lead");
     for (const start of [1, 2, 3, 4]) {
@@ -151,20 +153,30 @@ async function firstDrawn(page, kind) {
   return h.jsonValue();
 }
 
-/** Samples what draw() showed for `kind` until `untilMs` after the confirm: [{since, alpha, scale}] (alpha 0 = not drawn). */
+/**
+ * Samples what draw() showed for `kind` until `untilMs` after the confirm: [{since, alpha, scale}] (alpha 0 = not drawn).
+ * startSampling() starts the in-page rAF sampler at once (so a screenshot taken meanwhile does not eat the first
+ * frames of the window); sampleConfirm() resolves with its samples.
+ */
+async function startSampling(page, kind, untilMs) {
+  await page.evaluate(({ kind, untilMs }) => {
+    window.__confirmSamples = new Promise((res) => {
+      const out = [];
+      const step = () => {
+        const d = window.__gsTest.registry.getMode("lead")._debug();
+        const v = kind === "set" ? d.setBadge : d.octaveToast;
+        const since = d.drawnAt - (kind === "set" ? d.setChangedAt : d.octaveChangedAt);
+        out.push({ since, alpha: v ? v.alpha : 0, scale: v ? v.scale : 1 });
+        if (since >= untilMs) res(out);
+        else requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+  }, { kind, untilMs });
+}
 async function sampleConfirm(page, kind, untilMs) {
-  return page.evaluate(({ kind, untilMs }) => new Promise((res) => {
-    const out = [];
-    const step = () => {
-      const d = window.__gsTest.registry.getMode("lead")._debug();
-      const v = kind === "set" ? d.setBadge : d.octaveToast;
-      const since = d.drawnAt - (kind === "set" ? d.setChangedAt : d.octaveChangedAt);
-      out.push({ since, alpha: v ? v.alpha : 0, scale: v ? v.scale : 1 });
-      if (since >= untilMs) res(out);
-      else requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
-  }), { kind, untilMs });
+  if (kind) await startSampling(page, kind, untilMs);
+  return page.evaluate(() => window.__confirmSamples);
 }
 
 function assertConfirmTimeline(samples, label) {
@@ -187,18 +199,19 @@ test.describe("setting confirmed", () => {
     await setNoteSet(page, 1);
     await setHandsOn(page, SC.left(1), shape(SC, 3, 0.5));
     const pop = await firstDrawn(page, "set");
+    await startSampling(page, "set", 1600);
     await page.screenshot({ path: `${SCREENS_DIR}/feedback-noteset-confirm-pop.png` });
     expect(pop.since, "first confirmed frame comes right after the confirm").toBeLessThan(CONFIRM.popMs);
     expect(pop.scale, "pop: scaled up at the confirm").toBeGreaterThan(1.02);
     expect(pop.flash, "pop: flash at the confirm").toBeGreaterThan(0);
     // Keep the shape: the badge must still read "Full scale" (not a new hold) for the whole second.
-    const samples = await sampleConfirm(page, "set", 1600);
+    const samples = await sampleConfirm(page);
     assertConfirmTimeline(samples, "note-set badge");
     const settled = samples.filter((s) => s.since > CONFIRM.popMs + 20 && s.alpha > 0);
     for (const s of settled) expect(s.scale).toBe(1);
   });
 
-  test("note-set badge at ~1 s still fully visible (screenshot); octave by arrow: same pop + linger + fade", async ({ synthPage: page }) => {
+  test("note-set badge at ~1 s still fully visible (screenshot); octave by arrow: same pop + linger + fade", { tag: "@full" }, async ({ synthPage: page }) => {
     fs.mkdirSync(SCREENS_DIR, { recursive: true });
     await setHandsOn(page, SC.left(1), SC.preview(0.5));
     await enterMode(page, "lead");
@@ -241,7 +254,7 @@ for (const [vpName, vp] of [["desktop", DESKTOP], ["mobile", MOBILE]]) {
   test.describe(`ladder labels ${vpName} ${vp.width}x${vp.height}`, () => {
     test.use({ viewport: vp });
     for (const swap of [false, true]) {
-      test(`every line labelled; current note larger + mode-colored; no overlaps${swap ? " (ladder left)" : " (ladder right)"}`, async ({ synthPage: page }) => {
+      test(`every line labelled; current note larger + mode-colored; no overlaps${swap ? " (ladder left)" : " (ladder right)"}`, { tag: "@full" }, async ({ synthPage: page }) => {
         const sc = scene(vp, { swap });
         await setHandsOn(page, sc.left(1), sc.preview(0.5));
         await enterMode(page, "lead");
@@ -299,7 +312,7 @@ for (const [vpName, vp] of [["desktop", DESKTOP], ["mobile", MOBILE]]) {
 // 4. Discrete pitch in the app
 // =====================================================================================================
 
-test("moving while pinched steps between notes: no intermediate pitches (FFT per 85 ms window), no clicks", async ({ context }, info) => {
+test("moving while pinched steps between notes: no intermediate pitches (FFT per 85 ms window), no clicks", { tag: "@full" }, async ({ context }, info) => {
   await retryOnCaptureGlitch(info, async ({ track }) => {
     const page = await openApp(context, { viewport: DESKTOP });
     try {
@@ -405,7 +418,7 @@ for (const [vpName, vp] of [["desktop", DESKTOP], ["mobile", MOBILE]]) {
 // Hand lost in Lead: the dashed ring + "Hand lost" plate fade out (same timing as the edge tracks)
 // =====================================================================================================
 
-test("Lead hand-lost ring + plate: full for MOTION.lostHold, then fade, then gone; the ladder stays", async ({ synthPage: page }) => {
+test("Lead hand-lost ring + plate: full for MOTION.lostHold, then fade, then gone; the ladder stays", { tag: "@full" }, async ({ synthPage: page }) => {
   await setHandsOn(page, SC.left(1), SC.preview(0.5));
   await enterMode(page, "lead");
   await page.waitForTimeout(300);
@@ -438,7 +451,7 @@ test("Lead hand-lost ring + plate: full for MOTION.lostHold, then fade, then gon
 // Video with sound
 // =====================================================================================================
 
-test("video test-results/videos/camera-feedback-lead.webm: labels, discrete steps, rock sign -> All notes, octave toast", async ({ synthPage: page, browser }) => {
+test("video test-results/videos/camera-feedback-lead.webm: labels, discrete steps, rock sign -> All notes, octave toast", { tag: "@media" }, async ({ synthPage: page, browser }) => {
   test.setTimeout(90_000);
   const rec = createScreencast();
   await rec.track(page, "app");

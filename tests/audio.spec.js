@@ -89,7 +89,7 @@ test.describe("expression", () => {
     expect(rms((await recordAudio(page, 400)).samples)).toBeLessThan(0.001);
   });
 
-  test("hand height scales loudness", async ({ synthPage: page, setHands }) => {
+  test("hand height scales loudness", { tag: "@full" }, async ({ synthPage: page, setHands }) => {
     // Chords' volume is the LEFT hand's height (the master volume) since the right height lost its function in Chords
     // (this test used the right-hand volume 0.3 vs 0.9). Same intent and margins: volume 0.9 vs 0.3 -> loudness ~3x.
     // The hand is placed so the router's dead-zoned anchor lands on the height for that volume (the anchor trails a
@@ -108,7 +108,7 @@ test.describe("expression", () => {
     expect(loud / soft).toBeLessThan(3.6);
   });
 
-  test("tilt opens/closes the lowpass filter", async ({ synthPage: page, setHands }) => {
+  test("tilt opens/closes the lowpass filter", { tag: "@full" }, async ({ synthPage: page, setHands }) => {
     const filterAt = async (tilt) => {
       await setHands(leftHand(1), rightHand(1, { tilt }));
       await page.waitForTimeout(400);
@@ -128,7 +128,7 @@ test.describe("expression", () => {
     expect(neutral.bright).toBeLessThan(open.bright);
   });
 
-  test("tone select changes the timbre", async ({ synthPage: page, setHands }) => {
+  test("tone select changes the timbre", { tag: "@full" }, async ({ synthPage: page, setHands }) => {
     const brightness = {};
     for (const wave of ["triangle", "square", "sawtooth"]) {
       await page.locator("#toneSelect").selectOption(wave);
@@ -151,7 +151,7 @@ test.describe("expression", () => {
     expect(await page.evaluate(() => window.__gsTest.synth.oscillators.length)).toBe(4);
   });
 
-  test("output never clips", async ({ synthPage: page, setHands }) => {
+  test("output never clips", { tag: "@full" }, async ({ synthPage: page, setHands }) => {
     // Fixed in M1: chord oscillators leave headroom and the master has a limiter + soft clipper.
     // Worst case: right volume 1 and the left hand high (master volume 1).
     let peak = 0;

@@ -10,10 +10,12 @@ import path from "node:path";
 
 const LAYERS = ["unit", "integration", "e2e", "build"];
 const extra = process.argv.slice(2);
-const outDir = path.resolve("test-results/verify");
+// Outside test-results/: every playwright run wipes that folder, so the layers' reports would be lost.
+const outDir = path.resolve("playwright-report/verify");
 fs.mkdirSync(outDir, { recursive: true });
 
 const rows = [];
+const all = [];
 for (const layer of LAYERS) {
   const json = path.join(outDir, `${layer}.json`);
   console.log(`\n=== ${layer} ===`);
@@ -34,6 +36,7 @@ for (const layer of LAYERS) {
     walk(JSON.parse(fs.readFileSync(json, "utf8")));
   } catch {}
   const failed = tests.filter((t) => t.status !== t.expected && t.status !== "skipped").length;
+  all.push(...tests.map((t) => ({ ...t, layer })));
   rows.push({ layer, ok: r.status === 0, wall, count: tests.length, failed, slowest: tests.sort((a, b) => b.ms - a.ms).slice(0, 3) });
 }
 
@@ -42,6 +45,10 @@ for (const r of rows) {
   console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.layer.padEnd(12)} ${String(r.count).padStart(4)} tests  ${r.wall.toFixed(1).padStart(6)} s${r.failed ? `  (${r.failed} failed)` : ""}`);
   for (const t of r.slowest) console.log(`        ${(t.ms / 1000).toFixed(1).padStart(5)} s  ${t.title}`);
 }
+console.log("\n25 slowest tests:");
+for (const t of [...all].sort((a, b) => b.ms - a.ms).slice(0, 25))
+  console.log(`  ${(t.ms / 1000).toFixed(1).padStart(5)} s  [${t.layer}] ${t.title}`);
+fs.writeFileSync(path.join(outDir, "summary.json"), JSON.stringify({ rows, tests: all }, null, 1));
 const total = rows.reduce((s, r) => s + r.wall, 0);
 const ok = rows.every((r) => r.ok);
 console.log(`${ok ? "PASS" : "FAIL"}  total ${total.toFixed(1)} s`);

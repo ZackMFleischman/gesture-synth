@@ -11,7 +11,7 @@ import { makeView } from "../src/input/hand-input.js";
 const STYLE = "tests/helpers/visual.css"; // hides the animated canvas during the screenshot
 
 async function playing(page, setHands) {
-  // 6 of 8 bars: the meter shows the volume = the left height (master 0.75) in Chords.
+  // 6 of 8 bars: the meter (hidden in the modes UI, still updated) shows the volume = the left height (master 0.75).
   await setHands(leftHand(4, { volume: heightForMaster(0.75) }), rightHand(3, { volume: 0.75, tilt: 0.5 }));
   await expect(page.locator("#chordDisplay")).toHaveText("D(IV)");
   await expect(page.locator("#qualityDisplay")).toHaveText("Major 7th");
@@ -50,7 +50,7 @@ test("gesture guide (key of A)", async ({ synthPage: page, setHands }) => {
   await expect(page).toHaveScreenshot("gesture-guide.png", { stylePath: STYLE });
 });
 
-test("Lead layer chrome (Chords + Lead badge, note-set badge, chord, held meter)", async ({ synthPage: page, setHands }) => {
+test("Lead layer chrome (Chords + Lead badge, note-set badge, chord, master track)", async ({ synthPage: page, setHands }) => {
   // Same scene as the Lead e2e tests (real use): chord hand on the screen left, pre-pinch claw on the right.
   const view = makeView(640, 480, 1280, 800);
   const hands = () => setHands(

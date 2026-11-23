@@ -1,6 +1,6 @@
 // Sound menu in the real app (?mockHands): the radial menu's DOWN arc opens a sub-ring of the registered instrument
 // plugins (src/instruments). It sets the base instrument (Chords / Arp) or, with the Lead layer on, the lead's.
-//   - gesture: fist -> down through Sound -> sub-ring -> an instrument -> open hand (flash, no countdown)
+//   - gesture: fist -> down through Sound -> sub-ring -> crossing an instrument picks it (auto-select: flash, no countdown)
 //   - Lead on: "Lead sound" sets only the lead; the base keeps its instrument
 //   - tone select + Controls rows stay in sync; a 7th instrument registered at runtime shows up everywhere
 //   - sound: Arp + Warm under Lead + Bright (two timbres in one FFT); switching while a chord sounds: no gap / click
@@ -10,14 +10,16 @@ import fs from "node:fs";
 import { test, expect, SCREENS_DIR } from "./fixtures.js";
 import { spectrum, writeWav, retryOnCaptureGlitch } from "./helpers/audio.js";
 import { createScreencast } from "./helpers/screencast.js";
-import { scene, setHands, openApp, bus, startRec, longestSilence, maxD2 } from "./helpers/m2-lead.js";
+import { scene, setHands, openApp, bus, startRec, longestSilence, maxD2, menuChosen } from "./helpers/m2-lead.js";
 
 const WAV_DIR = "test-results/audio";
 const DESKTOP = { width: 1280, height: 800 };
 const SC = scene(DESKTOP);
 const TOP = { x: SC.R.x, y: 0.3 }; // fist start: room below for Sound + its sub-ring
 
-test.describe.configure({ mode: "default" });
+// Full gate: this file's tests run one after another (its @full audio measurements stay off each other's CPU).
+// Fast run (PW_TIER=fast, no @full tests here): parallel, so the file is not one long serial job.
+test.describe.configure({ mode: process.env.PW_TIER === "fast" ? "parallel" : "default" });
 
 const snap = (page) => page.evaluate(() => {
   const s = window.__gsTest.router.menu.snapshot();
@@ -26,7 +28,8 @@ const snap = (page) => page.evaluate(() => {
 const sounds = (page) => page.evaluate(() => ({ base: window.__gsTest.bus.get("sound/base"), lead: window.__gsTest.bus.get("sound/lead") }));
 
 /**
- * Fist at `from`, down through the Sound arc until the sub-ring opens, then to instrument `id` and open the hand.
+ * Fist at `from`, down through the Sound arc until the sub-ring opens, then across instrument `id` (auto-select),
+ * then open the hand.
  * `onRing(page)` / `onSelected(page)` hooks for screenshots. Resolves when the menu has closed.
  */
 async function pickSound(page, id, { left = SC.left(1), from = TOP, open = true, onRing, onSelected } = {}) {
@@ -53,7 +56,8 @@ async function pickSound(page, id, { left = SC.left(1), from = TOP, open = true,
     await setHands(page, left, SC.fistAt(p));
     await page.waitForTimeout(40);
   }
-  await expect.poll(async () => (await bus(page, "menu"))?.selectedId ?? null, { timeout: 2000 }).toBe(id);
+  // Auto-select: crossing the instrument's select radius picks it (flash), or closes quietly on the current one.
+  await expect.poll(() => menuChosen(page), { timeout: 2000 }).toBe(id);
   if (onSelected) await onSelected(page, p);
   if (!open) return p;
   await setHands(page, left, SC.open(2, p.y, { x: p.x }));
@@ -202,7 +206,7 @@ function dbAt(spec, f, ref) {
   return 20 * Math.log10(m / ref + 1e-12);
 }
 
-test("Arp + Warm under Lead + Bright: one recording, two timbres (triangle: no even harmonics; sawtooth: all)", async ({ context }, info) => {
+test("Arp + Warm under Lead + Bright: one recording, two timbres (triangle: no even harmonics; sawtooth: all)", { tag: "@full" }, async ({ context }, info) => {
   test.setTimeout(120_000);
   await retryOnCaptureGlitch(info, async ({ track }) => {
     const page = await openApp(context);
@@ -272,7 +276,7 @@ test("Arp + Warm under Lead + Bright: one recording, two timbres (triangle: no e
   });
 });
 
-test("switching the instrument while a chord sounds: no gap, no click (Warm -> Organ -> Electric -> Sax -> Warm)", async ({ context }, info) => {
+test("switching the instrument while a chord sounds: no gap, no click (Warm -> Organ -> Electric -> Sax -> Warm)", { tag: "@full" }, async ({ context }, info) => {
   test.setTimeout(120_000);
   await retryOnCaptureGlitch(info, async ({ track }) => {
     const page = await openApp(context);
@@ -306,7 +310,7 @@ test("switching the instrument while a chord sounds: no gap, no click (Warm -> O
   });
 });
 
-test("video test-results/videos/sound-menu.webm (with sound): pick Electric for Chords, Lead on top, pick Sax for the lead", async ({ synthPage: page, browser }) => {
+test("video test-results/videos/sound-menu.webm (with sound): pick Electric for Chords, Lead on top, pick Sax for the lead", { tag: "@media" }, async ({ synthPage: page, browser }) => {
   test.setTimeout(120_000);
   const rec = createScreencast();
   await rec.track(page, "app");

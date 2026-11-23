@@ -55,6 +55,16 @@ export async function openApp(context, { viewport } = {}) {
 
 export const bus = (page, name) => page.evaluate((n) => window.__gsTest.bus.get(n), name);
 /** The mode the right hand drives: "lead" while the Lead layer is on (bus `mode` stays the base then), else `mode`. */
+/**
+ * Radial menu auto-select: the id the current (or last) menu session acted on once the fist crossed an arc's select
+ * radius — a mode / layer (countdown) or setting (flash) it chose, or the current item it closed on quietly
+ * ("same-item") — else null. Poll it: a setting's flash and a same-item close are over before a bus poll sees them.
+ */
+export const menuChosen = (page) =>
+  page.evaluate(() => {
+    const s = window.__gsTest.router.menu.snapshot();
+    return s.confirmedId ?? (s.closeReason === "same-item" ? s.selectedId : null);
+  });
 export const modeId = (page) => page.evaluate(() => window.__gsTest.bus.get("layer") || window.__gsTest.bus.get("mode"));
 export const dbg = (page, at) =>
   page.evaluate((at) => window.__gsTest.registry.getMode("lead")._debug(at ?? window.__gsTest.ctx.now), at);
@@ -86,7 +96,10 @@ export async function fistSelect(page, { left, from, fistAt, dir = "left", steps
     await setHands(page, left, fistAt(p));
     await page.waitForTimeout(35);
   }
-  await expect.poll(async () => (await bus(page, "menu"))?.selectedId ?? null, { timeout: 2000 }).toBe(expectId ?? null);
+  // Auto-select: crossing the select radius chooses the item at once (polled via the menu snapshot: the countdown
+  // can be over before a bus poll sees it); expectId null = stayed in the centre zone, nothing selected.
+  if (expectId) await expect.poll(() => menuChosen(page), { timeout: 2000 }).toBe(expectId);
+  else await expect.poll(async () => (await bus(page, "menu"))?.selectedId ?? null, { timeout: 2000 }).toBe(null);
   return p;
 }
 

@@ -13,7 +13,7 @@ import { test, expect, SCREENS_DIR } from "./fixtures.js";
 import { recordAudio, spectrum, peaks, rms, writeWav, retryOnCaptureGlitch } from "./helpers/audio.js";
 import { peakAbs } from "./helpers/arp-analysis.js";
 import { createScreencast } from "./helpers/screencast.js";
-import { scene, setHands, openApp, bus, frames, startRec, longestSilence, maxD2, overlaps, yFor, ladder } from "./helpers/m2-lead.js";
+import { scene, setHands, openApp, bus, frames, startRec, longestSilence, maxD2, overlaps, yFor, ladder, menuChosen } from "./helpers/m2-lead.js";
 import { clearArea } from "../src/ui/theme.js";
 
 const WAV_DIR = "test-results/audio";
@@ -24,7 +24,9 @@ const STEP = { right: [0.014, 0], left: [-0.014, 0], up: [0, -0.022], down: [0, 
 const mod12 = (n) => ((n % 12) + 12) % 12;
 const pcOf = (f) => mod12(Math.round(69 + 12 * Math.log2(f / 440)));
 
-test.describe.configure({ mode: "default" }); // audio measurements: keep this file's tests off each other's CPU
+// Full gate: this file's tests run one after another (its @full audio measurements stay off each other's CPU).
+// Fast run (PW_TIER=fast, no @full tests here): parallel, so the file is not one long serial job.
+test.describe.configure({ mode: process.env.PW_TIER === "fast" ? "parallel" : "default" });
 
 const state = (page) =>
   page.evaluate(() => {
@@ -33,7 +35,7 @@ const state = (page) =>
   });
 
 /**
- * Fist menu: fist at `from`, move toward `dir` until `expectSel` is selected, open with `open(p)`. Resolves once the
+ * Fist menu: fist at `from`, move toward `dir` until `expectSel` is chosen (auto-select), then open with `open(p)`. Resolves once the
  * menu is closed. `want` = the {mode, layer} expected after (null layer = off).
  */
 async function menuPick(page, { left, from = SC.R, sc = SC, dir, expectSel, open, want, onSelected }) {
@@ -45,7 +47,8 @@ async function menuPick(page, { left, from = SC.R, sc = SC, dir, expectSel, open
     await setHands(page, left, sc.fistAt(p));
     await page.waitForTimeout(35);
   }
-  await expect.poll(async () => (await bus(page, "menu"))?.selectedId ?? null, { timeout: 2000 }).toBe(expectSel);
+  // Auto-select: crossing the select radius chose it (or, for the current item, closed quietly).
+  await expect.poll(() => menuChosen(page), { timeout: 2000 }).toBe(expectSel);
   if (onSelected) await onSelected(p);
   await setHands(page, left, open(p));
   if (want) await expect.poll(() => state(page).then((s) => ({ mode: s.mode, layer: s.layer })), { timeout: 1500 }).toEqual(want);
@@ -91,7 +94,7 @@ async function leadY(page, i) {
 // Sound: the base keeps playing under the lead
 // =====================================================================================================
 
-test("Arp -> Lead: arp keeps its held gate / tempo / voicing, follows left-hand chords; lead on top; no gap or click", async ({ context }, info) => {
+test("Arp -> Lead: arp keeps its held gate / tempo / voicing, follows left-hand chords; lead on top; no gap or click", { tag: "@full" }, async ({ context }, info) => {
   test.setTimeout(120_000);
   await retryOnCaptureGlitch(info, async ({ track }) => {
     const page = await openApp(context);
@@ -181,7 +184,7 @@ test("Arp -> Lead: arp keeps its held gate / tempo / voicing, follows left-hand 
   });
 });
 
-test("Chords -> Lead: the chord keeps sounding at the held voicing / volume, left-hand chords still change it, lead on top", async ({ context }, info) => {
+test("Chords -> Lead: the chord keeps sounding at the held voicing / volume, left-hand chords still change it, lead on top", { tag: "@full" }, async ({ context }, info) => {
   test.setTimeout(120_000);
   await retryOnCaptureGlitch(info, async ({ track }) => {
     const page = await openApp(context);
@@ -459,17 +462,21 @@ test("menu with the layer on: screenshot layer-menu-with-layer.png (Lead current
   await page.waitForTimeout(400);
   await setHands(page, L1, SC.fistAt({ x: 0.6, y: 0.45 }));
   await expect.poll(async () => (await bus(page, "menu"))?.state).toBe("open");
-  // Toward Arp (the base underneath): selected, hint "Open hand: Lead off".
-  for (let i = 1; i <= 10; i++) {
-    await setHands(page, L1, SC.fistAt({ x: 0.6 + 0.014 * i, y: 0.45 }));
+  // Toward Arp (the base underneath) but short of the select radius (auto-select would switch to Arp).
+  for (let i = 1; i <= 30; i++) {
+    await setHands(page, L1, SC.fistAt({ x: 0.6 + 0.004 * i, y: 0.45 }));
     await page.waitForTimeout(35);
+    const m = await bus(page, "menu");
+    if (m?.hoverId === "arp" && m.progress >= 0.6) break;
   }
-  await expect.poll(async () => (await bus(page, "menu"))?.selectedId).toBe("arp");
+  const m = await bus(page, "menu");
+  expect(m).toMatchObject({ state: "open", hoverId: "arp", selectedId: null });
+  expect(m.progress).toBeGreaterThanOrEqual(0.6);
   await page.waitForTimeout(250);
   await page.screenshot({ path: `${SCREENS_DIR}/layer-menu-with-layer.png` });
   await setHands(page, L1, SC.fistAt({ x: 0.6, y: 0.45 }));
   await page.waitForTimeout(200);
-  await setHands(page, L1, SC.preview(0.45));
+  await setHands(page, L1, SC.preview(0.45)); // open hand before anything was chosen = cancel
   await expect.poll(async () => (await bus(page, "menu")) ?? null).toBe(null);
   expect(await state(page)).toEqual({ mode: "arp", layer: "lead", right: "lead" });
 });
@@ -478,7 +485,7 @@ test("menu with the layer on: screenshot layer-menu-with-layer.png (Lead current
 // Video with sound: Arp -> Lead -> back
 // =====================================================================================================
 
-test("video test-results/videos/lead-layer.webm (with sound): Arp -> Lead on top -> back to Arp", async ({ synthPage: page, browser }) => {
+test("video test-results/videos/lead-layer.webm (with sound): Arp -> Lead on top -> back to Arp", { tag: "@media" }, async ({ synthPage: page, browser }) => {
   test.setTimeout(120_000);
   const rec = createScreencast();
   await rec.track(page, "app");

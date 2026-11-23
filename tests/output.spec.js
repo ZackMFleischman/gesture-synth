@@ -178,7 +178,7 @@ test("chip: off (hidden) → waiting → connected (< 1 s) → waiting on discon
   await s.context.close();
 });
 
-test("visualizer gets manifest, full state, fast frames, timed events, periodic state, clock sync", async ({ browser }, info) => {
+test("visualizer gets manifest, full state, fast frames, timed events, periodic state, clock sync", { tag: "@full" }, async ({ browser }, info) => {
   const s = await openSynth(browser);
   // Chord set BEFORE the visualizer connects: must show up from the connect snapshot.
   await s.setHands(leftHand(4), rightHand(3, { volume: 0.75, tilt: 0.5 }));
@@ -249,11 +249,15 @@ test("visualizer gets manifest, full state, fast frames, timed events, periodic 
     .toBeGreaterThanOrEqual(expectedMidi.length);
   const evs = await v.page.evaluate((n) => window.__viz.events.filter((e) => e.a === "/gs/note/on").slice(-n), expectedMidi.length);
   expect(evs.map((e) => e.v.note).sort()).toEqual([...expectedMidi].sort());
+  // `t` is when the note is HEARD (audioToShared adds the output latency: getOutputTimestamp / outputLatency), `at`
+  // when it was sent. Measured here: headless Chrome's output latency 160 ms (t - at 240 ms), so compare t - at
+  // minus that latency with "now" (live chords play at once).
+  const outLatMs = await s.page.evaluate(() => (window.__gsTest.synth.ctx.outputLatency || 0) * 1000);
   for (const e of evs) {
     expect(e.ch).toBe("reliable");
     expect(e.v.voice).toBe("chords");
     expect(typeof e.t).toBe("number");
-    expect(Math.abs(e.t - e.at)).toBeLessThan(200); // playTime on the shared clock, near "now" for live chords
+    expect(Math.abs(e.t - e.at - outLatMs)).toBeLessThan(200); // playTime on the shared clock, near "now" (+ output latency) for live chords
   }
 
   // Scheduled note (like the Arp: sent ~100 ms before it plays) is shown at its play time.
@@ -301,7 +305,7 @@ test("visualizer gets manifest, full state, fast frames, timed events, periodic 
   await s.context.close();
 });
 
-test("beat grid lights up when ctx.clock exists; visualizer beats follow the synth clock", async ({ browser }, info) => {
+test("beat grid lights up when ctx.clock exists; visualizer beats follow the synth clock", { tag: "@full" }, async ({ browser }, info) => {
   const s = await openSynth(browser);
   await s.setHands(leftHand(1), rightHand(1, { volume: 0.5 }));
   const code = await turnOn(s.page);
@@ -384,7 +388,7 @@ test("beat grid lights up when ctx.clock exists; visualizer beats follow the syn
   await s.context.close();
 });
 
-test("relay fallback: forced relay connects, chip shows Relayed (amber), data flows", async ({ browser }) => {
+test("relay fallback: forced relay connects, chip shows Relayed (amber), data flows", { tag: "@full" }, async ({ browser }) => {
   const s = await openSynth(browser, { relay: true });
   await s.setHands(leftHand(6, { minor: true }), rightHand(2, { volume: 0.6 }));
   await expect(s.page.locator("#chordDisplay")).toHaveText("F#m(vi)");
@@ -498,7 +502,7 @@ test("output off: no module load, no bus subscription, no extra frame cost", asy
   await s.context.close();
 });
 
-test("demo video: connect → playing → disconnect → reconnect", async ({ browser }) => {
+test("demo video: connect → playing → disconnect → reconnect", { tag: "@media" }, async ({ browser }) => {
   test.setTimeout(90_000);
   const rec = createScreencast();
   const s = await openSynth(browser);
