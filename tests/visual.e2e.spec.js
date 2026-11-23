@@ -21,6 +21,11 @@ async function playing(page, setHands) {
 test("start overlay", async ({ page }) => {
   await page.goto("/?mockHands");
   await expect(page.locator("#startOverlay")).toBeVisible();
+  // Wait for the steady state behind the overlay: modes UI mounted and the main loop running (the router has
+  // published the master volume, so the meter is lit). Before that the page is a transient layout, and which
+  // one the screenshot caught depended on machine load.
+  await expect(page.locator("#modeBadge")).toBeVisible();
+  await expect(page.locator(".vol-bar.lit")).toHaveCount(8);
   await expect(page).toHaveScreenshot("start-overlay.png", { stylePath: STYLE });
 });
 

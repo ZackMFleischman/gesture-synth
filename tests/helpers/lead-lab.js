@@ -25,6 +25,23 @@ export const test = base.extend({
   },
 });
 
+/**
+ * Opens a fresh lab page like the `lab` fixture (for tests that may run twice: retryOnCaptureGlitch).
+ * Close it yourself; `page.__errors` collects uncaught page errors.
+ */
+export async function openLab(context) {
+  const page = await context.newPage();
+  await page.addInitScript(AUDIO_TAP_SCRIPT);
+  page.__errors = [];
+  page.on("pageerror", (err) => page.__errors.push(err));
+  await page.goto("/labs/lead-lab.html?mockHands");
+  await page.locator("#startOverlay").click();
+  await expect(page.locator("#startOverlay")).toBeHidden();
+  await page.waitForFunction(() => document.getElementById("webcam").videoWidth > 0);
+  await page.waitForFunction(() => window.__gsTest.lead._debug().geo.W > 1);
+  return page;
+}
+
 /** Right hand with the palm at display (x, y). Open hand = 4 fingers (a valid count unless `fingers`). */
 export function rh({ y, x = 0.74, pinched = false, fingers = 4, ...rest }) {
   const pos = { x, y };
