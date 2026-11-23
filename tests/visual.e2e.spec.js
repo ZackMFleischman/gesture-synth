@@ -2,10 +2,11 @@
 // baselines live in tests/__screenshots__/visual.e2e.spec.js/ (one per platform).
 //   Update after an intended UI change:  PW_PORT=52xx npm run test:visual -- --update-snapshots
 //   then Read the new PNGs and commit them with the change that caused them.
-// Only surfaces that are not in flux get a baseline. Arp / Lead / radial-menu chrome is added after M1/M2
-// integration (docs/testing.md "Visual baselines").
+// Only surfaces that are not in flux get a baseline. Lead chrome landed with M2; Arp / radial-menu chrome
+// follows (docs/testing.md "Visual baselines").
 import { test, expect } from "./fixtures.js";
-import { leftHand, rightHand } from "./helpers/hands.js";
+import { leftHand, rightHand, pinch } from "./helpers/hands.js";
+import { makeView } from "../src/input/hand-input.js";
 
 const STYLE = "tests/helpers/visual.css"; // hides the animated canvas during the screenshot
 
@@ -40,6 +41,28 @@ test("gesture guide (key of A)", async ({ synthPage: page, setHands }) => {
   await page.locator("#guideToggle").click();
   await expect(page.locator("#gestureGuide")).toBeVisible();
   await expect(page).toHaveScreenshot("gesture-guide.png", { stylePath: STYLE });
+});
+
+test("Lead mode chrome (mode + note-set badges, pad chord, no meter)", async ({ synthPage: page, setHands }) => {
+  // Same scene as the Lead e2e tests: chord hand on the screen right, pre-pinch claw on the left.
+  const view = makeView(640, 480, 1280, 800);
+  const hands = () => setHands(
+    leftHand(4, { pos: { x: 0.72, y: 0.5 }, view }),
+    pinch({ pos: { x: 0.3, y: 0.42 }, view, distance: 0.55, fingers: ["index", "middle", "ring", "pinky"] })
+  );
+  await hands();
+  await page.locator("#controlsToggle").click();
+  await page.locator('#controlsPanel [data-control="mode"] button[data-value="lead"]').click();
+  await page.locator("#controlsToggle").click();
+  await page.mouse.move(640, 400);
+  await hands();
+  await expect(page.locator("#chordDisplay")).toHaveText("D(IV)");
+  await expect(page.locator("#qualityDisplay")).toHaveText("Major");
+  await expect(page.locator("#noteSetBadge i.on")).toHaveCount(1);
+  await expect(page.locator("#volumeMeter")).toBeHidden();
+  // First-use labels (3 s at the hand) are gone before the baseline is taken.
+  await expect.poll(() => page.evaluate(() => window.__gsTest.ui.firstUse), { timeout: 6000 }).toBe(false);
+  await expect(page).toHaveScreenshot("lead-playing.png", { stylePath: STYLE });
 });
 
 test.describe("mobile", () => {
