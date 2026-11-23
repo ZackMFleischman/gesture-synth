@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gesture Synth Visualizer</title>
+<style>
+  :root {
+    --bg: #0e0f11; --panel: #16181b; --line: #2a2d32; --ink: #e6e6e6; --muted: #8a8f98;
+    --green: #3ecf6e; --amber: #e8a13d; --blue: #4fb3ff; --pink: #ff6fae;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 14px; margin: 0 12px 0 0; font-weight: 600; letter-spacing: 0.04em; }
+  input#room { width: 110px; font: 16px monospace; letter-spacing: 0.08em; text-transform: uppercase; padding: 4px 8px;
+    color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; }
+  button { font: 12px monospace; color: var(--ink); background: #23262b; border: 1px solid var(--line); border-radius: 4px; padding: 5px 10px; cursor: pointer; }
+  #conn { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 12px; border: 1.5px solid var(--muted); }
+  #conn .dot { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid currentColor; }
+  #conn[data-state="direct"] { border-color: var(--green); } #conn[data-state="direct"] .dot { background: var(--green); border-color: var(--green); }
+  #conn[data-state="relay"] { border-color: var(--amber); } #conn[data-state="relay"] .dot { background: var(--amber); border-color: var(--amber); }
+  #conn[data-state="waiting"], #conn[data-state="connecting"], #conn[data-state="joining"] { border-style: dashed; }
+  #stats { color: var(--muted); }
+  main { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 12px; padding: 12px 16px; }
+  @media (max-width: 860px) { main { grid-template-columns: minmax(0, 1fr); } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; min-width: 0; }
+  section h2 { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 8px; font-weight: 600; }
+  canvas#hands { width: 100%; aspect-ratio: 16 / 10; background: #08090a; border-radius: 4px; display: block; }
+  .meters { display: grid; grid-template-columns: 104px 1fr 54px; gap: 4px 8px; align-items: center; margin-top: 10px; }
+  .bar { height: 8px; background: #23262b; border-radius: 4px; overflow: hidden; position: relative; }
+  .bar > i { position: absolute; top: 0; bottom: 0; left: 0; background: var(--ink); border-radius: 4px; }
+  .bar.center > i { background: var(--blue); }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 2px 6px 2px 0; vertical-align: top; }
+  td:first-child { color: var(--muted); white-space: nowrap; }
+  #manifest td:nth-child(3) { color: var(--muted); }
+  .col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  #beats { display: flex; gap: 10px; align-items: center; }
+  #beats .b { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--muted); transition: background-color 120ms; }
+  #beats .b.on { background: var(--blue); border-color: var(--blue); }
+  #keys { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; margin-top: 8px; }
+  #keys div { height: 34px; border-radius: 3px; background: #23262b; font-size: 10px; color: var(--muted); display: flex; align-items: flex-end; justify-content: center; padding-bottom: 3px; transition: background-color 90ms; }
+  #keys div.on { background: var(--pink); color: #111; }
+  #events { max-height: 190px; overflow: auto; font-size: 12px; }
+  #events div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Gesture Synth · Visualizer</h1>
+  <input id="room" placeholder="K7QF-2M" autocomplete="off" spellcheck="false" maxlength="8" aria-label="Room code">
+  <button id="connect">Connect</button>
+  <span id="conn" data-state="idle"><span class="dot"></span><span id="connText">Not connected</span></span>
+  <span id="stats"></span>
+</header>
+<main>
+  <div class="col">
+    <section>
+      <h2>Hands &amp; continuous values <span class="muted" id="frameInfo"></span></h2>
+      <canvas id="hands" width="800" height="500"></canvas>
+      <div class="meters" id="meters"></div>
+    </section>
+    <section>
+      <h2>Notes &amp; beat</h2>
+      <div id="beats"></div>
+      <div id="keys"></div>
+      <div class="muted" id="beatInfo" style="margin-top:6px">No beat grid yet (the synth sends one when its clock runs)</div>
+    </section>
+  </div>
+  <div class="col">
+    <section><h2>State</h2><table id="state"></table></section>
+    <section><h2>Events</h2><div id="events"></div></section>
+    <section><h2>Manifest <span class="muted" id="manifestCount"></span></h2><table id="manifest"></table></section>
+  </div>
+</main>
+<script type="module" src="./visualizer.js"></script>
+</body>
+</html>

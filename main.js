@@ -14,6 +14,7 @@ import { drawFrame } from "./src/ui/overlay.js";
 import { mountIndicators } from "./src/ui/indicators.js";
 import { mountControls } from "./src/ui/controls.js";
 import chordsMode from "./src/modes/chords.js";
+import { mountStatusChip } from "./src/output/status-chip.js"; // M3 output hook (see below)
 
 initAnalytics();
 
@@ -63,6 +64,12 @@ const router = createRouter({ bus, registry, harmony, ctx, controlsContainer: mo
 mountControls({ harmony, audio, synth, canvasEl });
 mountIndicators(bus);
 
+// ---- OUTPUT HOOK (milestone 3) ----
+// Status chip only. The WebRTC output module is dynamic-imported when the user turns the
+// output on, so with the output off it is never loaded and does no work.
+const outputChip = mountStatusChip({ bus, ctx, parent: stageEl });
+// ---- end OUTPUT HOOK ----
+
 // ---- Modes ----
 registerMode(chordsMode);
 router.setMode("chords");
@@ -73,6 +80,7 @@ if (import.meta.env.DEV) {
   window.__gsTest.router = router;
   window.__gsTest.ctx = ctx;
   window.__gsTest.handInput = handInput;
+  window.__gsTest.output = outputChip;
 }
 
 // ---- Main loop ----
