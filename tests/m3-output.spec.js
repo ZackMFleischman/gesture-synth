@@ -230,11 +230,20 @@ test("beat grid: sent at once on clock start / tempo / rate / x2 / stop; visuali
   // Start: entering Arp starts the shared clock.
   const start = await gridAfter(`(() => { const t = ${epochNow}; window.__gsTest.router.setMode("arp"); return t; })()`,
     "g.running === true", "start");
-  // It arrives before the first beat plays, so the first dot is on time too.
+  // The clock's very first beat (~60 ms after start) gets its dot, on time. The grid usually arrives before
+  // that beat (measured 88-94 ms ahead idle); under full-suite load it can land a few ms after it, and the
+  // visualizer still shows that beat (catch-up window = the beat-late bound).
   await expect.poll(() => s.page.evaluate(() => window.__m3.beats.length)).toBeGreaterThan(0);
   const firstBeat = await s.page.evaluate(() => window.__m3.beats[0]);
   const startRecvEpoch = await vizEpoch(start.g.recvLocal);
-  expect(startRecvEpoch).toBeLessThan(firstBeat.epoch);
+  await expect.poll(() => v.page.evaluate(() => window.__viz.beatsShown.filter((b) => !b.event).length)).toBeGreaterThan(0);
+  const firstDot = await v.page.evaluate(() => {
+    const b = window.__viz.beatsShown.find((x) => !x.event);
+    return { beat: b.beat, epoch: b.local + performance.timeOrigin, expected: b.expected + performance.timeOrigin };
+  });
+  expect(firstDot.beat).toBe(0);
+  expect(Math.abs(firstDot.expected - firstBeat.epoch)).toBeLessThan(GRID_PHASE_MS);
+  expect(firstDot.epoch - firstBeat.epoch).toBeLessThan(BEAT_LATE_MS);
   expect(start.g.bpm).toBe(await s.page.evaluate(() => window.__gsTest.ctx.clock.bpm));
   expect(Math.abs(start.g.beatTime - firstBeat.epoch)).toBeLessThan(GRID_PHASE_MS); // reference = the first beat
   expect(start.g.beat).toBe(0);

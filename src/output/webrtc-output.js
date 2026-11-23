@@ -390,7 +390,13 @@ export function createWebRtcOutput({
     if (!clock || clock === clockWatched) return;
     unwatchClock?.();
     clockWatched = clock;
-    unwatchClock = typeof clock.onTransport === "function" ? clock.onTransport(queueBeatGrid) : null;
+    const offs = [];
+    if (typeof clock.onTransport === "function") offs.push(clock.onTransport(queueBeatGrid));
+    // Re-anchor on every scheduled beat too (~100 ms before it plays): the AudioContext clock can run at a
+    // slightly different rate than the system clock (measured ~0.3 % in headless Chrome under load), so a grid
+    // that is only refreshed every 2 s drifts by several ms. One small message per beat keeps it < ~2 ms.
+    if (typeof clock.onBeat === "function") offs.push(clock.onBeat(queueBeatGrid));
+    unwatchClock = offs.length ? () => offs.forEach((off) => off()) : null;
   }
 
   function typeOf(name) {

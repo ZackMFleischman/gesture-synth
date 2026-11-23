@@ -23,7 +23,7 @@ export const SYS = {
   frame: "/gs/sys/frame", //        v: {address: value} — all continuous values that changed this frame; n: seq
   beatgrid: "/gs/sys/beatgrid", //  v: { bpm, beatTime (shared ms of a beat), beat (index in bar), beatsPerBar,
   //                                   running, rate, double } — sent on connect, at once on every clock
-  //                                   start/stop/tempo/rate/double-time change, and every 2 s
+  //                                   start/stop/tempo/rate/double-time change, on every scheduled beat, every 2 s
   ping: "/gs/sys/ping", //          c: sender clock ms, id
   pong: "/gs/sys/pong", //          c: echoed, h: responder clock ms, id
   hello: "/gs/sys/hello", //        v: { app, version } (synth -> visualizer, first message)

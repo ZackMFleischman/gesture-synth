@@ -43,7 +43,7 @@ Node lives at `~/.local/node/bin` on this machine (not on the default PATH):
   server, `?outputRelay` forces the WebSocket relay. Output code: `src/output/` (webrtc-output.js is lazy-loaded).
   Wire mapping (bus name -> `/gs/...`, `menu` sent as an event, `pinch` derived from `right/pinch` while the bus has
   no `pinch` event) is the `ADDRESS_TABLE` in `src/output/protocol.js`; the beat grid is re-sent on every
-  `clock.onTransport` change (start/stop/bpm/rate/x2) and every 2 s.
+  `clock.onTransport` change (start/stop/bpm/rate/x2), on every scheduled beat (drift correction) and every 2 s.
   Tests start the server on `PW_SIGNAL_PORT` (default PW_PORT + 200).
 
 ## How to verify changes yourself

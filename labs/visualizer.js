@@ -369,6 +369,7 @@ const smooth = {}; // address -> smoothed value (live input arrives with network
 let lastBeatAt = null;
 
 let beatInfoHtml = "";
+const BEAT_CATCH_UP_MS = 60; // a beat onset this recent is still shown when its grid arrives
 let prevFrameAt = -Infinity; // previous render frame: an event shown now was due after it (tests check this)
 function frame() {
   const now = performance.now();
@@ -397,9 +398,12 @@ function frame() {
     ensureBeatDots(bpb);
     const expected = ref + n * period;
     // Compare beat TIMES, not indices: every grid resync moves `ref` to a new beat.
-    if (lastBeatAt == null) {
+    // A grid that arrives just after its reference beat (e.g. the clock's first beat, ~60 ms after start, on a
+    // loaded machine) still shows that beat; one that arrives mid-beat waits for the next onset.
+    const catchUp = lastBeatAt == null && n >= 0 && now - expected < BEAT_CATCH_UP_MS;
+    if (lastBeatAt == null && !catchUp) {
       lastBeatAt = expected; // grid just arrived mid-beat: wait for the next beat onset
-    } else if (Math.abs(expected - lastBeatAt) > period / 2) {
+    } else if (catchUp || Math.abs(expected - lastBeatAt) > period / 2) {
       lastBeatAt = expected;
       const idx = (((bg.beat + n) % bpb) + bpb) % bpb;
       beatEls.forEach((d, i) => d.classList.toggle("on", i === idx));
