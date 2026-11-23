@@ -8,6 +8,14 @@ const blocks = (starts) => starts.map((t) => ({ t, n: N, cbAt: t - 0.05 }));
 const contiguous = (k, t0 = 1) => blocks(Array.from({ length: k }, (_, i) => t0 + (i * N) / SR));
 const info = () => ({ annotations: [] });
 
+// retryOnCaptureGlitch logs each glitch for the real tests; keep this file's simulated glitches out of the run log.
+let realLog;
+test.beforeEach(() => {
+  realLog = console.log;
+  console.log = (...a) => (String(a[0]).startsWith("[capture glitch]") ? undefined : realLog(...a));
+});
+test.afterEach(() => (console.log = realLog));
+
 test("captureHealth: gap-free blocks are clean; a shifted block is a discontinuity", () => {
   const ok = captureHealth(contiguous(10), SR);
   expect(ok).toMatchObject({ ok: true, blocks: 10, capturedSamples: 10 * N, expectedSamples: 10 * N, discontinuities: [] });
