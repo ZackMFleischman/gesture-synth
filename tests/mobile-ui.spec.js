@@ -64,6 +64,8 @@ test.describe("audit (before)", () => {
       test.use(device(vp));
 
       test(`today's app ${size}`, async ({ synthPage: page, setHands }) => {
+        // "Before" = the app without the mobile system (main.js mounts it; destroy() restores every node).
+        await page.evaluate(() => window.__gsTest.mobile.destroy());
         await setHands(leftHand(6, { minor: true }), rightHand(3, { volume: 0.6, tilt: 0.3 }));
         await expect(page.locator("#chordDisplay")).toHaveText("F#m(vi)");
         await page.screenshot({ path: `${SCREENS_DIR}/mobile-before-app-playing-${size}.png` });
@@ -256,11 +258,16 @@ for (const [size, vp] of Object.entries(PHONES)) {
 }
 
 // =====================================================================================================
-// The mobile system on the REAL app (handlers from controls.js), injected the way Phase B will mount it.
-async function mountInApp(page, opts = { intro: false }) {
+// The mobile system in the REAL app (main.js mounts it; real handlers from controls.js + the modes UI).
+// `mountInApp` uses the app's own instance; with `fresh` it remounts one with the given options.
+async function mountInApp(page, opts = null) {
   await page.evaluate(async (opts) => {
-    const m = await import("/src/ui/mobile/mobile-ui.js");
-    window.__mobile = m.mountMobileUI(opts);
+    if (opts) {
+      window.__gsTest.mobile.destroy();
+      const m = await import("/src/ui/mobile/mobile-ui.js");
+      window.__gsTest.mobile = m.mountMobileUI({ bus: window.__gsTest.bus, ...opts });
+    }
+    window.__mobile = window.__gsTest.mobile;
   }, opts);
 }
 
@@ -309,11 +316,12 @@ test.describe("real app + mobile system", () => {
 
     test("minimal HUD is remembered across reloads", async ({ synthPage: page }) => {
       await mountInApp(page);
-      await expect(page.locator("#volumeMeter")).toBeVisible();
+      await expect(page.locator("#distortionDisplay")).toBeVisible();
       await page.locator("#gsPill").click();
       await page.locator("#gsHudToggle").click();
       await expect(page.locator("body")).toHaveClass(/gs-hud-min/);
       await expect(page.locator("#volumeMeter")).toBeHidden();
+      await expect(page.locator("#distortionDisplay")).toBeHidden();
       await page.screenshot({ path: `${SCREENS_DIR}/mobile-after-app-minimal-390x844.png` });
       await page.reload();
       await page.locator("#startOverlay").click();
@@ -327,10 +335,9 @@ test.describe("real app + mobile system", () => {
       await mountInApp(page, {});
       await expect(page.locator("#gsBar")).toHaveClass(/open/);
       await page.screenshot({ path: `${SCREENS_DIR}/mobile-after-app-intro-390x844.png` });
-      await setHands(leftHand(1), rightHand(1));
-      await page.evaluate(() => window.__mobile.setPlaying(true));
+      await setHands(leftHand(1), rightHand(1)); // the bus hand positions drive "playing" (no setPlaying call)
+      await expect(page.locator("body")).toHaveClass(/gs-playing/);
       await expect(page.locator("#gsBar")).not.toHaveClass(/open/, { timeout: 4000 });
-      await page.evaluate(() => window.__mobile.destroy());
       await mountInApp(page, {});
       await expect(page.locator("#gsBar")).not.toHaveClass(/open/);
     });
@@ -341,7 +348,7 @@ test.describe("real app + mobile system", () => {
       });
       await page.goto("/?mockHands");
       await page.locator("#startOverlay").click();
-      await mountInApp(page, {}); // intro on: storage throws, so the tray opens (every load) and nothing breaks
+      // App instance, intro on: storage throws, so the tray opens (every load) and nothing breaks.
       await expect(page.locator("#gsBar")).toHaveClass(/open/);
       await page.locator("#gsHudToggle").click();
       await expect(page.locator("body")).toHaveClass(/gs-hud-min/);
@@ -362,11 +369,13 @@ test.describe("desktop unaffected", () => {
       return out;
     }, [...EXISTING, "helpModal"]);
 
-  test("1280x800: mounting changes nothing; mobile -> desktop resize restores every node", async ({ synthPage: page }) => {
+  test("1280x800: the mobile system is inert; mobile -> desktop resize restores every node", async ({ synthPage: page }) => {
     await page.locator("#guideToggle").click();
     const before = await boxes(page);
-    await mountInApp(page);
     expect(await page.evaluate(() => document.body.classList.contains("gs-mobile"))).toBe(false);
+    await page.evaluate(() => window.__gsTest.mobile.destroy()); // app without it = identical boxes
+    expect(await boxes(page)).toEqual(before);
+    await mountInApp(page, { intro: false });
     expect(await boxes(page)).toEqual(before);
     await expect(page.locator("#gsBar")).toBeHidden();
     await page.screenshot({ path: `${SCREENS_DIR}/mobile-desktop-1280x800.png` });
@@ -386,5 +395,100 @@ test.describe("desktop unaffected", () => {
     await openLab(page, "mode-arp");
     expect(await page.evaluate(() => window.__mobileLab.mobile.isMobile())).toBe(false);
     expect(await boxes(page)).toEqual(ref);
+  });
+});
+
+// =====================================================================================================
+// Phase B: the app's own mobile system with the modes UI (Arp), real-app screens + a real-time video.
+const APP_SIZES = { "390x844": MOBILE_SIZES["390x844"], "844x390": MOBILE_SIZES["844x390"] };
+const appShot = (page, state, size) => page.screenshot({ path: `${SCREENS_DIR}/mobile-app-${state}-${size}.png` });
+
+async function appArp(page, setHands) {
+  await page.evaluate(() => window.__gsTest.router.setMode("arp"));
+  await expect(page.locator("body")).toHaveAttribute("data-mode", "arp");
+  await setHands(leftHand(4), rightHand(3, { volume: 0.6, tilt: 0.3 }));
+  await expect(page.locator("body")).toHaveClass(/gs-playing/); // bus hand positions -> playing
+}
+
+for (const [size, vp] of Object.entries(APP_SIZES)) {
+  test.describe(`real app Arp ${size}`, () => {
+    test.use(device(vp));
+
+    test("states: playing-collapsed, tray-open, controls-sheet, guide-strip, minimal-hud", async ({ synthPage: page, setHands }) => {
+      await appArp(page, setHands);
+      await expect(page.locator("#gsPill")).toContainText("Arp");
+      // L1: the meter (same value as the right edge track) shows only while the tray is open; L5: the pill
+      // replaces the mode badge on phones.
+      await expect(page.locator("#volumeMeter")).toBeHidden();
+      await expect(page.locator("#modeBadge")).toBeHidden();
+      await page.waitForTimeout(3300); // first-use labels gone
+      await appShot(page, "playing-collapsed", size);
+      const { s } = await audit(page, "app-arp-playing", size);
+      expect(s.domCoverage).toBeLessThanOrEqual(budgetFor(vp.width).playingDom);
+      expect(s.inClear).toEqual([]);
+
+      await page.locator("#gsPill").click();
+      await expect(page.locator("#gsBar")).toHaveClass(/open/);
+      await expect(page.locator("#volumeMeter")).toBeVisible();
+      await appShot(page, "tray-open", size);
+
+      await page.locator("#controlsToggle").click();
+      await expect(page.locator("#gsControlsSheet")).toBeVisible();
+      await expect(page.locator("#gsControlsSheet #controlsPanel")).toBeVisible();
+      await appShot(page, "controls-sheet", size);
+      await page.locator("#gsControlsSheet .gs-close").click();
+      await expect(page.locator("#gsControlsSheet")).toBeHidden();
+
+      await page.locator("#gsPill").click();
+      await page.locator("#guideToggle").click();
+      await expect(page.locator("#gestureGuide")).toBeVisible();
+      await appShot(page, "guide-strip", size);
+      await page.locator("#gsGuideClose").click();
+
+      await page.locator("#gsPill").click();
+      await page.locator("#gsHudToggle").click();
+      await page.locator("#gsPill").click(); // fold the tray
+      await expect(page.locator("#transport")).toBeHidden();
+      await appShot(page, "minimal-hud", size);
+      const m = await audit(page, "app-arp-minimal", size);
+      expect(m.s.domCoverage).toBeLessThanOrEqual(budgetFor(vp.width).minimalDom);
+    });
+
+    test("phone first-use labels: only Gate and Filter", async ({ synthPage: page, setHands }) => {
+      await appArp(page, setHands);
+      await expect.poll(() => page.evaluate(() => window.__gsTest.ui.firstUse)).toBe(true);
+      const names = await page.evaluate(() => window.__gsTest.ui.regions.filter((r) => r.kind === "transient").map((r) => r.name));
+      expect(names.sort()).toEqual(["first-use-arc", "first-use-track"]);
+    });
+  });
+}
+
+test.describe("real app video 390x844", () => {
+  test.use(device(MOBILE_SIZES["390x844"]));
+
+  test("tray -> auto-collapse -> controls sheet -> close (real time)", async ({ synthPage: page, setHands, browser }) => {
+    test.setTimeout(60_000);
+    const { createScreencast } = await import("./helpers/screencast.js");
+    const rec = createScreencast();
+    await appArp(page, setHands);
+    await rec.track(page, "phone");
+    await page.waitForTimeout(800);
+    await page.locator("#gsPill").click();
+    await expect(page.locator("#gsBar")).toHaveClass(/open/);
+    const t0 = Date.now();
+    await expect(page.locator("#gsBar")).not.toHaveClass(/open/, { timeout: 5000 }); // hands playing -> folds
+    expect(Date.now() - t0).toBeGreaterThan(1500);
+    await page.waitForTimeout(600);
+    await page.locator("#gsPill").click();
+    await page.waitForTimeout(500);
+    await page.locator("#controlsToggle").click();
+    await expect(page.locator("#gsControlsSheet")).toBeVisible();
+    await page.waitForTimeout(1200);
+    await page.locator("#gsControlsSheet .gs-close").click();
+    await expect(page.locator("#gsControlsSheet")).toBeHidden();
+    await page.waitForTimeout(800);
+    await rec.untrack(page);
+    const out = await rec.save(browser, "test-results/videos/mobile-tray-controls-390x844.webm", { layout: ["phone"], cellW: 390, cellH: 844 });
+    expect(out.file).toBeTruthy();
   });
 });

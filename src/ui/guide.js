@@ -5,7 +5,8 @@
 //  - First-use labels: plates at the right hand for ~3 s the first time a mode is used (counted from the
 //    first frame the right hand is visible in that mode), and again whenever the guide is open.
 
-import { COLORS, FONT, LAYOUT, MOTION, drawLabel, edgeTrackX } from "./theme.js";
+import { COLORS, FONT, LAYOUT, MOTION, drawLabel } from "./theme.js";
+import { trackX } from "./edge-tracks.js";
 
 /** Right-hand guide rows per mode (spec table, ui-integration.md §7). A mode's own `guide` wins. */
 export const DEFAULT_GUIDE = {
@@ -18,6 +19,9 @@ export const DEFAULT_GUIDE = {
 export const FIRST_USE = {
   arp: [["track", "Gate"], ["arc", "Filter"], ["thumb", "Thumb: x2"], ["under", "Pinch: tempo"]],
 };
+/** On phones only the labels at the edge / above the hand show: the others land on the player's torso. */
+export const PHONE_FIRST_USE = new Set(["track", "arc"]);
+const isPhone = (G) => G.W < 600 || G.H < 500;
 
 export function createGuide({ S, doc }) {
   const guideEl = doc.getElementById("gestureGuide");
@@ -88,10 +92,11 @@ export function createGuide({ S, doc }) {
     g.font = `400 ${size}px ${FONT.family}`;
     const placed = [];
     for (const [where, text] of FIRST_USE[S.modeId]) {
+      if (isPhone(G) && !PHONE_FIRST_USE.has(where)) continue;
       let x, y, align;
       if (where === "track") {
         if (!S.rightTrack) continue;
-        [x, y, align] = [edgeTrackX(exprSide, G.W) + inw * (LAYOUT.gutter + 2), R.y - 18, inw > 0 ? "left" : "right"];
+        [x, y, align] = [trackX(exprSide, G) + inw * (LAYOUT.gutter + 2), R.y - 18, inw > 0 ? "left" : "right"];
       } else if (where === "arc") {
         [x, y, align] = [R.x, R.y - G.hs * 0.95 - 16, "center"];
       } else if (where === "thumb") {
