@@ -30,7 +30,7 @@ function rig() {
   const ctx = { audio: null, bus };
   const router = createRouter({ bus, registry, harmony, ctx });
   const right = (height, tilt = 0) => ({
-    handedness: "Right", fist: false, height, tilt, pos: { x: 0.3, y: 1 - height }, handSize: 0.1,
+    handedness: "Right", fist: false, height, tilt, pos: { x: 0.7, y: 1 - height }, handSize: 0.1,
     fingers: { thumb: false, index: true, middle: true, ring: true, pinky: true }, landmarks: [],
   });
   const clear = () => [chords, arp, lead].forEach((m) => (m.log.length = 0));

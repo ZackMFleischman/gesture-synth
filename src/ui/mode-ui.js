@@ -81,7 +81,7 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
     meter: DEFAULT_METER.chords,
     menu: { state: "closed", targetId: null },
     hands: { left: newHand(), right: newHand() },
-    chordSide: "left",
+    chordSide: "left", // real use (user-verified): the chord ("Left") hand shows on the screen left (mirrored view)
     chordSideKnown: false,
     sideCandidate: null,
     sideSince: 0,

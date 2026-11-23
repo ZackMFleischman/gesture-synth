@@ -18,7 +18,7 @@ import { clearArea } from "../src/ui/theme.js";
 const WAV_DIR = "test-results/audio";
 const DESKTOP = { width: 1280, height: 800 };
 const MOBILE = { width: 390, height: 844 };
-const SC = scene(DESKTOP); // chord hand on the screen right -> ladder on the LEFT edge
+const SC = scene(DESKTOP); // real use: chord hand on the screen left -> ladder on the RIGHT edge
 
 /** Dominant pitch (Hz): the FFT's strongest peak. */
 function pitchOf(samples, sampleRate) {
@@ -79,7 +79,7 @@ test.describe("Lead in the fist menu", () => {
     await expect(page.locator("#chordDisplay")).toHaveText("A(I)"); // Chords' chord (held voicing)
     await page.waitForTimeout(400);
     let d = await dbg(page);
-    expect(d.side).toBe("left"); // expression hand on the screen left
+    expect(d.side).toBe("right"); // expression hand on the screen right (real use)
     expect(d.pad).toEqual([]); // no pad: the base is the accompaniment
     expect(await page.evaluate(() => window.__gsTest.synth.oscillators.length)).toBe(4); // Chords keeps playing
 
@@ -465,7 +465,7 @@ for (const [vpName, vp] of [["desktop", DESKTOP], ["mobile", MOBILE]]) {
   test.describe(`layout ${vpName} ${vp.width}x${vp.height}`, () => {
     test.use({ viewport: vp });
     for (const swap of [false, true]) {
-      test(`ladder on the expression edge, clear of controls + master track${swap ? " (chord hand left)" : ""}`, async ({ synthPage: page }) => {
+      test(`ladder on the expression edge, clear of controls + master track${swap ? " (chord hand right)" : ""}`, async ({ synthPage: page }) => {
         const sc = scene(vp, { swap });
         await setHandsOn(page, sc.left(1), sc.preview(0.5));
         await enterLeadByPanel(page);

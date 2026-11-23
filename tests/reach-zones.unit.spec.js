@@ -183,12 +183,13 @@ test.describe("reach zones: smoothing", () => {
     hi.process(results(leftHand(1), rightHand(2)), 0);
     expect(typeof bus.get("left/x")).toBe("number");
     expect(typeof bus.get("right/x")).toBe("number");
-    // helper default: left palm displays at x 0.7 (right half), right palm at 0.3 (left half)
+    // helper default (real use): left palm displays at x 0.3 (left half), right palm at 0.7 (right half)
+    expect(bus.get("left/zone").side).toBe("left");
+    expect(bus.get("right/zone").side).toBe("right");
+    bus.set("ui/sides", { chord: "right", expr: "left" }); // the UI's decision wins over the palm guess
+    hi.process(results(leftHand(1), rightHand(2)), 33);
     expect(bus.get("left/zone").side).toBe("right");
     expect(bus.get("right/zone").side).toBe("left");
-    bus.set("ui/sides", { chord: "left", expr: "right" });
-    hi.process(results(leftHand(1), rightHand(2)), 33);
-    expect(bus.get("left/zone").side).toBe("left");
     bus.set("reach/range", "compact");
     hi.process(results(leftHand(1), rightHand(2)), 66);
     expect(bus.get("right/zone").range).toBe("compact");
