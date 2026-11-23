@@ -59,6 +59,7 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `audio-capture.unit.spec.js` | unit | New: capture-glitch policy. |
 | `gesture-reliability.unit.spec.js` | unit | Split out of `gesture-reliability.spec.js` (browser parts moved). |
 | `hand-input.unit.spec.js` | unit | Split out of `hand-input.spec.js` (app geometry test moved to e2e). |
+| `mobile-layout.unit.spec.js` | unit | Mobile layout math (coverage, clear area, hand zones, budgets) + safe-area edge-track x. |
 | `lead-notes.unit.spec.js` | unit | Split out of `lead.spec.js` (was Node tests inside a browser file). |
 | `output-protocol.spec.js` | unit | Right place (starts the signaling server in-process on its own port). Legacy name. |
 | `radial-menu.unit.spec.js` | unit | Split out of `radial-menu.spec.js`. |
@@ -68,6 +69,7 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `gesture-test.int.spec.js` | integration | From `gesture-reliability.spec.js`. |
 | `lead.spec.js` | integration | Right place for Lead UX checks 2.1–2.5 in the lab. Lab-only: **app journeys owed** (M2). Mode-switch test (Chords→Lead) belongs in e2e once Lead is registered in the app. |
 | `lead-demo.spec.js` | integration | Demo artifact (melody WAV + screenshots), 1 assert. Keep; candidate for a non-gating demo tag later. |
+| `mobile-ui.int.spec.js` | integration | Mobile system prototype in `labs/mobile-lab.html` (+ planned chrome as the before): budgets, clear area, 2-tap reach, sheets, 44 px targets, auto-collapse. |
 | `menu-lab.int.spec.js` | integration | From `radial-menu.spec.js` (lab visuals). |
 | `radial-menu-video.spec.js` | integration | Demo video, few asserts, slowest integration test (~15 s). Same note as `lead-demo`. |
 | `ui-lab.spec.js` | integration | Layout contract on mock-ups. Duplicated by `m1-ui.spec.js` for every state the real app can show; after M1/M2 keep only states the app can't reach yet, then retire. |
@@ -77,6 +79,7 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `bus.spec.js` | e2e (legacy) | **Mixed**: 7 Node unit tests + 3 app tests in one file. Split the `bus (unit)` block into `bus.unit.spec.js` after m1-wiring merges (it edits this file). |
 | `gestures.spec.js` | e2e | Right place (gesture → UI mapping in the app). Overlaps `hand-input.unit` on purpose: unit proves classification, this proves the wiring. |
 | `m1-ui.spec.js` | e2e | Milestone spec, right place. |
+| `mobile-ui.e2e.spec.js` | e2e | The app's mobile system: before/after audit, tray/sheets/guide strip/minimal HUD with the real handlers, first visit, blocked storage, phone first-use labels, desktop inert, real-app screens + video. |
 | `output.spec.js` | e2e | Right place (app + visualizer, two contexts). Its demo-video test is the slowest e2e test (~19 s). |
 | `pages.e2e.spec.js` | e2e | New: every served page (auto-discovers `labs/*.html`). |
 | `smoke.spec.js` | e2e | Real MediaPipe from the CDN: **needs network**. The only test of the real tracker. |

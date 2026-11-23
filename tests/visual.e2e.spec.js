@@ -20,6 +20,8 @@ async function playing(page, setHands) {
 test("start overlay", async ({ page }) => {
   await page.goto("/?mockHands");
   await expect(page.locator("#startOverlay")).toBeVisible();
+  // main.js has run (modes UI mounted): without this the shot can race a dev-server reload and catch bare index.html.
+  await page.waitForFunction(() => document.body.classList.contains("gs-modes"));
   await expect(page).toHaveScreenshot("start-overlay.png", { stylePath: STYLE });
 });
 
