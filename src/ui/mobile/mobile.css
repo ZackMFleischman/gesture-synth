@@ -227,7 +227,7 @@ body.gs-mobile #gsControlsSheet {
   left: 0;
   right: 0;
   bottom: 0;
-  max-height: min(64dvh, 560px);
+  max-height: min(56dvh, 520px); /* the top of the picture (head, raised hands) stays visible */
   flex-direction: column;
   box-sizing: border-box;
   padding-bottom: var(--gs-m-bottom);
@@ -238,6 +238,13 @@ body.gs-mobile #gsControlsSheet {
   z-index: 8;
   font-family: monospace;
   color: var(--gs-m-ink);
+}
+@media (min-width: 600px) and (min-height: 500px) {
+  /* Tablets: a floating card bottom-left instead of a full-width sheet. */
+  body.gs-mobile #gsControlsSheet {
+    left: var(--gs-m-left); right: auto; bottom: calc(16px + var(--gs-m-bottom)); width: 420px;
+    border-radius: 18px; border: 1px solid var(--gs-m-line); padding-bottom: 0;
+  }
 }
 .gs-sheet-head {
   position: relative;
