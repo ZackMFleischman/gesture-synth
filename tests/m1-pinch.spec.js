@@ -145,7 +145,8 @@ test.describe("1.6 right pinch = tempo (Arp)", () => {
   for (const v of [1, 2, 4]) {
     test(`UX 1.6: a pinch from voicing ${v} never changes the voicing (bus + recorded pitches)`, async ({ synthPage: page, setHands }) => {
       test.setTimeout(45_000);
-      const LOW = { x: R0.x, y: 0.8 }; // low hand = short notes, clean onsets for the pitch check
+      // Lowish hand: notes ~150 ms (longer than the 85 ms pitch window) with a clear gap between them (clean onsets).
+      const LOW = { x: R0.x, y: 0.7 };
       await enterArp(page, setHands, { bpm: 110, q: v, p: LOW });
       await page.waitForTimeout(400);
       expect((await arpState(page)).voicing).toBe(v);
