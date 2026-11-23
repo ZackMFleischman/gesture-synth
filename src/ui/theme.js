@@ -59,6 +59,8 @@ export const MOTION = Object.freeze({
   hold: 300, // note-set / octave-arrow hold
   bpmLinger: 1000, // big BPM number stays after a pinch
   firstUse: 3000, // first-use labels
+  lostHold: 1000, // "hand lost" ring + label stay fully visible this long...
+  lostFade: 800, // ...then fade out over this long (real-camera feedback: a lingering ring isn't useful)
 });
 
 /**

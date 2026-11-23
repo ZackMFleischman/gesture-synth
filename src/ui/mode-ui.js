@@ -89,6 +89,7 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
     now: 0,
     /** name -> {value, hand:"left"|"right", ref:number|null} (screen control wins until the hand moves). */
     overrides: new Map(),
+    lostGraceMs: LOST_GRACE_MS,
     lost(side) {
       const h = this.hands[side];
       return !h.pos && h.seen && h.goneAt != null && this.now - h.goneAt > LOST_GRACE_MS;
