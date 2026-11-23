@@ -13,7 +13,7 @@ import { mountIndicators } from "./src/ui/indicators.js";
 import { mountControls } from "./src/ui/controls.js";
 import { mountModeUI } from "./src/ui/mode-ui.js";
 import { mountMobileUI } from "./src/ui/mobile/mobile-ui.js";
-import { createRadialMenu, playTick } from "./src/menu/radial-menu.js";
+import { createRadialMenu } from "./src/menu/radial-menu.js";
 import chordsMode from "./src/modes/chords.js";
 import arpMode from "./src/modes/arp.js";
 import leadMode from "./src/modes/lead.js";
@@ -82,8 +82,7 @@ router.setMenu(
   createRadialMenu({
     // Lead is a layer: its arc turns it on over the current base; the base arc then has a hollow marker.
     items: () => (audio.ac ? registry.menuItems(router.modeId, { layerId: router.layerId }) : []), // modes need the AudioContext
-    currentId: () => router.rightModeId,
-    onTick: () => { if (audio.ac) playTick(audio.ac, audio.out); },
+    currentId: () => router.rightModeId, // crossing an arc selects it silently (no tick: auto-select, no open hand)
   })
 );
 

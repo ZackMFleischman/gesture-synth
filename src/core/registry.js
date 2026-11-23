@@ -36,7 +36,7 @@ export function createRegistry({ bus = sharedBus } = {}) {
       };
       if (layer && !m.layer && m.id === activeId) {
         it.secondary = true;
-        it.confirmHint = `Open hand: ${layer.name} off`;
+        it.confirmHint = `${layer.name} off`; // what choosing it does (menu hint while it is approached / selected)
       }
       return it;
     });
