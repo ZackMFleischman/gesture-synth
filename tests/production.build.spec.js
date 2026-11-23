@@ -126,5 +126,10 @@ test("Clarity: loads on a real host (request intercepted, nothing is sent)", asy
   expect(await page.evaluate(() => typeof window.clarity)).toBe("function");
   await page.locator("#startOverlay").click();
   await expect(page.locator("#startOverlay")).toBeHidden();
+  // Custom events reach Clarity's queue (the stub tag never drains it).
+  await page.locator("#guideToggle").click();
+  await page.locator("#helpButton").click();
+  const events = await page.evaluate(() => (window.clarity.q || []).map((a) => [...a]).filter((a) => a[0] === "event").map((a) => a[1]));
+  expect(events).toEqual(expect.arrayContaining(["guide_opened", "help_opened"]));
   expect(w.pageErrors).toEqual([]);
 });
