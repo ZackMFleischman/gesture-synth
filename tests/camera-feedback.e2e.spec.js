@@ -259,7 +259,7 @@ for (const [vpName, vp] of [["desktop", DESKTOP], ["mobile", MOBILE]]) {
           expect(d.current, "current note plate").toBeTruthy();
           labelled.add(d.current.midi);
           const visible = d.lines.filter((l) => l.alpha > 0.5).map((l) => l.midi);
-          for (const m of visible) expect(labelled.has(m), `set ${set}: line ${m} labelled`).toBe(true);
+          for (const m of visible) expect(labelled.has(m), `set ${set}: line ${m} labelled (ladder ${d.geo.top}..${d.geo.bottom}, current ${d.current.midi} size ${d.current.size} ${JSON.stringify(d.current.rect)}, line y ${d.lines.find((l) => l.midi === m)?.y})`).toBe(true);
           expect(d.labels.length + 1).toBe(visible.length);
           // Current: larger, in the mode color (text on a dark plate while previewing).
           expect(d.current.size).toBeGreaterThan(Math.max(...d.labels.map((l) => l.size)));

@@ -65,6 +65,7 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `radial-menu.unit.spec.js` | unit | Split out of `radial-menu.spec.js`. |
 | `recordings.unit.spec.js` | unit | New: every `tests/fixtures/**/*.expect.json` is a test. |
 | `suite-layout.unit.spec.js` | unit | New: convention guard. |
+| `reach-zones.unit.spec.js` | unit | Reach-zone math (whole hand in frame at both ends, scales 0.5–2, three views), dead zone, clamping, smoothing/hysteresis, hand-input zone/x publishing, axes table + switches, Drive gain math. |
 | `pinch-tempo.unit.spec.js` | unit | Pinch -> tempo mapping, the `pinch` bus event, `matchToScheduleAnyOffset` (helpers/schedule-match.js). |
 | `arp.spec.js` | integration | Right place for engine timing (±3 ms) on recorded audio. Lab-only: **app-level timing owed** (M1). Includes a WAV demo (not a gate-worthy assert; keep, it's cheap). |
 | `gesture-test.int.spec.js` | integration | From `gesture-reliability.spec.js`. |
@@ -88,6 +89,7 @@ PW_PORT + 200, `vite preview` PW_PORT + 100. Extra args to `verify` go to every 
 | `camera-feedback.e2e.spec.js` | e2e | Lead after the first real-camera session: set shapes (open hand never selects; 1/2/3 fingers + 🤘), confirm pop/linger/fade, ladder labels (both sides, 1280×800 + 390×844), discrete pitch steps (cycles + FFT per 85 ms, click metric), one filter visual per mode, screens `feedback-*.png` + `videos/camera-feedback-lead.webm`. Analysis: `helpers/lead-pitch.js` (pure). |
 | `m3-output.spec.js` | e2e | M3 3.3: output hooked into the modes app (beat grid, menu/mode, Arp notes, manifest, pinch, screens + video). |
 | `output-m3.unit.spec.js` | unit | M3 3.3 pure mapping + clock transport notifications. |
+| `reach-zones.e2e.spec.js` | e2e | The user's reach bug (height 1/0 at the top/bottom whole-hand positions), markers level with the palm across the band, Arp gate + Lead cursor/arrows at the band ends, Range, x bands, Drive (FFT brightness, ±2 dB, no limiting), Space (tail / none), switches, at-hand scales, phone, screens `reach-*.png` + `videos/reach-zones.webm`. |
 | `pages.e2e.spec.js` | e2e | New: every served page (auto-discovers `labs/*.html`). |
 | `smoke.spec.js` | e2e | Real MediaPipe from the CDN: **needs network**. The only test of the real tracker. |
 | `ui.spec.js` | e2e | Right place. Overlaps `visual.e2e` (structure vs pixels) — intended. |
@@ -102,7 +104,9 @@ that need a browser: none.
 ## Tools
 - **Mock hands** (`?mockHands`, dev only): each frame reads `window.__gsTest.results`. Build hands with
   `tests/helpers/hands.js` (`leftHand(degree, {minor})`, `rightHand(q, {volume, tilt, thumb})`, `fist()`,
-  `pinch({distance})`, all with `pos`/`view`/`scale`); in specs use the `synthPage` + `setHands` fixtures
+  `pinch({distance})`, all with `pos`/`view`/`scale`, plus `x` (HandFrame.x) and `range`); `volume` = HandFrame.height,
+  i.e. the palm is placed at that height of the hand's reach zone in the placement view (`setPlacementView`; the
+  `page` fixture sets it to the page's view, Node tests use the identity view — set it yourself for your own contexts); in specs use the `synthPage` + `setHands` fixtures
   (`tests/fixtures.js`), which also fail the test on any uncaught page error.
 - **Replay** (`?replay=/tests/fixtures/x.json`, dev only, real time, `&replayLoop`): real or synthetic
   recordings through the real pipeline. In Node: `replayThrough(loadRecordingFile(f))` → HandFrames.

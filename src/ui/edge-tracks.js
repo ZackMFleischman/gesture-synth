@@ -6,7 +6,9 @@
 //    A screen control that wins over the hand (ui/override) also shows as hollow (value) + solid (hand).
 //  - Hand lost: that hand's markers dashed in the warning color, a "Hand lost" plate at the edge and a
 //    ghost ring where the hand was last seen. Ring and plate fade out after MOTION.lostHold + lostFade.
-// Markers are level with the hand's palm (no numbers).
+// Markers are level with the hand's palm (no numbers). Each track spans that hand's vertical reach zone (bus
+// `left|right/zone`, src/input/reach-zones.js: palm y for value 1 at its top, 0 at its bottom), so the marker sits
+// level with the palm everywhere in the band and stops at the band's ends; full height until a zone is known.
 
 import {
   COLORS, LAYOUT, MOTION, STROKE, edgeTrackX, drawEdgeTrack, drawLabel, drawPlate, drawRing, FONT,
@@ -32,12 +34,19 @@ export function createEdgeTracks({ S, bus }) {
   let lastRightY = null;
   let lastMode = null;
 
-  function trackBounds(G) {
+  function trackBounds(G, zone = null) {
+    if (zone && zone.bottom > zone.top) return { top: zone.top * G.H, bottom: zone.bottom * G.H };
     return { top: LAYOUT.trackTop, bottom: G.H - LAYOUT.trackBottom };
   }
-  const valueToY = (G, v) => {
-    const { top, bottom } = trackBounds(G);
+  const valueToY = (G, v, zone = null) => {
+    const { top, bottom } = trackBounds(G, zone);
     return bottom - Math.max(0, Math.min(1, v)) * (bottom - top);
+  };
+  /** Palm y clamped to the hand's band (the marker never leaves its track). */
+  const clampY = (G, y, zone) => {
+    if (y == null) return null;
+    const { top, bottom } = trackBounds(G, zone);
+    return Math.max(top, Math.min(bottom, y));
   };
 
   /** Stronger dotted guide than theme.drawGuideLine (bright-video legibility). */
@@ -94,19 +103,19 @@ export function createEdgeTracks({ S, bus }) {
     });
   }
 
-  /** One hand's track. o: {side, color, hand, lostNow, markerY, heldY, dim, guideTo, name} */
-  /** Hollow-marker y for a value, in the hand's own frame when the hand is visible (so hollow and solid
-   *  meet where the engine hands control back: height ~ wrist y over 90% of the frame), else on the track. */
-  function hollowY(G, value, liveY, handHeight) {
-    if (liveY != null && typeof handHeight === "number") return liveY + (handHeight - value) * 0.9 * G.H;
-    return valueToY(G, value);
+  /** Hollow-marker y for a value: on the hand's band, where the palm gives that value (hollow and solid meet
+   *  exactly where the engine hands control back). */
+  function hollowY(G, value, zone) {
+    return valueToY(G, value, zone);
   }
+
+  /** One hand's track. o: {side, color, hand, lostNow, markerY, heldY, dim, guideTo, name} */
 
   function track(g, G, o) {
     const x = trackX(o.side, G);
     // What was drawn (read by tests through window.__gsTest.ui.tracks).
     S.tracks[o.name] = { side: o.side, markerY: o.markerY ?? null, heldY: o.heldY ?? null, dim: !!o.dim, lost: !!o.lostNow };
-    const { top, bottom } = trackBounds(G);
+    const { top, bottom } = trackBounds(G, o.hand.zone);
     backing(g, x, top, bottom);
     if (o.guideTo && o.markerY != null) {
       const dir = o.guideTo.x > x ? 1 : -1;
@@ -149,7 +158,7 @@ export function createEdgeTracks({ S, bus }) {
     const lLost = S.lost("left");
     const ov = S.overrides.get("master");
     const lPos = S.drawPos("left");
-    const lY = lPos ? lPos.y * G.H : L.lastPos && L.seen ? L.lastPos.y * G.H : null;
+    const lY = clampY(G, lPos ? lPos.y * G.H : L.lastPos && L.seen ? L.lastPos.y * G.H : null, L.zone);
     track(g, G, {
       name: "master-track",
       side: chordSide,
@@ -157,26 +166,26 @@ export function createEdgeTracks({ S, bus }) {
       hand: L,
       lostNow: lLost,
       markerY: lY,
-      heldY: ov && lPos ? hollowY(G, ov.value, lY, L.height) : null,
+      heldY: ov && lPos ? hollowY(G, ov.value, L.zone) : null,
       guideTo: lPos && ownSide ? handEdgePoint(G, lPos, chordSide) : null,
     });
 
     // ---- Right track (mode's right-height control) ----
     const R = S.hands.right;
     const rPos = S.drawPos("right");
-    const liveY = rPos ? rPos.y * G.H : null;
+    const liveY = clampY(G, rPos ? rPos.y * G.H : null, R.zone);
     if (S.modeId !== lastMode) {
       lastMode = S.modeId;
       // The router switches mode at the START of the countdown, while the menu still holds the hand:
       // keep showing a held marker, now at the new mode's value.
       const v = S.rightTrack ? bus.get(S.rightTrack.param) : null;
-      heldY = S.rightHeld ? (typeof v === "number" ? valueToY(G, v) : heldY) : null;
+      heldY = S.rightHeld ? (typeof v === "number" ? valueToY(G, v, R.zone) : heldY) : null;
     }
     if (S.rightHeld && !wasHeld) {
       // Arp pinch (menu closed): the hollow marker stays where the solid one was (hand level at the pinch
       // start), so nothing jumps; the menu shows the held value on the track.
       const pinchHold = S.menu.state === "closed" && lastRightY != null;
-      heldY = pinchHold ? lastRightY : S.heldValue != null ? valueToY(G, S.heldValue) : lastRightY ?? liveY;
+      heldY = pinchHold ? lastRightY : S.heldValue != null ? valueToY(G, S.heldValue, R.zone) : lastRightY ?? liveY;
     }
     if (!S.rightHeld) heldY = null;
     wasHeld = S.rightHeld;
@@ -186,8 +195,8 @@ export function createEdgeTracks({ S, bus }) {
     const rLost = S.lost("right");
     const rov = S.overrides.get(S.rightTrack.param);
     let hollow = null;
-    if (S.rightReturn && S.heldValue != null) hollow = hollowY(G, S.heldValue, liveY, R.height);
-    else if (rov) hollow = hollowY(G, rov.value, liveY, R.height);
+    if (S.rightReturn && S.heldValue != null) hollow = hollowY(G, S.heldValue, R.zone);
+    else if (rov) hollow = hollowY(G, rov.value, R.zone);
     if (hollow != null && liveY != null && Math.abs(hollow - liveY) < MEET_PX) hollow = null;
 
     if (rLost) {

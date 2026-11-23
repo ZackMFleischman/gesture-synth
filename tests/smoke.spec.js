@@ -5,7 +5,10 @@ import { test, expect, SCREENS_DIR } from "./fixtures.js";
 test("real MediaPipe pipeline boots and processes camera frames", async ({ page }) => {
   test.setTimeout(60_000);
   const consoleErrors = [];
-  page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
+  page.on("console", (m) => {
+    // The app has no favicon; Chrome's favicon.ico 404 is the one allow-listed error (same as pages.e2e).
+    if (m.type() === "error" && !/\/favicon\.ico$/.test(m.location().url)) consoleErrors.push(m.text());
+  });
 
   const modelLoaded = page.waitForResponse((r) => r.url().includes("hand_landmarker.task") && r.ok(), { timeout: 45_000 });
   await page.goto("/");

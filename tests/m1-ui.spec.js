@@ -237,7 +237,9 @@ test.describe("modes UI behavior", () => {
 
   for (const swap of [false, true]) {
     test(`edge-track markers are level with the hands${swap ? " (swapped)" : ""}`, async ({ synthPage: page, setHands }) => {
-      for (const [leftY, rightY] of [[0.57, 0.47], [0.3, 0.7]]) {
+      // (0.4, was 0.3: markers stop at the ends of the hand's reach zone, src/input/reach-zones.js, and this tilted
+      // synthetic hand's zone starts at 0.36 of the height. Level-with-the-palm inside the band is unchanged.)
+      for (const [leftY, rightY] of [[0.57, 0.47], [0.4, 0.7]]) {
         await setHands(...scene(DESKTOP, { swap, leftY, rightY }));
         await frames(page, 4);
         const t = (await ui(page)).tracks;

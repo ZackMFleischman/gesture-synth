@@ -3,7 +3,7 @@
 // The signaling server is started by playwright.config.js (webServer, port PW_SIGNAL_PORT).
 import fs from "node:fs";
 import { test, expect } from "@playwright/test";
-import { results, leftHand, rightHand, masterAt } from "./helpers/hands.js";
+import { results, leftHand, rightHand, masterAt, setPlacementView, DESKTOP_VIEW } from "./helpers/hands.js";
 import { createScreencast } from "./helpers/screencast.js";
 import { installSynthLog, checkRender } from "./helpers/output-timing.js";
 
@@ -43,6 +43,7 @@ function watchErrors(page) {
 
 async function openSynth(browser, { relay = false } = {}) {
   const context = await browser.newContext({ permissions: ["camera"], viewport: { width: 1280, height: 800 } });
+  setPlacementView(DESKTOP_VIEW); // hand builders place `volume` in this page's view (reach zone)
   const page = await context.newPage();
   const errors = watchErrors(page);
   const requests = [];
