@@ -1,12 +1,13 @@
 // Reach zones + sideways axes in the real app (?mockHands).
-// User feedback: "For the up and down on the right hand (re: the gate on the arp mode for instance) I can't reach all
-// the way to the top or bottom because my hand starts to get cut off" -> height maps over the band where the WHOLE
-// hand stays in frame (src/input/reach-zones.js). Plus: right hand sideways = Drive, left hand sideways = Space
-// (src/core/axes.js), each with a neutral middle, a Controls switch and an at-hand tick scale.
+// User feedback after real-camera testing: the up/down range "keeps changing. It should just be 75% of the size of the
+// screen." -> height = palm y over the FIXED middle 75 % of the display height (12.5 % = 1 .. 87.5 % = 0), both hands
+// (src/input/reach-zones.js BAND). Plus: right hand sideways = Drive, left hand sideways = Space (src/core/axes.js),
+// each with a neutral middle, a Controls switch and an at-hand tick scale. Drive / Space are EXPERIMENTAL and OFF by
+// default (user: "Mark it as an experimental feature and disable it for the moment"): every ON test turns the switch
+// on first, through the Controls panel's "Experimental" group.
 import fs from "node:fs";
 import { test, expect, SCREENS_DIR } from "./fixtures.js";
 import { leftHand, rightHand, hand, DESKTOP_VIEW } from "./helpers/hands.js";
-import { toDisplay } from "../src/input/hand-input.js";
 import { recordAudio, rms, spectrum, centroid, writeWav } from "./helpers/audio.js";
 import { createScreencast } from "./helpers/screencast.js";
 
@@ -15,35 +16,58 @@ const dB = (x) => 20 * Math.log10(x);
 const bus = (page, name) => page.evaluate((n) => window.__gsTest.bus.get(n), name);
 const shot = (page, state) => page.screenshot({ path: `${SCREENS_DIR}/reach-${state}.png` });
 
-/**
- * A right hand (4 fingers, desktop view) whose palm sits where its topmost / bottommost landmark is `gap` from the
- * top / bottom of the frame: the highest / lowest position at which the whole hand is still in view. Built with
- * `pos` only (no reach-zone math), so it describes the user's situation independently of the implementation.
- */
-function wholeHandAt(edge, { handedness = "Right", gap = 0.035, x = 0.7, scale = 1, fingers = ["index", "middle", "ring", "pinky"] } = {}) {
-  const probe = hand({ handedness, fingers, pos: { x, y: 0.5 }, view: DESKTOP_VIEW, scale });
-  const ys = probe.landmarks.map((p) => toDisplay(p, DESKTOP_VIEW).y);
-  const up = 0.5 - Math.min(...ys);
-  const down = Math.max(...ys) - 0.5;
-  const y = edge === "top" ? gap + up : 1 - gap - down;
-  return hand({ handedness, fingers, pos: { x, y }, view: DESKTOP_VIEW, scale });
+/** Sets the Drive / Space switches through the Controls panel ("Experimental" group), then closes the panel. */
+async function setAxes(page, want) {
+  await page.locator("#controlsToggle").click();
+  for (const [id, on] of Object.entries(want)) {
+    const sw = page.locator(`[data-control="axis-${id}"]`);
+    if ((await sw.getAttribute("aria-pressed")) !== String(on)) await sw.click();
+    await expect(sw).toHaveAttribute("aria-pressed", String(on));
+    await expect.poll(() => bus(page, `${id}/on`)).toBe(on);
+  }
+  await page.locator("#controlsToggle").click();
+  await expect(page.locator("#controlsPanel")).toBeHidden();
 }
-const inFrame = (h) => h.landmarks.map((p) => toDisplay(p, DESKTOP_VIEW)).every((p) => p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1);
+const axesOn = (page) => setAxes(page, { drive: true, space: true });
+
+const BAND_TOP = 0.125; // display fractions, src/input/reach-zones.js BAND (spelled out: the user's numbers)
+const BAND_BOTTOM = 0.875;
+/** A hand whose palm is at display y `y` (built with `pos`, no reach-zone math: independent of the implementation). */
+const palmAt = (y, { handedness = "Right", x = handedness === "Right" ? 0.7 : 0.28, scale = 1, fingers = ["index", "middle", "ring", "pinky"] } = {}) =>
+  hand({ handedness, fingers, pos: { x, y }, view: DESKTOP_VIEW, scale });
 
 test.describe("reach zones: vertical (the user's bug)", () => {
-  test("a hand at the top of what it can reach in frame reads height 1.0, at the bottom 0.0, all 21 landmarks inside", async ({ synthPage: page, setHands }) => {
-    for (const scale of [0.8, 1, 1.3]) {
-      for (const [edge, want] of [["top", 1], ["bottom", 0]]) {
-        const r = wholeHandAt(edge, { scale });
-        const l = wholeHandAt(edge, { handedness: "Left", x: 0.28, scale });
-        expect(inFrame(r) && inFrame(l), `${edge} ${scale}: whole hands in frame`).toBe(true);
-        await setHands(l, r);
-        await page.waitForTimeout(700); // zone smoothing (400 ms tau) settles on the new hand size
-        const h = await page.evaluate(() => [window.__gsTest.bus.get("right/height"), window.__gsTest.bus.get("left/height")]);
-        expect(h[0], `right ${edge} scale ${scale}`).toBeCloseTo(want, 2);
-        expect(h[1], `left ${edge} scale ${scale}`).toBeCloseTo(want, 2);
+  test("palm at 12.5 % of the screen height = 1.0, 50 % = 0.5, 87.5 % = 0.0, both hands, any hand size", async ({ synthPage: page, setHands }) => {
+    for (const scale of [0.6, 1, 1.3]) {
+      for (const [y, want] of [[BAND_TOP, 1], [0.3125, 0.75], [0.5, 0.5], [0.6875, 0.25], [BAND_BOTTOM, 0]]) {
+        await setHands(palmAt(y, { handedness: "Left", scale }), palmAt(y, { scale }));
+        await expect.poll(() => bus(page, "right/height"), { message: `right palm y ${y} scale ${scale}` }).toBeCloseTo(want, 2);
+        await expect.poll(() => bus(page, "left/height"), { message: `left palm y ${y} scale ${scale}` }).toBeCloseTo(want, 2);
       }
     }
+    for (const side of ["left", "right"]) {
+      const z = await bus(page, `${side}/zone`);
+      expect([z.top, z.bottom], side).toEqual([BAND_TOP, BAND_BOTTOM]);
+    }
+  });
+
+  test("the band never changes: hand size jitter / a closer hand / a fist leave a still palm's height exactly as it was", async ({ synthPage: page, setHands }) => {
+    const y = 0.4;
+    const want = (BAND_BOTTOM - y) / (BAND_BOTTOM - BAND_TOP);
+    const seen = new Set();
+    for (const [i, scale] of [0.9, 1.1, 0.9, 1.1, 1.6, 0.7, 1].entries()) {
+      const r = i === 5 ? hand({ handedness: "Right", fist: true, pos: { x: 0.7, y }, view: DESKTOP_VIEW, scale }) : palmAt(y, { scale });
+      await setHands(palmAt(y, { handedness: "Left", scale }), r);
+      await page.waitForTimeout(150); // a few frames at this size (the old band glided for ~1 s after a size change)
+      const s = await page.evaluate(() => ({
+        rh: window.__gsTest.bus.get("right/height"), lh: window.__gsTest.bus.get("left/height"),
+        rz: window.__gsTest.bus.get("right/zone"), lz: window.__gsTest.bus.get("left/zone"),
+      }));
+      expect(s.rh, `right, scale ${scale}`).toBeCloseTo(want, 3);
+      expect(s.lh, `left, scale ${scale}`).toBeCloseTo(want, 3);
+      seen.add(`${s.rz.top}|${s.rz.bottom}|${s.lz.top}|${s.lz.bottom}`);
+    }
+    expect([...seen]).toEqual([`${BAND_TOP}|${BAND_BOTTOM}|${BAND_TOP}|${BAND_BOTTOM}`]);
   });
 
   test("edge-track markers stay level with the palm (±4 px) across the band and stop at its ends", async ({ synthPage: page, setHands }) => {
@@ -63,6 +87,7 @@ test.describe("reach zones: vertical (the user's bug)", () => {
       expect(s.lh).toBeCloseTo(v, 2);
       expect(Math.abs(s.tracks["right-track"].markerY - s.r.y * H), `right marker at ${v}`).toBeLessThanOrEqual(4);
       expect(Math.abs(s.tracks["master-track"].markerY - s.l.y * H), `master marker at ${v}`).toBeLessThanOrEqual(4);
+      expect(Math.abs(s.tracks["right-track"].markerY - (BAND_BOTTOM - v * (BAND_BOTTOM - BAND_TOP)) * H), `right marker on the band at ${v}`).toBeLessThanOrEqual(4);
       if (v === 1) await shot(page, "top");
       if (v === 0) await shot(page, "bottom");
     }
@@ -82,10 +107,10 @@ test.describe("reach zones: vertical (the user's bug)", () => {
       await setHands(leftHand(1), rightHand(2, { volume: v }));
       await expect.poll(() => bus(page, "arp/gate"), { message: `gate at ${v}` }).toBeCloseTo(v, 2);
     }
-    // ...from a whole-in-frame hand at the very top / bottom it can reach
-    for (const [edge, want] of [["top", 1], ["bottom", 0]]) {
-      await setHands(leftHand(1), wholeHandAt(edge));
-      await expect.poll(() => bus(page, "arp/gate"), { message: `gate at the ${edge}` }).toBeCloseTo(want, 2);
+    // ...from a palm at the band's ends (12.5 % / 87.5 % of the screen height) and beyond them (clamped)
+    for (const [y, want] of [[BAND_TOP, 1], [BAND_BOTTOM, 0], [0.05, 1], [0.95, 0]]) {
+      await setHands(leftHand(1), palmAt(y, { fingers: ["index", "middle"] }));
+      await expect.poll(() => bus(page, "arp/gate"), { message: `gate at palm y ${y}` }).toBeCloseTo(want, 2);
     }
     await setHands(leftHand(1), rightHand(2, { volume: 1 }));
     await page.waitForTimeout(300);
@@ -93,21 +118,28 @@ test.describe("reach zones: vertical (the user's bug)", () => {
   });
 
   test("Lead: the cursor reaches the top and bottom notes and both octave arrows inside the band", async ({ synthPage: page, setHands }) => {
-    await setHands(leftHand(1));
+    // Real orientation (chord hand on screen LEFT, melody hand on the RIGHT), placed by palm position.
+    const L = palmAt(0.5, { handedness: "Left", x: 0.25, fingers: ["index"] });
+    const R = (y) => palmAt(y, { x: 0.75 });
+    await setHands(L);
     await page.evaluate(() => window.__gsTest.router.setMode("lead"));
     const dbg = () => page.evaluate(() => window.__gsTest.router.rightMode._debug()); // Lead = a layer on the base
     const placeAtY = async (y) => {
-      await setHands(leftHand(1), rightHand(4, { pos: { x: 0.7, y }, view: DESKTOP_VIEW }));
+      await setHands(L, R(y));
       await page.waitForTimeout(250);
       return dbg();
     };
-    await setHands(leftHand(1), rightHand(4, { volume: 0.5 }));
-    await page.waitForTimeout(400);
+    await setHands(L, R(0.5));
+    await expect.poll(async () => (await bus(page, "ui/sides"))?.expr).toBe("right");
+    await page.waitForTimeout(600); // ladder clearance cache (500 ms) sees the final layout
     const H = await page.evaluate(() => window.innerHeight);
     const z = await bus(page, "right/zone");
+    expect([z.top, z.bottom]).toEqual([BAND_TOP, BAND_BOTTOM]);
     let d = await dbg();
-    // The ladder spans the band: arrows at its ends (palm at height 1 / 0), lines between.
-    expect(Math.abs(d.geo.upY - z.top * H)).toBeLessThanOrEqual(2);
+    expect(d.geo.side).toBe("right");
+    // The ladder spans the fixed band: arrows at its ends (palm at height 1 / 0), lines between. DOM chrome at that
+    // edge still wins (the arrows never sit under it): the up arrow is at the band top or below it, never above.
+    expect(d.geo.upY).toBeGreaterThanOrEqual(z.top * H - 2);
     expect(Math.abs(d.geo.downY - z.bottom * H)).toBeLessThanOrEqual(2);
     const midis = d.lines.map((l) => l.midi);
     const [lo, hi] = [Math.min(...midis), Math.max(...midis)];
@@ -116,37 +148,37 @@ test.describe("reach zones: vertical (the user's bug)", () => {
     d = await placeAtY(d.geo.bottom / H);
     expect(d.preview, "bottom line").toBe(lo);
     // Height 1 / 0 (palm at the band's ends) = the octave arrows.
-    await setHands(leftHand(1), rightHand(4, { volume: 1 }));
+    await setHands(L, R(BAND_TOP));
     await expect.poll(async () => (await dbg()).hover).toBe("up");
     await shot(page, "lead-up-arrow");
-    await setHands(leftHand(1), rightHand(4, { volume: 0 }));
+    await setHands(L, R(BAND_BOTTOM));
     await expect.poll(async () => (await dbg()).hover).toBe("down");
   });
 
-  test("Range setting: Wide / Compact change the band; the marker still follows the palm", async ({ synthPage: page, setHands }) => {
-    await setHands(leftHand(1), rightHand(2, { volume: 0.5, scale: 0.6 }));
-    await page.waitForTimeout(600);
-    const comfort = await bus(page, "right/zone");
+  test("no Range setting: the Controls panel has no band presets (the band is fixed)", async ({ synthPage: page }) => {
     await page.locator("#controlsToggle").click();
-    const seg = page.locator('[data-control="range"]');
-    await expect(seg.locator("button.on")).toHaveText("Comfort");
-    await seg.getByText("Wide").click();
-    await expect.poll(async () => (await bus(page, "right/zone")).range).toBe("wide");
-    const wide = await bus(page, "right/zone");
-    await shot(page, "range-wide");
-    await seg.getByText("Compact").click();
-    await expect.poll(async () => (await bus(page, "right/zone")).range).toBe("compact");
-    const compact = await bus(page, "right/zone");
-    expect(wide.top).toBeLessThan(comfort.top);
-    expect(wide.bottom).toBeGreaterThan(comfort.bottom);
-    expect(compact.top).toBeGreaterThan(comfort.top);
-    expect(compact.bottom).toBeLessThan(comfort.bottom);
-    await shot(page, "range-compact");
+    await expect(page.locator("#controlsPanel")).toBeVisible();
+    await expect(page.locator('[data-control="range"]')).toHaveCount(0);
+    await expect(page.locator("#controlsPanel")).not.toContainText("Comfort");
+    expect(await bus(page, "reach/range")).toBeUndefined();
   });
 });
 
 test.describe("reach zones: horizontal", () => {
-  test("left/x and right/x: 0 inner, 0.5 neutral (band middle), 1 outer; null when the hand is lost", async ({ synthPage: page, setHands }) => {
+  test("default OFF: hands sideways publish nothing (no left/x, right/x, drive, space) and change no sound", async ({ synthPage: page, setHands }) => {
+    expect(await bus(page, "drive/on")).toBe(false);
+    expect(await bus(page, "space/on")).toBe(false);
+    for (const x of [0, 1, 0.5, 1]) {
+      await setHands(leftHand(1, { x }), rightHand(2, { x }));
+      await page.waitForTimeout(150);
+    }
+    for (const n of ["left/x", "right/x", "drive", "space"]) expect(await bus(page, n), n).toBeUndefined();
+    const audio = await page.evaluate(() => ({ drive: window.__gsTest.synth.drive, space: window.__gsTest.synth.space, shaper: !!window.__gsTest.synth.waveShaper?.curve, send: !!window.__gsTest.synth.spaceSend }));
+    expect(audio).toEqual({ drive: 0, space: 0, shaper: false, send: false }); // Drive bypassed (no curve), no reverb running
+  });
+
+  test("left/x and right/x (switched on): 0 inner, 0.5 neutral (band middle), 1 outer; null when the hand is lost", async ({ synthPage: page, setHands }) => {
+    await axesOn(page);
     for (const x of [0, 0.5, 1]) {
       await setHands(leftHand(1, { x }), rightHand(2, { x }));
       await page.waitForTimeout(150);
@@ -208,6 +240,7 @@ async function settleLimiterMeter(page) {
 test.describe("Drive (right hand sideways)", () => {
   test("brightness rises with right x, loudness stays within ±2 dB (default tone, filter neutral)", async ({ synthPage: page, setHands }) => {
     test.setTimeout(60_000);
+    await setAxes(page, { drive: true });
     const L = leftHand(4, { volume: 0.7 });
     const levels = [];
     for (const x of [0.5, 0.75, 0.9, 1]) {
@@ -236,6 +269,7 @@ test.describe("Drive (right hand sideways)", () => {
   test("full Drive on loud Chords (sawtooth, filter open, master 1, right 1): no limiting, loudness ±2 dB, peak <= 1", async ({ synthPage: page, setHands }) => {
     test.setTimeout(60_000);
     const th = await threshold(page);
+    await setAxes(page, { drive: true });
     await page.locator("#toneSelect").selectOption("sawtooth");
     const L = leftHand(6, { minor: true, volume: 0.95 }); // master 1, a close voicing below
     const out = [];
@@ -257,6 +291,7 @@ test.describe("Drive (right hand sideways)", () => {
 
   test("full Drive on loud Arp (gate 1, x2, max settings): no limiting, peak <= 1", async ({ synthPage: page, setHands }) => {
     const th = await threshold(page);
+    await setAxes(page, { drive: true });
     await page.locator("#toneSelect").selectOption("sawtooth");
     await setHands(leftHand(1, { volume: 0.95 }));
     await page.evaluate(() => window.__gsTest.router.setMode("arp"));
@@ -272,26 +307,30 @@ test.describe("Drive (right hand sideways)", () => {
     expect(m.peak).toBeLessThanOrEqual(1);
   });
 
-  test("Drive switched off: right x has no effect (param 0, same brightness as neutral)", async ({ synthPage: page, setHands }) => {
+  test("Drive off (default, and switched off again): right x has no effect (same brightness as neutral)", async ({ synthPage: page, setHands }) => {
+    test.setTimeout(60_000);
     await page.locator("#toneSelect").selectOption("sawtooth");
     const L = leftHand(4, { volume: 0.95 });
     await setHands(L, rightHand(3, { volume: 0.8, x: 0.5 }));
     await page.waitForTimeout(900); // tone change + chord hold + ramps settle (steady state only)
     const neutral = await measure(page, 700);
-    await page.locator("#controlsToggle").click();
-    const sw = page.locator('[data-control="axis-drive"]');
-    await expect(sw).toHaveAttribute("aria-pressed", "true");
-    await sw.click();
-    await expect(sw).toHaveAttribute("aria-pressed", "false");
+    // Default: off. The hand all the way out changes nothing.
     await setHands(L, rightHand(3, { volume: 0.8, x: 1 }));
     await page.waitForTimeout(900);
-    expect(await bus(page, "drive")).toBe(0);
-    const off = await measure(page, 700);
-    console.log(`[drive-off] neutral ${dB(neutral.rms).toFixed(2)} dB ${neutral.centroid.toFixed(0)} Hz; off ${dB(off.rms).toFixed(2)} dB ${off.centroid.toFixed(0)} Hz`);
-    expect(Math.abs(off.centroid / neutral.centroid - 1)).toBeLessThan(0.03);
-    expect(Math.abs(dB(off.rms) - dB(neutral.rms))).toBeLessThan(0.5);
-    await sw.click();
+    expect(await bus(page, "drive")).toBeUndefined();
+    const dflt = await measure(page, 700);
+    // On: full Drive. Off again: back to neutral (param 0).
+    await setAxes(page, { drive: true });
     await expect.poll(() => bus(page, "drive")).toBe(1);
+    await setAxes(page, { drive: false });
+    await expect.poll(() => bus(page, "drive")).toBe(0);
+    await page.waitForTimeout(900);
+    const off = await measure(page, 700);
+    for (const [name, m] of [["default", dflt], ["off", off]]) {
+      console.log(`[drive-${name}] neutral ${dB(neutral.rms).toFixed(2)} dB ${neutral.centroid.toFixed(0)} Hz; ${name} ${dB(m.rms).toFixed(2)} dB ${m.centroid.toFixed(0)} Hz`);
+      expect(Math.abs(m.centroid / neutral.centroid - 1), name).toBeLessThan(0.03);
+      expect(Math.abs(dB(m.rms) - dB(neutral.rms)), name).toBeLessThan(0.5);
+    }
   });
 });
 
@@ -312,6 +351,7 @@ test.describe("Space (left hand sideways)", () => {
 
   test("wet tail after note-off with left x high; none at neutral; dry level kept at neutral", async ({ synthPage: page, setHands }) => {
     test.setTimeout(60_000);
+    await setAxes(page, { space: true });
     const dry = await tail(page, setHands, 0.5);
     expect(dry.space).toBe(0);
     const wet = await tail(page, setHands, 1);
@@ -326,6 +366,7 @@ test.describe("Space (left hand sideways)", () => {
 
   test("full Space on loud Chords: no limiting, peak <= 1", async ({ synthPage: page, setHands }) => {
     const th = await threshold(page);
+    await setAxes(page, { space: true });
     await page.locator("#toneSelect").selectOption("sawtooth");
     await setHands(leftHand(6, { minor: true, volume: 0.95, x: 1 }), rightHand(4, { volume: 1, tilt: 1 }));
     await page.waitForTimeout(1500); // reverb builds up to its steady level
@@ -337,24 +378,35 @@ test.describe("Space (left hand sideways)", () => {
     expect(m.peak).toBeLessThanOrEqual(1);
   });
 
-  test("Space switched off: no tail", async ({ synthPage: page, setHands }) => {
-    await page.locator("#controlsToggle").click();
-    await page.locator('[data-control="axis-space"]').click();
-    await expect(page.locator('[data-control="axis-space"]')).toHaveAttribute("aria-pressed", "false");
+  test("Space off (default, and switched off again): no tail", async ({ synthPage: page, setHands }) => {
+    test.setTimeout(60_000);
     const t = await tail(page, setHands, 1);
-    expect(t.space).toBe(0);
+    expect(t.space).toBeUndefined(); // default off: not published
     expect(dB(t.tail + 1e-9) - dB(t.playing)).toBeLessThan(-50);
+    await setAxes(page, { space: true });
+    await expect.poll(() => bus(page, "space")).toBe(1);
+    await setAxes(page, { space: false });
+    const t2 = await tail(page, setHands, 1);
+    expect(t2.space).toBe(0);
+    expect(dB(t2.tail + 1e-9) - dB(t2.playing)).toBeLessThan(-50);
   });
 });
 
 // ---------- UI ----------
 
 test.describe("at-hand indicators, guide, help", () => {
-  test("tick scales under each palm: neutral, active (dot at the hand), hidden when switched off", async ({ synthPage: page, setHands }) => {
+  test("tick scales under each palm: none by default; switched on: neutral, active (dot at the hand); hidden when switched off", async ({ synthPage: page, setHands }) => {
     const regions = () => page.evaluate(() => Object.fromEntries(window.__gsTest.ui.regions.filter((r) => r.name.startsWith("axis-")).map((r) => [r.name, r.rect])));
-    await setHands(leftHand(1, { x: 0.5 }), rightHand(2, { x: 0.5 }));
+    await setHands(leftHand(1, { x: 1 }), rightHand(2, { x: 1 }));
     await page.waitForTimeout(300);
     let r = await regions();
+    expect(Object.keys(r)).toEqual([]); // default off: no at-hand indicators
+    await shot(page, "axes-off");
+    await axesOn(page);
+    await setHands(leftHand(1, { x: 0.5 }), rightHand(2, { x: 0.5 }));
+    await expect.poll(() => bus(page, "drive")).toBe(0); // glides back from the x 1 it was switched on at
+    await page.waitForTimeout(100);
+    r = await regions();
     expect(Object.keys(r).sort()).toEqual(["axis-drive", "axis-space"]);
     expect(r["axis-drive"].active).toBe(false);
     const W = await page.evaluate(() => window.innerWidth);
@@ -374,28 +426,61 @@ test.describe("at-hand indicators, guide, help", () => {
     const zr = await bus(page, "right/zone");
     expect(zr.side === "left" ? r["axis-drive"].dot.x < rp.x * W : r["axis-drive"].dot.x > rp.x * W).toBe(true);
     await shot(page, "drive-space-active");
-    await page.locator("#controlsToggle").click();
-    await page.locator('[data-control="axis-drive"]').click();
-    await page.locator("#controlsToggle").click();
+    await setAxes(page, { drive: false });
     await page.waitForTimeout(200);
     r = await regions();
     expect(r["axis-drive"]).toBeUndefined();
     expect(r["axis-space"]).toBeDefined();
   });
 
-  test("Controls panel rows, gesture guide rows and help text", async ({ synthPage: page }) => {
-    await page.locator("#controlsToggle").click();
-    for (const c of ["range", "axis-drive", "axis-space"]) await expect(page.locator(`[data-control="${c}"]`)).toBeVisible();
-    await shot(page, "controls");
-    await page.locator("#guideToggle").click();
+  test("Controls panel: Experimental group at the bottom, off; guide + help lines only while switched on", async ({ synthPage: page }) => {
     const guide = page.locator("#gestureGuide");
-    await expect(guide).toContainText("Right hand sideways → Drive");
-    await expect(guide).toContainText("Left hand sideways → Space");
+    const helpLine = (t) => page.locator("#helpModal p").filter({ hasText: t });
+    const LINES = ["Right hand sideways → Drive", "Left hand sideways → Space"];
+    // Default: off. No guide lines, no help lines.
+    await page.locator("#guideToggle").click();
+    await expect(guide).toBeVisible();
+    for (const t of LINES) await expect(guide).not.toContainText(t);
+    await shot(page, "guide-default");
+    await page.locator("#guideToggle").click();
+    await page.locator("#helpButton").click();
+    await expect(page.locator("#helpModal")).toBeVisible();
+    await expect(page.locator("#helpExperimental")).toBeHidden();
+    for (const t of LINES) await expect(helpLine(t)).toBeHidden();
+    await page.locator("#closeHelp").click();
+    // The panel: "Experimental" + note, then the two switches (off), after every other row.
+    await page.locator("#controlsToggle").click();
+    const head = page.locator('#controlsPanel [data-group="experimental"]');
+    await expect(head).toBeVisible();
+    await expect(head).toContainText("Experimental");
+    await expect(head).toContainText("Hand sideways controls");
+    const order = await page.evaluate(() => [...document.querySelectorAll("#controlsPanel > *")].map((e) => e.dataset.group || e.querySelector("[data-control]")?.dataset.control || e.dataset.hook || e.querySelector("[data-hook]")?.dataset.hook || ""));
+    const at = (k) => order.indexOf(k);
+    expect(at("experimental")).toBeGreaterThan(at("output"));
+    expect(at("experimental")).toBeGreaterThan(at("master"));
+    expect(at("axis-drive")).toBeGreaterThan(at("experimental"));
+    expect(at("axis-space")).toBeGreaterThan(at("experimental"));
+    for (const c of ["axis-drive", "axis-space"]) {
+      await expect(page.locator(`[data-control="${c}"]`)).toBeVisible();
+      await expect(page.locator(`[data-control="${c}"]`)).toHaveAttribute("aria-pressed", "false");
+    }
+    await shot(page, "controls");
+    await page.locator("#controlsToggle").click();
+    // Switched on: the guide and help show them (as today).
+    await axesOn(page);
+    await page.locator("#guideToggle").click();
+    for (const t of LINES) await expect(guide).toContainText(t);
     await shot(page, "guide");
     await page.locator("#guideToggle").click();
-    const help = await page.locator("#helpModal").textContent();
-    expect(help).toContain("Right hand sideways → Drive");
-    expect(help).toContain("Left hand sideways → Space");
+    await page.locator("#helpButton").click();
+    await expect(page.locator("#helpExperimental")).toBeVisible();
+    for (const t of LINES) await expect(helpLine(t)).toBeVisible();
+    await page.locator("#closeHelp").click();
+    // Only Drive on: only its lines.
+    await setAxes(page, { space: false });
+    await page.locator("#helpButton").click();
+    await expect(helpLine(LINES[0])).toBeVisible();
+    await expect(helpLine(LINES[1])).toBeHidden();
   });
 
   test("phone 390x844: tick scales are compact and on screen", async ({ page, setHands }) => {
@@ -406,6 +491,7 @@ test.describe("at-hand indicators, guide, help", () => {
     const { setPlacementView, viewFor } = await import("./helpers/hands.js");
     setPlacementView(viewFor(390, 844));
     const view = viewFor(390, 844);
+    await page.evaluate(() => { window.__gsTest.bus.set("drive/on", true); window.__gsTest.bus.set("space/on", true); });
     await setHands(leftHand(1, { pos: { x: 0.25, y: 0.5 }, view, scale: 0.5 }), rightHand(2, { pos: { x: 0.8, y: 0.45 }, view, scale: 0.5 }));
     await page.waitForTimeout(400);
     const r = await page.evaluate(() => window.__gsTest.ui.regions.filter((x) => x.name.startsWith("axis-")).map((x) => x.rect));
@@ -422,6 +508,7 @@ test.describe("at-hand indicators, guide, help", () => {
 test("video: reaching up/down and sideways (test-results/videos/reach-zones.webm)", async ({ synthPage: page, setHands, browser }) => {
   test.setTimeout(90_000);
   const OUT = "test-results/videos/reach-zones.webm";
+  await axesOn(page); // sideways = experimental Drive / Space, switched on for the video
   await setHands(leftHand(1), rightHand(2));
   await page.waitForTimeout(500);
   const rec = createScreencast();

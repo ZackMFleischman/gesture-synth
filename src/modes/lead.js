@@ -34,6 +34,7 @@ import { drawEnergy } from "./chords.js";
 import { MODE_COLORS, COLORS, FONT as THEME_FONT, MOTION, withAlpha, easeOut, confirmPhase, drawLabel, rectsOverlap } from "../ui/theme.js";
 import { createSafeArea } from "../ui/mobile/safe-area.js";
 import { lostAlpha } from "../ui/edge-tracks.js";
+import { BAND } from "../input/reach-zones.js";
 
 // ---- Look: shared tokens from src/ui/theme.js; Lead-specific geometry below ----
 export const LEAD_COLOR = MODE_COLORS.lead;
@@ -771,10 +772,11 @@ const lead = {
     const H = g.canvas.height;
     const sides = ctx?.bus?.get?.("ui/sides");
     const side = sides && sides.expr === "left" ? "left" : "right";
-    // Reach zone of the right hand (kept while the hand is lost, so the ladder does not jump).
+    // Reach zone of the right hand (the fixed height band, src/input/reach-zones.js; BAND before a hand was seen).
     const z = ctx?.bus?.get?.("right/zone");
     if (z && typeof z.top === "number") view.band = z;
-    const band = view.band ? { top: view.band.top * H, bottom: view.band.bottom * H } : null;
+    const zb = view.band || { top: BAND.TOP, bottom: BAND.BOTTOM };
+    const band = { top: zb.top * H, bottom: zb.bottom * H };
     const geo = (lastGeo = ladderGeometry(W, H, side, safeInsets()[side], edgeClearance(W, H, side, now), band));
     const sz = geo.sz;
     const dir = geo.dir;

@@ -7,7 +7,7 @@
 
 import { COLORS, FONT, LAYOUT, MOTION, drawLabel } from "./theme.js";
 import { trackX } from "./edge-tracks.js";
-import { AXES } from "../core/axes.js";
+import { AXES, isAxisOn } from "../core/axes.js";
 
 /** Right-hand guide rows per mode (spec table, ui-integration.md §7). A mode's own `guide` wins. */
 export const DEFAULT_GUIDE = {
@@ -37,8 +37,8 @@ export function createGuide({ S, doc, bus }) {
     return (Array.isArray(S.mode?.guide) && S.mode.guide) || DEFAULT_GUIDE[S.modeId] || [];
   }
   /** Sideways axes (every mode, src/core/axes.js) that are switched on: "Right hand sideways → Drive". */
-  const axisRows = () => AXES.filter((a) => bus?.get?.(`${a.id}/on`) !== false).map((a) => ["↔", a.guide]);
-  const renderKey = () => `${S.modeId}|${S.layerId ? S.baseId : ""}|${axisRows().length}|${AXES.map((a) => bus?.get?.(`${a.id}/on`) !== false).join()}`;
+  const axisRows = () => AXES.filter((a) => isAxisOn(bus, a)).map((a) => ["↔", a.guide]);
+  const renderKey = () => `${S.modeId}|${S.layerId ? S.baseId : ""}|${axisRows().length}|${AXES.map((a) => isAxisOn(bus, a)).join()}`;
 
   function append() {
     if (!guideEl) return;

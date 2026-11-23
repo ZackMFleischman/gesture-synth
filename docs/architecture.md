@@ -247,7 +247,8 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
     value pill at the hand (~0.4 s) instead of the countdown ring. Lab: `labs/menu-lab.html` (down = "Sound", 6 instruments).
 - Reach zones + sideways axes (ws/reach-zones, user feedback "my hand starts to get cut off"):
   - HandFrame `height` = the palm's position over the hand's vertical reach zone (display space; 0 bottom .. 1 top), no
-    longer the wrist over 90 % of the camera image (that is now `rawHeight`). Zone (`src/input/reach-zones.js`, pure):
+    longer the wrist over 90 % of the camera image (that is now `rawHeight`). *Superseded by the fixed band below (ws/simplify).*
+    Zone (`src/input/reach-zones.js`, pure):
     palm y limits where the whole hand stays in frame = max(preset top, up + 3 %) .. min(preset bottom, 1 − down − 3 %),
     up/down = the hand's extent above/below the palm (max of the 21 landmarks and 1.3 / 0.9 hand sizes); band never shorter
     than 0.12 (centered when a hand is too big). Presets (`reach/range`, Controls "Range"): comfort 20–80 % (default), wide
@@ -256,7 +257,8 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
   - HandFrame adds `x` (0 inner .. 0.5 neutral .. 1 outer of a horizontal band on the side the hand is DISPLAYED on, from
     `ui/sides`, else guessed from the palms; dead zone 16 % of the band around its middle), `zone`
     ({top, bottom, inner, outer, side, range}), `extents`, `rawHeight`. Bus (hand input): `left|right/x` (null when lost),
-    `left|right/zone` (state, quantized to 1/1000); `reach/range` (state, ui).
+    `left|right/zone` (state, quantized to 1/1000); `reach/range` (state, ui). *(`extents`, `range`, `reach/range`: removed
+    by ws/simplify.)*
   - Edge tracks span their hand's zone (marker = palm y, clamped to the band; hollow markers on the band). Lead's ladder
     spans the right hand's zone: arrows at the band ends, lines between (`ladderGeometry(..., band)`), DOM clearance still wins.
   - `src/core/axes.js` = THE mapping table (one line per axis): right x -> `drive`, left x -> `space`, curve `outward`
@@ -269,6 +271,39 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
     tanh(g·x), g 0.05..9 (squared), makeup keeps a 0.3 reference peak (× 0.62 at full drive for the RMS rise):
     loudness within ±2 dB, limiter input falls as Drive rises. `audio.setDrive/setSpace`, `audio.drive/space`.
   - Wire: `/gs/drive`, `/gs/space`, `/gs/left/x`, `/gs/right/x` (ADDRESS_TABLE).
+- Fixed height band (ws/simplify; user feedback after real-camera testing: the up/down range "keeps changing. It should
+  just be 75% of the size of the screen."):
+  - HandFrame `height` = palm display y over the FIXED middle 75 % of the display height: `BAND.TOP` 0.125 (height 1) ..
+    `BAND.BOTTOM` 0.875 (height 0), clamped (`src/input/reach-zones.js`). Same band for both hands (left = master volume,
+    right = gate / note cursor / ...), every mode and screen; hand size, extent, shape and distance never move it. No
+    smoothing of the band (nothing to smooth), no presets: the Controls "Range" row, `reach/range`, `RANGE_PRESETS`,
+    `handExtents`, `createZoneSmoother` and HandFrame `extents` are gone.
+  - Horizontal band (Drive / Space only) is fixed too: `BAND.INNER` 0.56 .. `BAND.OUTER` 0.88 on the right half,
+    mirrored on the left; dead zone unchanged (16 %).
+  - `zoneFor(side)` -> {top, bottom, inner, outer, side}. Bus `left|right/zone` still published (same values; a new
+    object only when the hand's display side changes) so consumers keep one source.
+  - Edge tracks span exactly this band (also before any hand was seen); Lead's ladder spans it (arrows at the band ends,
+    DOM chrome at that edge still wins). The router's MASTER_VOLUME map (LOW 0.1 .. HIGH 0.55 of height, dead zone,
+    smoothing) is unchanged: it works on height.
+- Drive & Space = EXPERIMENTAL, OFF by default (ws/simplify; user: "the side-to-side for space and drive makes things too
+  complicated right now. Mark it as an experimental feature and disable it for the moment."):
+  - Code kept as is (`src/core/axes.js`, audio graph, at-hand scales). `<id>/on` defaults to `false` (on only when exactly
+    `true`; `isAxisOn(bus, axis)`); nothing is persisted, so every load starts off.
+  - Off: no audio effect (`setDrive` / `setSpace` never called, or called once with 0 when switched off: the waveshaper
+    has no curve until first used = bit-identical pass-through, no convolver until first used), the hand is ignored, no
+    at-hand tick scales, no gesture-guide rows, no help lines. Output: `drive` / `space` are not set on the bus (so not in
+    the state snapshot nor sent) until switched on; `left|right/x` are published by hand input only while an axis using
+    them is on (HandFrame.x is still computed). Switching off after on sets the param to 0 and the x to null once.
+  - Controls panel: the two switches sit in an "Experimental" group at the bottom (after Output), header
+    `[data-group="experimental"]` "Experimental · Hand sideways controls". Help modal: the Drive / Space lines live in
+    `#helpExperimental` (hidden unless an axis is on; each line `[data-axis]` shown only while its axis is on). On =
+    today's behavior.
+- Top-right 8-bar meter hidden with the modes UI (ws/simplify; user: "The bars in the upper right I think represent the
+  gate, but I think we can nix that? The gate's already mid right on the screen."): `body.gs-modes #volumeMeter
+  {display:none}` in every mode, desktop and phones (same approach as `#distortionDisplay`). Eric's element stays in the
+  DOM and is still updated (readouts.js / indicators.js, mode field `meter` and `S.meter` kept: not dead). The edge
+  tracks carry the same values (Arp gate = right track, master = master track). The output chip moves to the top-right
+  gutter (it sat left of the meter).
 - Lead layer (ws/lead-layer; spec note "Decided after real-camera testing: Lead plays on top of the current mode"):
   - Modes split into BASE modes (Chords, Arp: accompaniment, left hand) and LAYERS (mode plugin `layer: true`: Lead). The
     router keeps `active` = the base and `layer` = Lead or null. Bus: `mode` = the base id (unchanged meaning for

@@ -5,7 +5,8 @@
 // 5-8 index, 9-12 middle, 13-16 ring, 17-20 pinky (mcp, pip, dip, tip).
 
 import { bus as sharedBus } from "../core/bus.js";
-import { DEFAULT_RANGE, createZoneSmoother, handExtents, heightIn, xIn, zoneFor } from "./reach-zones.js";
+import { heightIn, xIn, zoneFor } from "./reach-zones.js";
+import { AXES, isAxisOn } from "../core/axes.js";
 
 // ---- Tunable thresholds (live-tuned on labs/gesture-test.html) ----
 // `export let` = live bindings: setThresholds() changes what every importer sees.
@@ -259,7 +260,7 @@ export function thumbOffset(landmarks, handedness, handSize, view = IDENTITY_VIE
  * @returns HandFrame (see docs/architecture.md)
  */
 export function buildHandFrame(landmarks, handedness, {
-  t = 0, view = IDENTITY_VIEW, wasPinching = false, wasThumb, voicingBeforePinch, side, range = DEFAULT_RANGE, extents,
+  t = 0, view = IDENTITY_VIEW, wasPinching = false, wasThumb, voicingBeforePinch, side,
 } = {}) {
   // 1. Pinch first: thumb-index distance in hand sizes, two thresholds, needs the middle finger up.
   const handSize = displayDistance(landmarks[0], landmarks[9], view);
@@ -310,12 +311,10 @@ export function buildHandFrame(landmarks, handedness, {
     if (d.y > by1) by1 = d.y;
   }
   const box = { x0: bx0, y0: by0, x1: bx1, y1: by1 };
-  // Reach zone (src/input/reach-zones.js): height / x over the band where the whole hand stays in frame.
-  // A lone frame uses its own extents and guesses the side from the palm; createHandInput passes smoothed
-  // extents and the side the UI displays the hand on.
-  const aspect = view.dstH > 0 ? view.dstW / view.dstH : 1;
-  const ext = handExtents(pts, pos, handSize, aspect);
-  const zone = zoneFor(extents || ext, side || (pos.x < 0.5 ? "left" : "right"), range);
+  // Reach zone (src/input/reach-zones.js): height over the fixed middle 75 % of the display height; x over the fixed
+  // horizontal band on the side the hand is displayed on (a lone frame guesses it from the palm; createHandInput
+  // passes the side the UI displays the hand on).
+  const zone = zoneFor(side || (pos.x < 0.5 ? "left" : "right"));
 
   return {
     handedness,
@@ -331,7 +330,6 @@ export function buildHandFrame(landmarks, handedness, {
     rawHeight: getVolumeFromHeight(landmarks),
     x: xIn(zone, pos.x),
     zone,
-    extents: ext,
     tilt: getHandHorizontalTilt(landmarks, handedness),
     pos,
     top,
@@ -348,11 +346,18 @@ const SIDE_SIGNALS = {
   Right: { height: "right/height", tilt: "right/tilt", pos: "right/pos", top: "right/top", pinchpt: "right/pinchpt", fist: "right/fist", pinch: "right/pinch", size: "right/size", x: "right/x", zone: "right/zone" },
 };
 
+// Sideways axes fed by each hand's `x` (src/core/axes.js; experimental, off by default): `left|right/x` is published
+// only while one of them is switched on.
+const X_AXES = {
+  Left: AXES.filter((a) => a.source === SIDE_SIGNALS.Left.x),
+  Right: AXES.filter((a) => a.source === SIDE_SIGNALS.Right.x),
+};
+
 const HISTORY_MS = 1000; // voicing history kept per hand (must exceed PINCH_LOOKBACK_MS)
 
 /** Per-hand state carried between frames. Reset when the hand is lost. */
 function newHandState() {
-  return { pinch: false, thumb: undefined, latched: null, history: [], zone: createZoneSmoother(), side: null };
+  return { pinch: false, thumb: undefined, latched: null, history: [], side: null };
 }
 
 /** voicing at (t - PINCH_LOOKBACK_MS): latest sample at/before then, else the oldest, else null. */
@@ -381,11 +386,9 @@ export function createHandInput({ bus = sharedBus } = {}) {
     bus.declare(side.fist, { type: "state", owner: "hand-input" });
     bus.declare(side.pinch, { type: "state", owner: "hand-input" });
     bus.declare(side.size, { type: "continuous", owner: "hand-input" }); // handSize, display-height units
-    bus.declare(side.x, { type: "continuous", owner: "hand-input" }); // 0 inner .. 0.5 neutral .. 1 outer (reach zone)
-    bus.declare(side.zone, { type: "state", owner: "hand-input" }); // reach zone {top,bottom,inner,outer,side,range}
+    bus.declare(side.x, { type: "continuous", owner: "hand-input" }); // 0 inner .. 0.5 neutral .. 1 outer; only while its axis is on
+    bus.declare(side.zone, { type: "state", owner: "hand-input" }); // reach zone {top,bottom,inner,outer,side} (fixed band)
   }
-  // Controls panel "Range" (reach-zone preset: comfort | wide | compact; src/input/reach-zones.js).
-  bus.declare("reach/range", { type: "state", owner: "ui" });
   // `/gs/pinch` event: 1 when the right (mode) hand starts a pinch, 0 at release (or when the pinching
   // hand is lost). Shared here so every mode gets it with no code.
   bus.declare("pinch", { type: "event", owner: "hand-input" });
@@ -413,22 +416,12 @@ export function createHandInput({ bus = sharedBus } = {}) {
   function frameFor(landmarks, handedness, t, otherPos) {
     const s = state[handedness];
     if (!s) return buildHandFrame(landmarks, handedness, { t, view });
-    const range = bus.get("reach/range") || DEFAULT_RANGE;
-    // This frame's extents are measured from its landmarks; the zone uses the smoothed extents.
     const pos = palmOf(landmarks);
     const side = (s.side = sideOf(handedness, s, pos, otherPos));
     // Pinch decided first (no latched voicing yet), then latch on the rising edge.
     const f = buildHandFrame(landmarks, handedness, {
-      t, view, wasPinching: s.pinch, wasThumb: s.thumb, range, side, extents: s.zone.value || undefined,
+      t, view, wasPinching: s.pinch, wasThumb: s.thumb, side,
     });
-    const ext = s.zone.update(f.extents, t);
-    if (ext !== null) {
-      // Re-map with this frame's smoothed extents (the zone above used the previous frame's).
-      const zone = zoneFor(ext, side, range);
-      f.zone = zone;
-      f.height = heightIn(zone, f.pos.y);
-      f.x = xIn(zone, f.pos.x);
-    }
     if (f.pinch) {
       if (!s.pinch || s.latched === null) s.latched = voicingAt(s.history, t) ?? f.voicingCount;
       f.voicingBeforePinch = s.latched;
@@ -451,17 +444,14 @@ export function createHandInput({ bus = sharedBus } = {}) {
     bus.set(s.fist, f ? f.fist : false);
     bus.set(s.pinch, f ? f.pinch : false);
     bus.set(s.size, f ? f.handSize : null);
-    bus.set(s.x, f ? f.x : null);
+    if (X_AXES[side].some((a) => isAxisOn(bus, a))) bus.set(s.x, f ? f.x : null);
+    else if (bus.get(s.x) != null) bus.set(s.x, null); // switched off: once, then nothing
     if (!f) bus.set(s.zone, null);
     else {
-      // Rebuilt only when the band moved visibly (1/1000 of the screen): few updates for consumers.
+      // The band is fixed: a new object only when the hand's display side changes (few updates for consumers).
       const z = f.zone;
       const prev = bus.get(s.zone);
-      const q = (v) => Math.round(v * 1000) / 1000;
-      if (!prev || q(prev.top) !== q(z.top) || q(prev.bottom) !== q(z.bottom) || q(prev.inner) !== q(z.inner) ||
-        q(prev.outer) !== q(z.outer) || prev.side !== z.side || prev.range !== z.range) {
-        bus.set(s.zone, { top: q(z.top), bottom: q(z.bottom), inner: q(z.inner), outer: q(z.outer), side: z.side, range: z.range });
-      }
+      if (!prev || prev.side !== z.side) bus.set(s.zone, { ...z });
     }
   }
 

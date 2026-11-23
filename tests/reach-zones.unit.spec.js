@@ -1,9 +1,9 @@
 // Reach zones (src/input/reach-zones.js) + sideways axes (src/core/axes.js) + Drive gain math, in Node.
-// User feedback: "I can't reach all the way to the top or bottom because my hand starts to get cut off."
+// User feedback (real camera): the up/down range "keeps changing. It should just be 75% of the size of the screen."
+// -> height = palm y over the FIXED middle 75 % of the display height, for both hands, whatever the hand does.
 import { test, expect } from "@playwright/test";
 import {
-  RANGE_PRESETS, ZONE, zoneFor, heightIn, yForHeight, xIn, xForValue, bandPos, deadZone, handExtents,
-  createZoneSmoother,
+  BAND, ZONE, zoneFor, heightIn, yForHeight, xIn, xForValue, bandPos, deadZone,
 } from "../src/input/reach-zones.js";
 import { buildHandFrame, createHandInput, makeView } from "../src/input/hand-input.js";
 import { createBus } from "../src/core/bus.js";
@@ -15,100 +15,86 @@ const VIEWS = { identity: IDENTITY_VIEW, desktop: DESKTOP_VIEW, phone: makeView(
 const SCALES = [0.5, 0.75, 1, 1.25, 1.5, 2];
 const frameOf = (h, view) => buildHandFrame(h.landmarks, h.handedness, { view });
 
-test.describe("reach zones: vertical", () => {
+test.describe("reach zones: vertical (fixed band, middle 75 % of the screen)", () => {
+  test("the band: palm y 12.5 % (height 1) .. 87.5 % (height 0) of the display height, same on both sides", () => {
+    expect(BAND.TOP).toBe(0.125);
+    expect(BAND.BOTTOM).toBe(0.875);
+    expect(BAND.BOTTOM - BAND.TOP).toBeCloseTo(0.75, 12);
+    for (const side of ["left", "right"]) {
+      const z = zoneFor(side);
+      expect(z.top, side).toBe(BAND.TOP);
+      expect(z.bottom, side).toBe(BAND.BOTTOM);
+      expect(heightIn(z, 0.125), side).toBe(1);
+      expect(heightIn(z, 0.875), side).toBe(0);
+      expect(heightIn(z, 0.5), side).toBeCloseTo(0.5, 12);
+      expect(heightIn(z, 0.3125), side).toBeCloseTo(0.75, 12);
+    }
+  });
+
   for (const [vname, view] of Object.entries(VIEWS)) {
-    test(`${vname} view: at height 1 and 0 the whole hand (all 21 landmarks) stays in frame, scales 0.5-2`, () => {
+    test(`${vname} view: the palm's display y alone sets the height (hand size and shape never move the band)`, () => {
       for (const scale of SCALES) {
-        for (const shape of ["open", "fist", "thumb"]) {
-          for (const volume of [0, 1]) {
+        for (const shape of ["open", "fist", "thumb", "pinch"]) {
+          for (const volume of [0, 0.25, 0.5, 0.75, 1]) {
             const opts = { volume, scale, view };
-            const h = shape === "fist" ? fist(opts) : rightHand(4, { ...opts, thumb: shape === "thumb" });
+            const h = shape === "fist" ? fist(opts) : shape === "pinch" ? hand({ ...opts, handedness: "Right", pinch: true })
+              : rightHand(4, { ...opts, thumb: shape === "thumb" });
             const f = frameOf(h, view);
             const label = `${vname} scale ${scale} ${shape} volume ${volume}`;
             expect(f.height, label).toBeCloseTo(volume, 6);
-            const { pts } = handGeometry(h.landmarks, view);
-            for (const p of pts) {
-              expect(p.y, `${label}: landmark y`).toBeGreaterThanOrEqual(0);
-              expect(p.y, `${label}: landmark y`).toBeLessThanOrEqual(1);
-            }
-            // The margin is kept whenever the hand fits in a band of MIN_SPAN.
-            if (f.zone.bottom - f.zone.top > ZONE.MIN_SPAN + 1e-9) {
-              const ys = pts.map((p) => p.y);
-              expect(Math.min(...ys), label).toBeGreaterThanOrEqual(ZONE.MARGIN - 1e-9);
-              expect(Math.max(...ys), label).toBeLessThanOrEqual(1 - ZONE.MARGIN + 1e-9);
-            }
+            expect(f.pos.y, label).toBeCloseTo(BAND.BOTTOM - volume * (BAND.BOTTOM - BAND.TOP), 6);
+            expect([f.zone.top, f.zone.bottom], label).toEqual([BAND.TOP, BAND.BOTTOM]);
           }
         }
       }
     });
   }
 
-  test("comfort band: palm 20%..80% for a small hand; a bigger (closer) hand gets a narrower band inside it", () => {
-    const small = zoneFor({ up: 0.05, down: 0.04, side: 0.04 });
-    expect(small.top).toBeCloseTo(0.2, 9);
-    expect(small.bottom).toBeCloseTo(0.8, 9);
-    const big = zoneFor({ up: 0.3, down: 0.22, side: 0.1 });
-    expect(big.top).toBeCloseTo(0.33, 9);
-    expect(big.bottom).toBeCloseTo(0.75, 9);
-  });
-
-  test("presets nest: wide contains comfort contains compact", () => {
-    const ext = { up: 0.05, down: 0.04, side: 0.04 };
-    const [w, c, k] = ["wide", "comfort", "compact"].map((r) => zoneFor(ext, "right", r));
-    expect(w.top).toBeLessThan(c.top);
-    expect(c.top).toBeLessThan(k.top);
-    expect(w.bottom).toBeGreaterThan(c.bottom);
-    expect(c.bottom).toBeGreaterThan(k.bottom);
-    expect(zoneFor(ext, "right", "nonsense").range).toBe("comfort");
-    expect(Object.keys(RANGE_PRESETS)).toEqual(["comfort", "wide", "compact"]);
-  });
-
   test("clamping: palm above the band = 1, below = 0; yForHeight inverts heightIn", () => {
-    const z = zoneFor({ up: 0.05, down: 0.04, side: 0.04 });
+    const z = zoneFor("right");
     expect(heightIn(z, 0.05)).toBe(1);
+    expect(heightIn(z, 0)).toBe(1);
     expect(heightIn(z, 0.95)).toBe(0);
+    expect(heightIn(z, 1)).toBe(0);
     for (const h of [0, 0.1, 0.37, 0.5, 0.9, 1]) expect(heightIn(z, yForHeight(z, h))).toBeCloseTo(h, 9);
     expect(yForHeight(z, 2)).toBeCloseTo(z.top, 12);
+    expect(yForHeight(z, -1)).toBeCloseTo(z.bottom, 12);
   });
 
-  test("a hand too big to fit gets a centered band of MIN_SPAN (no inverted band)", () => {
-    const z = zoneFor({ up: 0.6, down: 0.5, side: 0.2 });
-    expect(z.bottom - z.top).toBeCloseTo(ZONE.MIN_SPAN, 9);
-    expect(heightIn(z, (z.top + z.bottom) / 2)).toBeCloseTo(0.5, 9);
-  });
-
-  test("extents: at least the hand-size ratios (a fist does not widen the band), more when the hand reaches further", () => {
-    const pos = { x: 0.5, y: 0.5 };
-    const tight = handExtents([{ x: 0.5, y: 0.49 }], pos, 0.1);
-    expect(tight.up).toBeCloseTo(ZONE.UP * 0.1, 9);
-    expect(tight.down).toBeCloseTo(ZONE.DOWN * 0.1, 9);
-    const far = handExtents([{ x: 0.5, y: 0.2 }, { x: 0.9, y: 0.5 }], pos, 0.1);
-    expect(far.up).toBeCloseTo(0.3, 9);
-    expect(far.side).toBeCloseTo(0.4, 9);
-    // side is in display WIDTHS: handSize (display heights) / aspect
-    expect(handExtents([], pos, 0.1, 2).side).toBeCloseTo((ZONE.SIDE * 0.1) / 2, 9);
+  test("a still palm keeps exactly its height while the hand size jitters, the hand comes closer or changes shape", () => {
+    const bus = createBus();
+    const hi = createHandInput({ bus });
+    const pos = { x: 0.3, y: 0.4 };
+    const want = (BAND.BOTTOM - pos.y) / (BAND.BOTTOM - BAND.TOP);
+    const zones = new Set();
+    for (let i = 0; i < 120; i++) {
+      const scale = i < 60 ? (i % 2 ? 1.1 : 0.9) : 1.6; // ±10 % size jitter at 30 fps, then a much closer hand
+      const shape = i % 3 === 0 ? { fist: true } : i % 3 === 1 ? { fingers: ["index", "middle"] } : { pinch: true };
+      const r = hi.process(results(hand({ handedness: "Left", pos, scale, ...shape, view: IDENTITY_VIEW })), i * 33);
+      expect(r.left.height, `frame ${i}`).toBeCloseTo(want, 9);
+      expect(bus.get("left/height"), `frame ${i}`).toBeCloseTo(want, 9);
+      const z = bus.get("left/zone");
+      zones.add(`${z.top}|${z.bottom}`);
+    }
+    expect([...zones]).toEqual([`${BAND.TOP}|${BAND.BOTTOM}`]);
   });
 });
 
 test.describe("reach zones: horizontal", () => {
   test("band on the hand's own side, inner end near the middle; left side mirrors right", () => {
-    const ext = { up: 0.05, down: 0.04, side: 0.04 };
-    const r = zoneFor(ext, "right");
-    const l = zoneFor(ext, "left");
+    const r = zoneFor("right");
+    const l = zoneFor("left");
     expect(r.inner).toBeCloseTo(0.56, 9);
-    expect(r.outer).toBeCloseTo(0.92, 9);
+    expect(r.outer).toBeCloseTo(0.88, 9);
     expect(l.inner).toBeCloseTo(1 - r.inner, 9);
     expect(l.outer).toBeCloseTo(1 - r.outer, 9);
     expect(xIn(r, 0.95)).toBe(1); // clamped beyond the outer end
     expect(xIn(l, 0.02)).toBe(1);
     expect(xIn(r, 0.3)).toBe(0); // crossed the middle
-    // outer end keeps the whole hand inside: a wide hand pulls it in
-    const wide = zoneFor({ up: 0.05, down: 0.04, side: 0.12 }, "right");
-    expect(wide.outer).toBeCloseTo(1 - 0.12 - ZONE.MARGIN, 9);
   });
 
   test("dead zone: the middle of the band reads exactly 0.5; outside it rescales to reach 0 and 1; monotonic", () => {
-    const z = zoneFor({ up: 0.05, down: 0.04, side: 0.04 }, "right");
+    const z = zoneFor("right");
     const mid = (z.inner + z.outer) / 2;
     const w = z.outer - z.inner;
     for (const d of [0, 0.03, -0.03, 0.079, -0.079]) expect(xIn(z, mid + d * w)).toBe(0.5);
@@ -125,7 +111,7 @@ test.describe("reach zones: horizontal", () => {
     expect(bandPos(z, mid)).toBeCloseTo(0.5, 9);
   });
 
-  test("helper x placement: a hand at x 0 / 1 stays whole in frame on either side (desktop view)", () => {
+  test("helper x placement: a hand at x 0 / 1 stays whole in frame on either side (desktop view, default-size hand)", () => {
     for (const handedness of ["Left", "Right"]) {
       for (const xv of [0, 1]) {
         const h = hand({ handedness, fingers: ["index", "middle", "ring", "pinky"], x: xv, view: DESKTOP_VIEW });
@@ -140,47 +126,21 @@ test.describe("reach zones: horizontal", () => {
   });
 });
 
-test.describe("reach zones: smoothing", () => {
-  test("first frame sets the extents directly; jittering hand size moves the band far less than raw", () => {
-    const sm = createZoneSmoother();
-    const base = { up: 0.2, down: 0.15, side: 0.1 };
-    expect(sm.update(base, 0)).toEqual(base);
-    let rawSpread = 0, smSpread = 0;
-    let lo = Infinity, hi = -Infinity, rlo = Infinity, rhi = -Infinity;
-    for (let i = 1; i <= 120; i++) {
-      const k = i % 2 ? 1.1 : 0.9; // ±10 % hand-size jitter every frame (30 fps)
-      const raw = { up: base.up * k, down: base.down * k, side: base.side * k };
-      const top = zoneFor(sm.update(raw, i * 33)).top;
-      const rtop = zoneFor(raw).top;
-      if (i > 30) { lo = Math.min(lo, top); hi = Math.max(hi, top); rlo = Math.min(rlo, rtop); rhi = Math.max(rhi, rtop); }
-    }
-    rawSpread = rhi - rlo;
-    smSpread = hi - lo;
-    expect(rawSpread).toBeGreaterThan(0.03);
-    expect(smSpread).toBeLessThan(rawSpread / 8);
-    // a real size change is followed within ~1 s
-    for (let i = 0; i < 40; i++) sm.update({ up: 0.3, down: 0.2, side: 0.1 }, 5000 + i * 33);
-    expect(sm.value.up).toBeGreaterThan(0.29);
-    expect(sm.update(null, 7000)).toBeNull(); // lost: forget
-    expect(sm.update(base, 7100)).toEqual(base);
-  });
-
-  test("small pose changes (tilt, pinch, fist: < HYST) leave the band exactly where it was", () => {
-    const sm = createZoneSmoother();
-    const base = { up: 0.2, down: 0.15, side: 0.1 };
-    const z0 = zoneFor(sm.update(base, 0));
-    for (let i = 1; i <= 60; i++) {
-      const k = 1 + (ZONE.HYST * 0.9) * Math.sin(i);
-      expect(zoneFor(sm.update({ up: base.up * k, down: base.down * k, side: base.side * k }, i * 33))).toEqual(z0);
-    }
-  });
-
-  test("createHandInput publishes left|right/x and /zone (null when lost), honours ui/sides and reach/range", () => {
+test.describe("reach zones: hand input", () => {
+  test("createHandInput publishes left|right/x (only while its axis is on) and /zone (null when lost), honours ui/sides", () => {
     const bus = createBus();
     const hi = createHandInput({ bus });
     const seen = [];
     bus.subscribe({ onSet: (n, v) => seen.push([n, v]) }, ["left/x", "right/x", "left/zone", "right/zone"]);
+    // Drive / Space are experimental and off by default: no x on the bus (nor on the wire).
     hi.process(results(leftHand(1), rightHand(2)), 0);
+    expect(bus.get("left/x")).toBeUndefined();
+    expect(bus.get("right/x")).toBeUndefined();
+    expect(seen.filter(([n]) => n.endsWith("/x"))).toEqual([]);
+    expect(typeof hi.process(results(leftHand(1), rightHand(2)), 1).left.x).toBe("number"); // HandFrame.x still computed
+    bus.set("space/on", true);
+    bus.set("drive/on", true);
+    hi.process(results(leftHand(1), rightHand(2)), 2);
     expect(typeof bus.get("left/x")).toBe("number");
     expect(typeof bus.get("right/x")).toBe("number");
     // helper default (real use): left palm displays at x 0.3 (left half), right palm at 0.7 (right half)
@@ -190,13 +150,20 @@ test.describe("reach zones: smoothing", () => {
     hi.process(results(leftHand(1), rightHand(2)), 33);
     expect(bus.get("left/zone").side).toBe("right");
     expect(bus.get("right/zone").side).toBe("left");
-    bus.set("reach/range", "compact");
-    hi.process(results(leftHand(1), rightHand(2)), 66);
-    expect(bus.get("right/zone").range).toBe("compact");
-    expect(bus.get("right/zone").top).toBeCloseTo(RANGE_PRESETS.compact.top, 3);
+    for (const side of ["left", "right"]) {
+      expect(bus.get(`${side}/zone`).top).toBe(BAND.TOP);
+      expect(bus.get(`${side}/zone`).bottom).toBe(BAND.BOTTOM);
+    }
     hi.process(results(leftHand(1)), 99);
     expect(bus.get("right/x")).toBeNull();
     expect(bus.get("right/zone")).toBeNull();
+    // Switched off again: x goes null once, then nothing more is published.
+    bus.set("space/on", false);
+    hi.process(results(leftHand(1)), 132);
+    expect(bus.get("left/x")).toBeNull();
+    const n = seen.length;
+    for (let t = 165; t < 400; t += 33) hi.process(results(leftHand(1, { x: 1 })), t);
+    expect(seen.slice(n).filter(([name]) => name === "left/x")).toEqual([]);
   });
 });
 
@@ -218,8 +185,23 @@ test.describe("sideways axes (src/core/axes.js)", () => {
     expect(outward(null)).toBeNull();
   });
 
-  test("hand x drives the params (smoothed, first frame direct); switches on by default; off = 0, hand ignored", () => {
+  test("experimental: both switches OFF by default; off = no param published, audio untouched, hand ignored", () => {
     const { bus, calls, axes } = setup();
+    expect(bus.get("drive/on")).toBe(false);
+    expect(bus.get("space/on")).toBe(false);
+    expect(axes.isOn("drive")).toBe(false);
+    for (let t = 0; t < 600; t += 16) axes.update(f(1), f(1), { now: t });
+    expect(bus.get("drive")).toBeUndefined();
+    expect(bus.get("space")).toBeUndefined();
+    expect(calls.drive).toEqual([]);
+    expect(calls.space).toEqual([]);
+    expect(axes.values).toEqual({ drive: 0, space: 0 });
+  });
+
+  test("switched on: hand x drives the params (smoothed, first frame direct); off again = 0 once, hand ignored", () => {
+    const { bus, calls, axes } = setup();
+    axes.setOn("drive", true);
+    axes.setOn("space", true);
     expect(bus.get("drive/on")).toBe(true);
     axes.update(f(1), f(1), { now: 0 });
     expect(bus.get("drive")).toBe(1);
@@ -229,9 +211,13 @@ test.describe("sideways axes (src/core/axes.js)", () => {
     expect(bus.get("drive")).toBeGreaterThan(0.5); // smoothed (60 ms)
     for (let t = 32; t < 600; t += 16) axes.update(f(0.5), f(0.5), { now: t });
     expect(bus.get("drive")).toBe(0);
+    axes.update(f(1), f(1), { now: 650 });
+    expect(bus.get("drive")).toBeGreaterThan(0);
     bus.set("drive/on", false);
+    const n = calls.drive.length;
     for (let t = 700; t < 1300; t += 16) axes.update(f(1), f(1), { now: t });
     expect(bus.get("drive")).toBe(0);
+    expect(calls.drive.slice(n)).toEqual([0]); // neutral sound, once
     expect(bus.get("space")).toBe(1);
     axes.setOn("drive", true);
     for (let t = 1300; t < 1900; t += 16) axes.update(f(1), f(1), { now: t });
@@ -240,6 +226,8 @@ test.describe("sideways axes (src/core/axes.js)", () => {
 
   test("a lost hand and a held right hand (menu) hold the value", () => {
     const { bus, axes } = setup();
+    axes.setOn("drive", true);
+    axes.setOn("space", true);
     axes.update(f(0.9), f(0.9), { now: 0 });
     const d = bus.get("drive");
     axes.update(null, null, { now: 16 });

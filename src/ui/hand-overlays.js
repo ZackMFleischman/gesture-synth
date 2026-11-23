@@ -13,7 +13,7 @@
 // big BPM plate during a pinch) so they share one look.
 
 import { COLORS, FONT, STROKE, deg, drawArc, drawPill, drawPlate, drawLabel, withAlpha } from "./theme.js";
-import { AXES } from "../core/axes.js";
+import { AXES, isAxisOn } from "../core/axes.js";
 
 // Sideways axes (src/core/axes.js: right x = Drive, left x = Space): a short horizontal tick scale under each palm,
 // running from the band's inner end (towards the screen middle) to its outer end. Middle segment = the neutral dead
@@ -29,7 +29,7 @@ const ARC_CLEARANCE = 0.12;
 
 export function createHandOverlays({ S, bus }) {
   function drawAxis(g, G, a) {
-    if (bus?.get?.(`${a.id}/on`) === false) return;
+    if (!isAxisOn(bus, a)) return; // experimental, off by default (src/core/axes.js)
     const side = a.hand;
     const h = S.hands[side];
     const pos = S.drawPos(side);
