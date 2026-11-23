@@ -1,10 +1,11 @@
 // Chords mode: today's right-hand behavior as a mode plugin.
 //   right fingers (index..pinky) -> voicing 1-4, thumb -> octave down,
-//   height -> volume, tilt -> lowpass filter, plus the energy wave drawing.
+//   tilt -> lowpass filter, plus the energy wave drawing. Right height has no function in Chords (for now):
+//   the volume is the left hand's height alone (the master `volume` the router publishes); the chord voice
+//   plays at the fixed CHORDS_LEVEL.
 // The left-hand chord comes from the router via ctx.harmony.raw.
 //
-// Publishes: chord, voicing, chords/octave (state); chords/volume (right-height chord-voice volume,
-// multiplied with the master `volume` the router publishes from the left height), filter (continuous).
+// Publishes: chord, voicing, chords/octave (state); filter (continuous).
 // hold(ctx) keeps the right-hand values while the radial menu holds the right hand.
 
 import { createChordStabilizer } from "../services/harmony.js";
@@ -110,30 +111,35 @@ export function drawEnergy(ctx, volume01, qualityIndex, tiltFactor, chordStr) {
   }
 }
 
+/**
+ * Chord-voice gain (synth.chordGain) while a chord plays. Fixed: Chords' volume is the left hand only (master).
+ * 1 = the "right = 1" level of the gain staging (src/services/audio.js header; tests/gain-staging.e2e.spec.js):
+ * every chord at master 1, sawtooth, filter fully open still peaks >= 1 dB under the limiter threshold.
+ */
+export const CHORDS_LEVEL = 1;
+
 // ---- Mode state ----
 const stabilizeChordState = createChordStabilizer();
 let lastTrackedChord = null;
-let volumeParam = null;
 let filterParam = null;
 
 // Right-hand values as last applied: what hold() keeps playing while the menu holds the right hand.
-const held = { quality: 0, thumb: false, volume: 0 };
+// `on` = a chord was sounding (right hand visible with a voicing): the pad keeps playing while held.
+const held = { quality: 0, thumb: false, on: false };
 
 // Published chord descriptor, memoized on (stable state identity, key).
 let publishedFrom = undefined;
 let publishedKeyVersion = -1;
 let publishedChord = null;
 
-// What draw() renders (set by update()).
+// What draw() renders (set by update()). volume = the master (left height): the wave's thickness.
 const view = { volume: 0, qualityIndex: 0, tilt: 0, chord: null };
 
 /** Chord-release fade when leaving Chords: long enough to overlap the next mode's first notes. */
 export const CHORDS_EXIT_FADE = 0.4;
 
 function ensureParams(ctx) {
-  if (volumeParam) return;
-  // Right height = chord-voice volume (multiplied with the master volume from the left height).
-  volumeParam = ctx.param("chords/volume", { type: "continuous", min: 0, max: 1 });
+  if (filterParam) return;
   filterParam = ctx.param("filter", {
     type: "continuous",
     min: -1,
@@ -154,10 +160,10 @@ function publish(ctx, stable) {
   bus.set("chord", publishedChord);
 }
 
-function sound(ctx, stable, volume) {
-  if (stable && stable.qualityIndex >= 1 && volume > 0) {
+function sound(ctx, stable, on) {
+  if (on && stable && stable.qualityIndex >= 1) {
     ctx.audio.playChord(ctx.harmony.notes(stable.chord, stable.isMajorMode, stable.qualityIndex, stable.thumbDown));
-    ctx.audio.setVolume(volume);
+    ctx.audio.setVolume(CHORDS_LEVEL);
     return true;
   }
   ctx.audio.setVolume(0);
@@ -174,11 +180,13 @@ export default {
     { name: "chord", type: "state" },
     { name: "voicing", type: "state" },
     { name: "chords/octave", type: "state" },
-    { name: "chords/volume", type: "continuous" },
     { name: "filter", type: "continuous" },
   ],
-  guide: [["✊", "Menu"], ["↕", "Volume"], ["👍", "Octave down"]],
-  rightTrack: { param: "chords/volume", label: "Volume" },
+  guide: [["✊", "Menu"], ["👍", "Octave down"]],
+  // Right height does nothing in Chords: no right edge track. The 8-bar meter shows the master (left height).
+  rightTrack: null,
+  meter: "volume",
+  rightLost: true, // still show "Hand lost" for the right hand (it silences the pad)
 
   enter(ctx) {
     ensureParams(ctx);
@@ -187,9 +195,8 @@ export default {
     const locked = ctx.rightLocked;
     held.quality = Math.max(1, Math.min(4, ctx.harmony.voicing || 1));
     held.thumb = false;
-    held.volume = locked ? Math.max(0, Math.min(1, locked.height)) : held.volume;
-    view.volume = held.volume;
-    if (locked) volumeParam.value = held.volume;
+    if (locked) held.on = true;
+    view.volume = ctx.masterVolume ?? view.volume;
     // Start the pad right now (same call as the previous mode's exit), not on the next frame:
     // a slow frame must not open a gap in the sound.
     if (ctx.rightLocked) this.hold(ctx);
@@ -203,14 +210,15 @@ export default {
     publishedFrom = undefined;
   },
 
-  /** Menu holds the right hand: keep voicing/volume/filter, follow the left-hand chord. */
+  /** Menu holds the right hand: keep voicing/filter (and the pad on/off), follow the left-hand chord. */
   hold(ctx) {
     const c = ctx.harmony.chord;
     const state = c ? { chord: c.roman, isMajorMode: c.isMajor, qualityIndex: held.quality, thumbDown: held.thumb } : null;
     const stable = stabilizeChordState.prime(state, ctx.now);
     if (stable && stable.qualityIndex >= 1) ctx.harmony.voicing = stable.qualityIndex;
     publish(ctx, stable);
-    sound(ctx, stable, held.volume);
+    sound(ctx, stable, held.on);
+    view.volume = ctx.masterVolume ?? view.volume;
     view.qualityIndex = stable ? stable.qualityIndex : 0;
     view.chord = stable ? stable.chord : null;
   },
@@ -255,8 +263,6 @@ export default {
 
     // ---- Sound ----
     if (right) {
-      const currentVolume = right.height;
-      volumeParam.value = currentVolume; // meter
       filterParam.value = right.tilt; // filter sweep + readout
 
       if (currentChord && qualityIndex >= 1) {
@@ -268,8 +274,8 @@ export default {
           trackClarityEvent("chord_changed");
         }
       }
-      sound(ctx, stable, currentVolume);
-      held.volume = qualityIndex >= 1 ? currentVolume : 0;
+      sound(ctx, stable, true);
+      held.on = qualityIndex >= 1;
       if (qualityIndex >= 1) {
         held.quality = qualityIndex;
         held.thumb = thumbDown;
@@ -277,11 +283,11 @@ export default {
     } else {
       // Right hand out of frame = rest.
       ctx.audio.setVolume(0);
-      held.volume = 0;
+      held.on = false;
     }
 
-    // ---- Visual energy state ----
-    view.volume = right ? right.height : 0;
+    // ---- Visual energy state (thickness = the volume you hear: the master) ----
+    view.volume = right ? ctx.masterVolume ?? 1 : 0;
     view.tilt = right ? right.tilt : 0;
     view.qualityIndex = qualityIndex;
     view.chord = currentChord;

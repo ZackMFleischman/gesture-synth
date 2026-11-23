@@ -9,7 +9,7 @@ test.describe("bus in the app", () => {
     await expect(page.locator("#chordDisplay")).toHaveText("D(IV)");
     const s = await page.evaluate(() => {
       const b = window.__gsTest.bus;
-      const names = ["mode", "chord", "voicing", "chords/octave", "chords/volume", "volume", "filter",
+      const names = ["mode", "chord", "voicing", "chords/octave", "volume", "filter",
         "left/height", "left/tilt", "right/height", "right/tilt", "right/pos"];
       return { values: Object.fromEntries(names.map((n) => [n, b.get(n)])), manifest: b.manifest() };
     });
@@ -17,8 +17,8 @@ test.describe("bus in the app", () => {
     expect(s.values.chord).toMatchObject({ roman: "IV", degree: 4, isMajor: true, name: "D", rootMidi: 62 });
     expect(s.values.voicing).toBe(3);
     expect(s.values["chords/octave"]).toBe(false);
-    expect(s.values["chords/volume"]).toBeCloseTo(0.75, 5); // right height = chord-voice volume
-    // M1 1.3: `volume` is the master volume from the left height (0.5 -> MASTER_VOLUME mapping).
+    // M1 1.3: `volume` is the master volume from the left height (0.5 -> MASTER_VOLUME mapping). It is the only
+    // volume in Chords: the right height has no function there (no `chords/volume` signal any more).
     expect(s.values.volume).toBeCloseTo(masterAt(0.5), 3);
     expect(s.values.filter).toBeCloseTo(0.5, 5);
     expect(s.values["right/height"]).toBeCloseTo(0.75, 5);
@@ -26,17 +26,18 @@ test.describe("bus in the app", () => {
     expect(s.values["left/tilt"]).toBeCloseTo(0.6, 5);
     expect(s.values["right/pos"].x).toBeLessThan(0.5); // mirrored: right hand shows on the left
     const names = s.manifest.map((m) => m.name);
-    for (const n of ["mode", "chord", "voicing", "volume", "chords/volume", "filter", "left/height", "right/pinch",
+    for (const n of ["mode", "chord", "voicing", "volume", "filter", "left/height", "right/pinch",
       "note/on", "note/off", "note/cancel", "menu", "right/held"]) {
       expect(names, n).toContain(n);
     }
+    expect(names).not.toContain("chords/volume");
   });
 
   test("indicators read from the bus", async ({ synthPage: page, setHands }) => {
     await setHands(); // no hands: nothing in the app writes the meter param / filter
     await page.evaluate(() => {
       const b = window.__gsTest.bus;
-      b.set("chords/volume", 0.5); // the meter shows the active mode's right-height param (Chords)
+      b.set("volume", 0.5); // the meter shows the active mode's meter param (Chords: the master volume)
       b.set("filter", -0.25);
     });
     await expect(page.locator(".vol-bar.lit")).toHaveCount(4);

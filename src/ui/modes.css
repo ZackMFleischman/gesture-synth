@@ -48,11 +48,12 @@ body.gs-modes #distortionDisplay {
   transition: opacity var(--gs-fast);
 }
 body.gs-modes #volumeMeter { transition: opacity var(--gs-fast); }
-/* Held (menu open / pinch) or right hand lost: right-hand readouts dim, value frozen. */
-body.gs-modes.gs-right-held #volumeMeter,
+/* Held (menu open / pinch) or right hand lost: right-hand readouts dim, value frozen. (In Chords the meter shows the
+   master volume, a left-hand control: it stays bright.) */
+body.gs-modes.gs-right-held:not(.gs-meter-master) #volumeMeter,
 body.gs-modes.gs-right-held #distortionDisplay { opacity: 0.4; }
-/* No right track in this mode (Lead: right height is the note, the ladder shows it). */
-body.gs-modes.gs-no-right-track #volumeMeter { display: none; }
+/* No meter in this mode (Lead: right height is the note, the ladder shows it). */
+body.gs-modes.gs-no-meter #volumeMeter { display: none; }
 
 /* ---- Top row: mode badge (+ Lead note-set badge) right of the key select ---- */
 .gs-badge {

@@ -33,11 +33,16 @@ import { createControlsPanel } from "./controls-panel.js";
 import { createTransport } from "./transport.js";
 import { createGuide } from "./guide.js";
 
-/** What the right edge track / 8-bar meter show when a mode does not say (`mode.rightTrack`). */
+/** What the right edge track shows when a mode does not say (`mode.rightTrack`). Chords: none (right height is free). */
 export const DEFAULT_RIGHT_TRACK = {
-  chords: { param: "volume", label: "Volume" },
+  chords: null,
   arp: { param: "arp/gate", label: "Gate" },
 };
+/**
+ * What the 8-bar meter (top right) shows when a mode does not say (`mode.meter`, a bus name or null): else the right
+ * track's param. Chords = the master `volume` (its only volume control is the left height); Arp = gate (D5).
+ */
+export const DEFAULT_METER = { chords: "volume" };
 
 const LOST_GRACE_MS = 250; // a hand must be gone this long before it shows as lost
 const SIDE_LOCK_MS = 600; // the chord hand must stay on the other side this long before the tracks swap
@@ -63,6 +68,7 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
     mode: null,
     color: MODE_COLORS.chords,
     rightTrack: DEFAULT_RIGHT_TRACK.chords,
+    meter: DEFAULT_METER.chords,
     menu: { state: "closed", targetId: null },
     hands: { left: newHand(), right: newHand() },
     chordSide: "left",
@@ -113,10 +119,14 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
     S.name = mode?.name || id[0].toUpperCase() + id.slice(1);
     S.color = MODE_COLORS[id] || mode?.color || MODE_COLORS.chords;
     S.rightTrack = mode && "rightTrack" in mode ? mode.rightTrack : DEFAULT_RIGHT_TRACK[id] || null;
+    S.meter = mode && "meter" in mode ? mode.meter : DEFAULT_METER[id] ?? S.rightTrack?.param ?? null;
     body.dataset.mode = id;
     if (MODE_COLORS[id]) body.style.removeProperty("--gs-mode");
     else body.style.setProperty("--gs-mode", S.color);
     body.classList.toggle("gs-no-right-track", !S.rightTrack);
+    body.classList.toggle("gs-no-meter", !S.meter);
+    // The meter shows the master (left hand): it does not dim with the right hand (held / lost).
+    body.classList.toggle("gs-meter-master", S.meter === "volume");
   }
 
   function setHand(side, field, v) {
@@ -338,7 +348,7 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
       for (const p of parts) p.destroy?.();
       safeArea.destroy();
       layer.remove();
-      body.classList.remove("gs-modes", "gs-right-held", "gs-no-right-track");
+      body.classList.remove("gs-modes", "gs-right-held", "gs-no-right-track", "gs-no-meter", "gs-meter-master");
       delete body.dataset.mode;
     },
   };

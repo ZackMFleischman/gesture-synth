@@ -1,7 +1,7 @@
 // Edge tracks (docs/ui-integration.md §4): full-height tracks in the 20px gutters, one per hand.
 //  - Master-volume track: neutral ink, on the edge where the chord hand is displayed (D11).
-//  - Right track: the active mode's right-height control (mode.rightTrack, default Chords=volume,
-//    Arp=gate), in the mode color. Held (menu / countdown / pinch): dim + hollow marker at the held
+//  - Right track: the active mode's right-height control (mode.rightTrack: Arp=gate; none in Chords, where right
+//    height has no function, and in Lead, which draws its ladder), in the mode color. Held (menu / countdown / pinch): dim + hollow marker at the held
 //    value, no guide. Return (engine still holds the value, `held` signal): hollow + solid markers.
 //    A screen control that wins over the hand (ui/override) also shows as hollow (value) + solid (hand).
 //  - Hand lost: that hand's markers dashed in the warning color, a "Hand lost" plate at the edge and a
@@ -128,15 +128,19 @@ export function createEdgeTracks({ S, bus }) {
       fillY: o.fillY, guideTo: null,
     });
     G.reg(o.name, "edge", rect);
-    const a = o.lostNow && o.hand.lastPos && o.hand.goneAt != null ? lostAlpha(S.now - o.hand.goneAt - S.lostGraceMs) : 0;
-    if (a > 0) {
-      g.save();
-      g.globalAlpha *= a;
-      G.reg(`${o.name}-lost-label`, "edge", lostLabel(g, G, o.side, o.markerY ?? G.H / 2));
-      G.reg(`${o.name}-ghost`, "hand", ghost(g, G, o.side, o.hand.lastPos));
-      g.restore();
-    }
+    if (o.lostNow) lostFeedback(g, G, o.name, o.side, o.hand, o.markerY ?? G.H / 2);
     return rect;
+  }
+
+  /** "Hand lost" plate at the edge + ghost ring where the hand was last seen, fading out (lostAlpha). */
+  function lostFeedback(g, G, name, side, hand, y) {
+    const a = hand.lastPos && hand.goneAt != null ? lostAlpha(S.now - hand.goneAt - S.lostGraceMs) : 0;
+    if (a <= 0) return;
+    g.save();
+    g.globalAlpha *= a;
+    G.reg(`${name}-lost-label`, "edge", lostLabel(g, G, side, y));
+    G.reg(`${name}-ghost`, "hand", ghost(g, G, side, hand.lastPos));
+    g.restore();
   }
 
   function handEdgePoint(G, pos, side) {
@@ -190,7 +194,12 @@ export function createEdgeTracks({ S, bus }) {
     if (!S.rightHeld) heldY = null;
     wasHeld = S.rightHeld;
     if (liveY != null && !S.rightHeld) lastRightY = liveY;
-    if (!S.rightTrack) return; // e.g. Lead: the mode draws its note ladder instead
+    if (!S.rightTrack) {
+      // No right track (Chords; Lead draws its note ladder instead). A mode with `rightLost: true` (Chords: losing the
+      // right hand silences the pad) still gets the right hand's "Hand lost" plate at that edge + the ghost ring.
+      if (S.mode?.rightLost && S.lost("right")) lostFeedback(g, G, "right-track", exprSide, S.hands.right, lastRightY ?? G.H / 2);
+      return;
+    }
 
     const rLost = S.lost("right");
     const rov = S.overrides.get(S.rightTrack.param);

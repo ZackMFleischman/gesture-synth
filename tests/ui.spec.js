@@ -1,5 +1,5 @@
 import { test, expect, SCREENS_DIR } from "./fixtures.js";
-import { leftHand, rightHand } from "./helpers/hands.js";
+import { leftHand, rightHand, heightForMaster } from "./helpers/hands.js";
 
 test("start overlay gates the app and dismisses on click", async ({ page }) => {
   await page.goto("/?mockHands");
@@ -50,7 +50,8 @@ test("gesture guide toggles and follows the selected key", async ({ synthPage: p
 });
 
 test("playing state renders chord, quality, meter and energy wave", async ({ synthPage: page, setHands }) => {
-  await setHands(leftHand(4), rightHand(3, { volume: 0.75, tilt: 0.5 }));
+  // 6 of 8 bars: the meter shows the volume = the left height (master 0.75) in Chords.
+  await setHands(leftHand(4, { volume: heightForMaster(0.75) }), rightHand(3, { volume: 0.75, tilt: 0.5 }));
   await expect(page.locator("#chordDisplay")).toHaveText("D(IV)");
   await expect(page.locator("#qualityDisplay")).toHaveText("Major 7th");
   await expect(page.locator(".vol-bar.lit")).toHaveCount(6);

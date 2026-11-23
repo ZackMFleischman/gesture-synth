@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures.js";
-import { hand, leftHand, rightHand } from "./helpers/hands.js";
+import { hand, leftHand, rightHand, heightForMaster } from "./helpers/hands.js";
 
 const A_MAJOR = ["A", "B", "C#", "D", "E", "F#", "G#"];
 const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII"];
@@ -48,8 +48,10 @@ test.describe("right hand picks voicing and expression", () => {
   }
 
   test("height drives the volume meter", async ({ synthPage: page, setHands }) => {
+    // The volume is the LEFT hand's height (master) since the right height lost its function in Chords (this test
+    // used the right hand). Rising hand: placed so the router's dead-zoned anchor lands on each volume.
     for (const [volume, lit] of [[0, 0], [0.25, 2], [0.5, 4], [1, 8]]) {
-      await setHands(leftHand(1), rightHand(1, { volume }));
+      await setHands(leftHand(1, { volume: volume === 0 ? 0 : heightForMaster(volume, 1) }), rightHand(1));
       await expect(page.locator(".vol-bar.lit")).toHaveCount(lit);
     }
   });

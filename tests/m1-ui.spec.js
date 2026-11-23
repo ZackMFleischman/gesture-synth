@@ -2,7 +2,7 @@
 // controls, transport, first-use labels, guide/help extensions. Uses ?mockHands; states the engine
 // can't produce yet are driven by publishing on window.__gsTest.bus directly.
 import { test, expect, SCREENS_DIR } from "./fixtures.js";
-import { leftHand, rightHand, pinch, fist } from "./helpers/hands.js";
+import { leftHand, rightHand, pinch, fist, heightForMaster } from "./helpers/hands.js";
 import { makeView } from "../src/input/hand-input.js";
 import { ensureArp, ensureLead, ensureMenu, frames, collectLayout } from "./helpers/m1-ui.js";
 
@@ -36,13 +36,14 @@ function scene(vp, { swap = false, leftY = 0.57, rightY = 0.47, rightX, right = 
 const overlap = (a, b) => a.x + a.w > b.x && b.x + b.w > a.x && a.y + a.h > b.y && b.y + b.h > a.y;
 
 /** Layout contract (same rules as tests/ui-lab.spec.js, against the real app). */
-function checkLayout({ existing, newDom, canvas, clear }, vp) {
+function checkLayout({ existing, newDom, canvas, clear }, vp, { rightTrack = true } = {}) {
   const fresh = [...newDom, ...canvas];
   const persistent = fresh.filter((r) => r.kind === "edge" || r.kind === "status");
   const panels = fresh.filter((r) => r.kind === "panel");
   // Phones: the mobile system (docs/mobile-ui.md) folds the badge + Controls toggle into its bar and hides
   // the meter while collapsed, so only the edge tracks (+ transport) remain as new persistent elements.
-  expect(persistent.length, "new persistent elements found").toBeGreaterThan(vp.width < 600 ? 1 : 3);
+  // Chords has no right edge track (right height has no function there): one fewer.
+  expect(persistent.length, "new persistent elements found").toBeGreaterThan((vp.width < 600 ? 1 : 3) - (rightTrack ? 0 : 1));
   for (const n of [...persistent, ...panels]) {
     const r = n.rect;
     expect(r.x, `${n.name} left`).toBeGreaterThanOrEqual(0);
@@ -112,7 +113,7 @@ for (const [vpName, vp] of Object.entries(VIEWPORTS)) {
         await frames(page, 4);
         expect((await ui(page)).chordSide).toBe(swap ? "left" : "right");
         await shot(page, `chords-play${sfx}`, vpName);
-        checkLayout(await collectLayout(page, EXISTING), vp);
+        checkLayout(await collectLayout(page, EXISTING), vp, { rightTrack: false });
       });
 
       test(`arp-play${tag}`, async ({ synthPage: page, setHands }) => {
@@ -146,7 +147,7 @@ for (const [vpName, vp] of Object.entries(VIEWPORTS)) {
     });
 
     test("menu-open", async ({ synthPage: page, setHands }) => {
-      await ensureArp(page);
+      await toArp(page); // a mode with a right track (Chords has none): it dims + shows the held value
       await ensureMenu(page);
       await setHands(...scene(vp));
       await frames(page, 6);
@@ -199,10 +200,19 @@ test.describe("modes UI behavior", () => {
     await expect(page.locator("#controlsPanel")).toBeVisible();
   });
 
-  test("meter shows volume in Chords and gate in Arp, in the mode color", async ({ synthPage: page, setHands }) => {
-    await setHands(leftHand(4), rightHand(3, { volume: 0.75, tilt: 0.5 }));
+  test("meter shows the master volume in Chords and gate in Arp, in the mode color", async ({ synthPage: page, setHands }) => {
+    // Chords: the meter is the master (left height; right height has no function in Chords).
+    await setHands(leftHand(4, { volume: heightForMaster(0.75) }), rightHand(3, { volume: 0.2, tilt: 0.5 }));
     await expect(page.locator(".vol-bar.lit")).toHaveCount(6);
     await expect(page.locator(".vol-bar.lit").first()).toHaveCSS("background-color", "rgb(232, 161, 61)");
+    await setHands(leftHand(4, { volume: heightForMaster(0.75) }), rightHand(3, { volume: 0.95, tilt: 0.5 }));
+    await frames(page, 4);
+    await expect(page.locator(".vol-bar.lit")).toHaveCount(6); // the right height does not move it
+    // ...and it stays bright while the right hand is held/lost (it is a left-hand value).
+    await setHands(leftHand(4, { volume: heightForMaster(0.75) }));
+    await expect(page.locator("body")).toHaveClass(/gs-right-held/);
+    await expect(page.locator("#volumeMeter")).toHaveCSS("opacity", "1");
+    expect((await ui(page)).tracks["right-track"]).toBeUndefined(); // no right edge track in Chords
 
     await toArp(page);
     await setHands(leftHand(4)); // right hand away: Arp keeps its last values
@@ -237,6 +247,7 @@ test.describe("modes UI behavior", () => {
 
   for (const swap of [false, true]) {
     test(`edge-track markers are level with the hands${swap ? " (swapped)" : ""}`, async ({ synthPage: page, setHands }) => {
+      await toArp(page); // a mode with a right track (Chords has none since the right height lost its function there)
       // (0.4, was 0.3: markers stop at the ends of the hand's reach zone, src/input/reach-zones.js, and this tilted
       // synthetic hand's zone starts at 0.36 of the height. Level-with-the-palm inside the band is unchanged.)
       for (const [leftY, rightY] of [[0.57, 0.47], [0.4, 0.7]]) {
@@ -505,7 +516,7 @@ test.describe("modes UI behavior", () => {
     const guide = page.locator("#gestureGuide");
     await page.locator("#guideToggle").click();
     await expect(guide.locator(".gesture-guide-note")).toHaveCount(7); // existing rows untouched
-    await expect(guide.locator(".gs-guide-mode .gs-guide-label")).toHaveText(["Menu", "Volume", "Octave down"]);
+    await expect(guide.locator(".gs-guide-mode .gs-guide-label")).toHaveText(["Menu", "Octave down"]); // right height: no function
     await bus.set(page, "mode", "arp");
     await expect(guide.locator(".gs-guide-head")).toContainText("Arp");
     await expect(guide.locator(".gs-guide-mode .gs-guide-label")).toHaveText(["Menu", "Gate", "Double time", "Tempo"]);
@@ -519,6 +530,7 @@ test.describe("modes UI behavior", () => {
     await expect(modal).toContainText("Right fist");
     await expect(modal).toContainText("master volume");
     await expect(modal).toContainText("Right Hand (Chords mode)");
+    await expect(modal).toContainText("Volume is your Left Hand's height"); // right-hand Height line (Chords)
     await expect(modal).toContainText("Arp mode");
     await expect(modal).toContainText("double time");
     await expect(modal).toContainText("Left Hand");

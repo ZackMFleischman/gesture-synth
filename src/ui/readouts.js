@@ -1,7 +1,7 @@
 // Existing right-hand readouts, extended for modes (docs/ui-integration.md D5, D6):
-//  - #volumeMeter (8 bars) = the right-height expression meter: the active mode's right-track param
-//    (Chords = volume, exactly as indicators.js renders it today; Arp = arp/gate), bars in the mode
-//    color via CSS. Hidden when the mode has no right track (Lead).
+//  - #volumeMeter (8 bars): the active mode's meter param (S.meter, mode-ui.js): Chords = the master `volume`
+//    (left height, the only volume control in Chords; same rendering as indicators.js), Arp = arp/gate (the
+//    right-height expression), bars in the mode color via CSS. Hidden when the mode has none (Lead).
 //  - #distortionDisplay "Filter: x%": same text; in modes that don't publish `filter` it follows
 //    `right/tilt` (frozen while the right hand is held). Color + dim come from modes.css.
 // indicators.js keeps rendering `volume`/`filter` as before; this module renders after it, so in
@@ -15,7 +15,7 @@ export function createReadouts({ S, bus, doc }) {
   let lastFilterText = null;
 
   function renderMeter() {
-    const p = S.rightTrack?.param;
+    const p = S.meter;
     if (!p) return;
     const v = bus.get(p);
     if (typeof v !== "number") return;
@@ -44,17 +44,17 @@ export function createReadouts({ S, bus, doc }) {
   }
 
   // Own subscription: `filter` + `volume` (indicators.js consumes them anyway) and the active mode's
-  // right-track param, re-subscribed on mode change.
+  // meter param, re-subscribed on mode change.
   let off = null;
   const consumer = {
     onSet(name) {
       if (name === "filter") filterSeenInMode = true;
-      if (name === S.rightTrack?.param || name === "volume") renderMeter();
+      if (name === S.meter || name === "volume") renderMeter();
     },
   };
   function resubscribe() {
     off?.();
-    off = bus.subscribe(consumer, ["filter", "volume", ...(S.rightTrack?.param ? [S.rightTrack.param] : [])]);
+    off = bus.subscribe(consumer, ["filter", "volume", ...(S.meter && S.meter !== "volume" ? [S.meter] : [])]);
   }
 
   function update() {

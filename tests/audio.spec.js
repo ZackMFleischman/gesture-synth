@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures.js";
 import { leftHand, rightHand } from "./helpers/hands.js";
+import { MASTER_VOLUME } from "../src/router.js";
 import { recordAudio, rms, spectrum, assertNotes, centroid, writeWav, et } from "./helpers/audio.js";
 
 const WAV_DIR = "test-results/audio";
@@ -89,13 +90,20 @@ test.describe("expression", () => {
   });
 
   test("hand height scales loudness", async ({ synthPage: page, setHands }) => {
-    const level = async (volume) => {
-      await setHands(leftHand(1), rightHand(1, { volume }));
+    // Chords' volume is the LEFT hand's height (the master volume) since the right height lost its function in Chords
+    // (this test used the right-hand volume 0.3 vs 0.9). Same intent and margins: volume 0.9 vs 0.3 -> loudness ~3x.
+    // The hand is placed so the router's dead-zoned anchor lands on the height for that volume (the anchor trails a
+    // moving hand by DEAD_ZONE), and the published master is checked before recording.
+    const { LOW, HIGH, DEAD_ZONE } = MASTER_VOLUME;
+    const level = async (volume, dir) => {
+      const height = LOW + volume * (HIGH - LOW) + dir * DEAD_ZONE; // dir: 0 first frame, -1 moving down
+      await setHands(leftHand(1, { volume: height }), rightHand(1));
+      await expect.poll(() => page.evaluate(() => window.__gsTest.bus.get("volume"))).toBeCloseTo(volume, 2);
       await page.waitForTimeout(350);
       return rms((await recordAudio(page, 500)).samples);
     };
-    const loud = await level(0.9);
-    const soft = await level(0.3);
+    const loud = await level(0.9, 0);
+    const soft = await level(0.3, -1);
     expect(loud / soft).toBeGreaterThan(2.4);
     expect(loud / soft).toBeLessThan(3.6);
   });

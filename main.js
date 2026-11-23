@@ -57,7 +57,7 @@ const { synth, audio, harmony, handInput, ctx, router } = createAppContext({
 // ---- UI ----
 mountControls({ harmony, audio, synth, canvasEl });
 // indicators.js renders `volume` (now the master) on the meter too; src/ui/readouts.js (mounted with the
-// modes UI below, after it) re-renders the meter from the active mode's rightTrack param.
+// modes UI below, after it) re-renders the meter from the active mode's meter param (Chords: `volume`, Arp: gate).
 mountIndicators(bus);
 
 // ---- OUTPUT HOOK (milestone 3) ----
