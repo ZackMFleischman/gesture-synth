@@ -11,6 +11,9 @@
 //     cabinet (high-pass 80 Hz, resonance 2.4 kHz, low-pass 4.8 kHz + 5.2 kHz).
 //   Level: compensated (`level`) so steady play is as loud as the other instruments and stays under the limiter;
 //     the global Drive (right hand sideways) adds its own level-compensated saturation on top.
+// Strings come from a per-AudioContext POOL of idle worklet nodes (created in onReady, grown on demand): a new
+// AudioWorkletNode gets its processor asynchronously (0-10 ms live, much longer in an OfflineAudioContext), which
+// would delay a strum. A string is busy from its note until shortly after stop(); then it is silent and reusable.
 // Until the worklet has loaded (onReady, a few ms after the AudioContext starts) a decaying sawtooth stands in.
 import { stepParam, wrapSource, biquad, series, perContext } from "../shared.js";
 
@@ -18,7 +21,7 @@ export const ELECTRIC = Object.freeze({
   T60: { chords: 3.5, arp: 2.1, lead: 8 }, // ring time per voice (s); the Lead's mono string sustains longest
   DAMP_T60: 0.06, // palm mute at release()
   AMP: 0.5, // pluck strength
-  PRE: 2.2, // gain into the clipper (its curve spans 4x its input range): heavy overdrive
+  PRE: 30, // gain into the clipper (a decaying string stays in heavy overdrive for ~1 s: sustain)
 });
 
 /** Asymmetric tube-style soft clip: tanh for positive inputs, a later, softer knee for negative ones. Pure. */
@@ -34,18 +37,49 @@ export function tubeCurve(n = 4097, drive = 4) {
 }
 
 const loaded = new WeakMap(); // ac -> true once the worklet module is in
+const pools = new WeakMap(); // ac -> [{ node, plucks, busyUntil, to }]
+const POOL_START = 12;
+
+/** String settings (also used by tests for a clean reference string). seed: deterministic pick noise per string. */
+export const STRING_OPTIONS = Object.freeze({ tone: 0.55, bright: 0.35, pickPos: 0.14, persistent: true });
+
+function newString(ac, index) {
+  const node = new AudioWorkletNode(ac, "ks-string", {
+    numberOfInputs: 0,
+    numberOfOutputs: 1,
+    outputChannelCount: [1],
+    processorOptions: { ...STRING_OPTIONS, seed: 1000 + index },
+  });
+  return { node, plucks: 0, busyUntil: 0, to: null };
+}
+
+/** A silent string from the pool (marked busy until released), connected to `dest`. */
+function takeString(ac, dest) {
+  let pool = pools.get(ac);
+  if (!pool) pools.set(ac, (pool = []));
+  const now = ac.currentTime;
+  let s = pool.find((p) => p.busyUntil <= now);
+  if (!s) pool.push((s = newString(ac, pool.length)));
+  s.busyUntil = Infinity;
+  if (s.to) { try { s.node.disconnect(); } catch {} }
+  s.node.connect(dest);
+  s.to = dest;
+  for (const n of ["freq", "t60", "pluckAmp"]) s.node.parameters.get(n).cancelScheduledValues(now);
+  return s;
+}
 
 export default {
   id: "electric",
   label: "Electric",
   icon: "M13 3L6 13h5l-1 8 7-10h-5l1-8",
-  level: 0.3,
+  level: 0.76,
   traits: { strumMs: 9, releaseTailS: 0.5, sustains: false, legato: "hammer-on", hammerOn: 0.3 },
 
   onReady(ac) {
     if (!ac.audioWorklet) return false;
     return ac.audioWorklet.addModule(new URL("./ks-worklet.js", import.meta.url)).then(() => {
       loaded.set(ac, true);
+      if (!pools.has(ac)) pools.set(ac, Array.from({ length: POOL_START }, (_, i) => newString(ac, i)));
       return true;
     });
   },
@@ -58,8 +92,8 @@ export default {
       biquad(ac, "lowshelf", 160, 0.7, 2), // tone stack: bass
       biquad(ac, "peaking", 800, 0.9, 3), // mid
       biquad(ac, "highshelf", 3200, 0.7, -4), // treble
-      biquad(ac, "peaking", 2400, 1.4, 5), // cabinet resonance
-      biquad(ac, "lowpass", 4800, 0.8), // speaker roll-off
+      biquad(ac, "peaking", 2400, 0.9, 3), // cabinet resonance (broad: a narrow one rings = peaks)
+      biquad(ac, "lowpass", 4800, 0.6), // speaker roll-off
       biquad(ac, "lowpass", 5200, 0.6),
     ]),
 
@@ -74,36 +108,39 @@ export default {
     const t60 = ELECTRIC.T60[opts.voice] ?? ELECTRIC.T60.chords;
     const amp = opts.amp ?? ELECTRIC.AMP;
     const mono = !!opts.mono;
-    let hz = freq;
 
     if (loaded.get(ac)) {
-      const node = new AudioWorkletNode(ac, "ks-string", {
-        numberOfInputs: 0,
-        numberOfOutputs: 1,
-        outputChannelCount: [1],
-        processorOptions: { freq, t60, amp, tone: 0.55, bright: 0.35, pickPos: 0.14, start: mono ? null : t0, persistent: mono },
-      });
-      node.connect(pre);
-      const post = (m) => node.port.postMessage(m);
+      const str = takeString(ac, pre);
+      const node = str.node;
+      const P = (n) => node.parameters.get(n);
+      const tA = Math.max(ac.currentTime, Math.min(t0, ac.currentTime));
+      P("freq").setValueAtTime(freq, tA);
+      P("t60").setValueAtTime(t60, tA);
+      const pluck = (t, a) => {
+        P("pluckAmp").setValueAtTime(amp * a, t);
+        P("pluck").setValueAtTime(++str.plucks, t); // every change of `pluck` = one pluck (sample-accurate)
+      };
+      if (!mono) pluck(t0, 1);
+      let stopped = false;
       const src = wrapSource("electric", out, freq, {
-        stop(t) { post({ type: "end", time: t }); },
-        release(t) { post({ type: "damp", time: t, t60: ELECTRIC.DAMP_T60 }); },
+        stop(t) {
+          if (stopped) return;
+          stopped = true;
+          const ts = Math.max(t, ac.currentTime);
+          P("t60").setValueAtTime(0.005, ts); // silent within a few ms: back to the pool
+          str.busyUntil = ts + 0.06;
+          setTimeout(() => src._fireEnded(), Math.max(0, (str.busyUntil - ac.currentTime) * 1000) + 20);
+        },
+        release(t) { P("t60").setValueAtTime(ELECTRIC.DAMP_T60, t); }, // palm mute
         setFreq(f, t, ramp = 0.003) {
-          hz = f;
           src.frequency.value = f;
-          post({ type: "freq", time: t, freq: f, ramp: Math.max(0.0005, ramp) });
+          stepParam(P("freq"), f, t, ramp);
         },
         excite(t, a = 1) {
-          post({ type: "t60", time: t, t60 }); // undo a palm mute
-          post({ type: "pluck", time: t, amp: amp * a, freq: hz });
+          P("t60").setValueAtTime(t60, t); // undo a palm mute
+          pluck(t, a);
         },
       });
-      node.port.onmessage = (e) => {
-        if (e.data && e.data.type === "ended") {
-          try { node.disconnect(); } catch {}
-          src._fireEnded();
-        }
-      };
       src.node = node;
       return src;
     }

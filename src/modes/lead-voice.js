@@ -30,7 +30,17 @@ export const RETRIGGER_DIP_S = 0.008; // a new pinch on a sounding voice dips to
 // 85 ms FFT window (tests/lead.spec.js "audio quality").
 export const PITCH_STEP_S = 0.003;
 export const LEAD_TONE_HZ = 3200; // fixed lowpass that takes the edge off bright waveforms
-export const SWAP_S = 0.025; // instrument change while sounding: crossfade
+export const SWAP_S = 0.06; // instrument change while sounding: equal-power crossfade
+
+/** Equal-power fade curve (64 points) from a to b on the quarter circle: "out" = cos, "in" = sin. */
+function fadeCurve(kind, level) {
+  const c = new Float32Array(64);
+  for (let i = 0; i < 64; i++) {
+    const u = (i / 63) * (Math.PI / 2);
+    c[i] = level * (kind === "out" ? Math.cos(u) : Math.sin(u));
+  }
+  return c;
+}
 
 export const PAD_LEVEL = 0.03; // per pad note (4 notes, 2 oscillators each)
 export const PAD_ATTACK_TAU = 0.12;
@@ -120,14 +130,14 @@ export function createLeadVoice(audio, { bus = null, voice = "lead", padVoice = 
     const ch = buildChain(ac, n.rack, id, freq);
     Object.assign(n, ch);
     const lvl = old.env.gain.value;
-    hold(old.env.gain, t);
-    old.env.gain.linearRampToValueAtTime(0, t + SWAP_S);
+    old.env.gain.cancelScheduledValues(0);
+    old.env.gain.setValueCurveAtTime(fadeCurve("out", lvl), t, SWAP_S);
     try { old.src.stop(t + SWAP_S + 0.05); } catch {}
     old.src.onended = () => { try { old.env.disconnect(); } catch {} };
     if (soundingFreq != null && lvl > 0.002) {
       const g = n.env.gain;
-      g.setValueAtTime(0, t);
-      g.linearRampToValueAtTime(Math.max(lvl, LEAD_SUSTAIN * 0.9), t + SWAP_S);
+      g.cancelScheduledValues(0);
+      g.setValueCurveAtTime(fadeCurve("in", Math.max(lvl, LEAD_SUSTAIN * 0.9)), t, SWAP_S);
       g.setTargetAtTime(LEAD_SUSTAIN, t + SWAP_S, DECAY_TAU);
       ch.src.excite(t, 1);
     }

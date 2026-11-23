@@ -33,7 +33,7 @@ export default {
   id: "organ",
   label: "Organ",
   icon: "M5 20V10M9.5 20V6M14 20V4M18.5 20V8M3 20h18",
-  level: 0.62,
+  level: 0.98,
   traits: { releaseTailS: 0.03, sustains: true, legato: "retrigger" },
   createChain: (ac) => series([biquad(ac, "lowpass", 7000, 0.5)]),
   createSource(ac, freq, t0) {
