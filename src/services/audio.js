@@ -191,8 +191,11 @@ export class SynthEngine {
     const ac = this.ctx;
     const t = ac.currentTime;
     const g = this.chordInstance.gain;
-    if (g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(t);
-    else { g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); }
+    // Not cancelAndHoldAtTime: after a finished linear ramp Chrome holds a wrong (about half) value,
+    // which is an audible step. The attack ramp is long over, so g.value is the real level.
+    const v = g.value;
+    g.cancelScheduledValues(0);
+    g.setValueAtTime(v, t);
     g.linearRampToValueAtTime(0, t + fade);
     const node = this.chordInstance;
     const oscs = this.oscillators;

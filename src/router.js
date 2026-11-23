@@ -67,7 +67,11 @@ export function createMasterVolume(opts = {}) {
 const lerp = (a, b, k) => a + (b - a) * k;
 const smooth = (k) => k * k * (3 - 2 * k);
 
-export function createRouter({ bus, registry, harmony, ctx, controlsContainer = null }) {
+/**
+ * @param {{ bus, registry, harmony, ctx, controlsContainer?: HTMLElement|null,
+ *           aspect?: () => number }} opts  aspect = canvas width / height (menu geometry units)
+ */
+export function createRouter({ bus, registry, harmony, ctx, controlsContainer = null, aspect = () => 1 }) {
   let active = null;
   let menu = null;
   let cleanupControls = null;
@@ -141,7 +145,10 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
     // ---- RADIAL MENU HOOK ----
     let held = false;
     if (menu) {
-      const r = menu.update(right, now);
+      // HandFrame.handSize is in display-HEIGHT units; the menu measures in canvas-WIDTH units.
+      const a = aspect();
+      const menuHand = right && a !== 1 ? { ...right, handSize: right.handSize / a } : right;
+      const r = menu.update(menuHand, now);
       if (r.opened) ctx.rightLocked = lastOpenRight;
       if (r.confirmed) setMode(r.confirmed);
       if (r.finished || r.cancelled) {

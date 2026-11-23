@@ -10,7 +10,8 @@
 import { createChordStabilizer } from "../services/harmony.js";
 import { trackClarityEvent } from "../services/analytics.js";
 
-function drawEnergy(ctx, volume01, qualityIndex, tiltFactor, chordStr) {
+/** The energy wave behind the chord display (shared by every mode; see docs/ui-integration.md §3). */
+export function drawEnergy(ctx, volume01, qualityIndex, tiltFactor, chordStr) {
   if (!ctx) return;
 
   // 1. QUALITY determines the number of lines (1: Major, 2: Minor, 3: Dominant, 4: Diminished)

@@ -67,9 +67,16 @@ const ctx = {
 // Container for the active mode's screen controls (empty for Chords).
 const modeControlsEl = document.createElement("div");
 modeControlsEl.id = "modeControls";
+// Hidden until the Controls panel (src/ui/controls-panel.js, docs/ui-integration.md D8) shows it;
+// unstyled it would sit on top of the key/tone selects.
+modeControlsEl.hidden = true;
 stageEl.appendChild(modeControlsEl);
 
-const router = createRouter({ bus, registry, harmony, ctx, controlsContainer: modeControlsEl });
+const router = createRouter({
+  bus, registry, harmony, ctx,
+  controlsContainer: modeControlsEl,
+  aspect: () => (canvasEl.width && canvasEl.height ? canvasEl.width / canvasEl.height : 1),
+});
 
 // ---- UI ----
 mountControls({ harmony, audio, synth, canvasEl });

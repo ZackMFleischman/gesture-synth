@@ -12,6 +12,7 @@
 import { createArpVoice } from "./arp-voice.js";
 import { arpNoteAt, midiToHz, PATTERNS, PATTERN_LABELS } from "./arp-patterns.js";
 import { RATES, MIN_BPM, MAX_BPM } from "../services/clock.js";
+import { drawEnergy } from "./chords.js";
 
 export const ARP_COLOR = "#4fb3ff"; // placeholder accent (see requirements: mode colors TBD)
 const REBIND_MARGIN = 0.008; // s: steps starting later than now + this can still be re-bound
@@ -30,7 +31,17 @@ export function createArpMode() {
   const changeListeners = new Set();
   let params = null;
 
+  let tilt = 0;
   const notify = () => changeListeners.forEach((cb) => cb());
+
+  // Chord display / quality read these (Chords publishes them itself; in Arp the chord is the left hand's).
+  function publishChord() {
+    const bus = ctx?.bus;
+    if (!bus) return;
+    bus.set("chord", ctx.harmony.chord ?? null);
+    bus.set("voicing", ctx.harmony.chord ? voicing : 0);
+    bus.set("chords/octave", false);
+  }
 
   function noteKey() {
     const c = ctx.harmony.chord;
@@ -169,6 +180,7 @@ export function createArpMode() {
           if (ctx.harmony) ctx.harmony.voicing = voicing;
           params.gate.value = clamp01(right.height);
           ctx.audio.setFilter(right.tilt);
+          tilt = right.tilt;
           const thumb = !!right.fingers?.thumb;
           if (thumb !== thumbWas) {
             // Edge-triggered so the screen toggle still works while the hand is up.
@@ -180,12 +192,14 @@ export function createArpMode() {
       }
       // Right hand null: keep the last values. Chord null (left fist): steps rest (in onStep).
       rebind();
+      publishChord();
     },
 
     /** Menu holds the right hand: keep the locked values; left-hand chord changes still land on the next step. */
     hold(c = ctx) {
       ctx = c;
       rebind();
+      publishChord();
     },
 
     /** Programmatic setters (screen controls, lab). */
@@ -232,6 +246,9 @@ export function createArpMode() {
     },
 
     draw(g, c = ctx) {
+      // The energy wave stays in every mode (docs/ui-integration.md §3): gate = thickness here.
+      const ch = c.harmony?.chord;
+      drawEnergy(g, params?.gate.value ?? 0, ch ? voicing : 0, tilt, ch ? ch.roman : null);
       drawArp(g, c, steps);
     },
   };
