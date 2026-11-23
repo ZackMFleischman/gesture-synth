@@ -181,8 +181,8 @@ export function createArpMode() {
     pinch = {
       startBpm: bpm,
       bpm,
-      startY: right.pos.y,
-      size: right.handSize,
+      startY: right.pos ? right.pos.y : null, // set by pinchMove() once a position is known
+      size: right.handSize > 0 ? right.handSize : null,
       gate: ret ? ret.gate : params.gate.value, // a re-pinch during Return keeps the original held gate
       tilt,
     };
@@ -193,6 +193,13 @@ export function createArpMode() {
   }
 
   function pinchMove(right) {
+    // Without a position / hand size (e.g. a synthetic frame) the pinch only holds; the tempo stays.
+    if (!right.pos || !(right.handSize > 0)) return;
+    if (pinch.startY == null || pinch.size == null) {
+      pinch.startY = right.pos.y;
+      pinch.size = right.handSize;
+      return;
+    }
     const dy = (pinch.startY - right.pos.y) / pinch.size; // up = +, in hand sizes (both display-height units)
     const b = pinchTempo(pinch.startBpm, dy, pinch.bpm);
     if (b === pinch.bpm) return;
@@ -286,7 +293,7 @@ export function createArpMode() {
       ctx = c;
       if (right) {
         const t = right.t || performance.now();
-        if (right.pinch && right.pos && right.handSize > 0) {
+        if (right.pinch) {
           if (!pinch) startPinch(right, t);
           pinchMove(right);
         } else {
