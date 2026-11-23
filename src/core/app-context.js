@@ -7,6 +7,7 @@ import { createRouter } from "../router.js";
 import { SynthEngine, createAudioFacade } from "../services/audio.js";
 import { createHarmony } from "../services/harmony.js";
 import { createClock } from "../services/clock.js";
+import { createAxes } from "./axes.js";
 
 /**
  * @param {{ bus, registry, canvasEl: HTMLCanvasElement, controlsContainer?: HTMLElement|null,
@@ -44,10 +45,13 @@ export function createAppContext({ bus, registry, canvasEl, controlsContainer = 
     masterVolume: 1, // router: left height -> master volume (1.3); 1 until a left hand is seen
     rightLocked: null, // router: the right HandFrame locked when the menu opened
     layerBase: null, // router: base mode id while the Lead layer plays on top of it
+    axes: null, // reach axes (src/core/axes.js): Drive / Space switches
   };
+  const axes = createAxes({ bus, audio });
+  ctx.axes = axes;
   router = createRouter({
-    bus, registry, harmony, ctx, controlsContainer,
+    bus, registry, harmony, ctx, controlsContainer, axes,
     aspect: () => (canvasEl.width && canvasEl.height ? canvasEl.width / canvasEl.height : 1),
   });
-  return { synth, audio, harmony, handInput, ctx, router };
+  return { synth, audio, harmony, handInput, ctx, router, axes };
 }

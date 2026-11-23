@@ -8,7 +8,7 @@
 //   - Q4 chrome (Controls Output row, chip) screenshots + a real-time video of switching to Arp
 import fs from "node:fs";
 import { test, expect } from "@playwright/test";
-import { results, leftHand, rightHand, fist, pinch, DESKTOP_VIEW } from "./helpers/hands.js";
+import { results, leftHand, rightHand, fist, pinch, DESKTOP_VIEW, setPlacementView } from "./helpers/hands.js";
 import { createScreencast } from "./helpers/screencast.js";
 import { installSynthLog, checkRender } from "./helpers/output-timing.js";
 
@@ -57,6 +57,7 @@ function report(name, obj) {
 
 async function openSynth(browser) {
   const context = await browser.newContext({ permissions: ["camera"], viewport: { width: 1280, height: 800 } });
+  setPlacementView(DESKTOP_VIEW); // hand builders place `volume` in this page's view (reach zone)
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(e));

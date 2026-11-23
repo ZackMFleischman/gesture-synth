@@ -11,7 +11,7 @@
 // `body.gs-modes` + modes.css, new DOM nodes, and canvas layers drawn on top of the modes. State comes
 // from bus signals, never from mode internals: pushed (subscribe) for `mode`, `beat` (event + playTime),
 // `filter`, `volume` and the active right-track param; read once per frame (bus.get) for the rest, so
-// their producers stay free: left|right/{pos,height,size,pinch,tilt}, menu (fallback:
+// their producers stay free: left|right/{pos,height,size,pinch,tilt,zone,x}, drive, space, menu (fallback:
 // router.menu.snapshot()), held ({right?:bool, [param]: heldValue}), bpm, arp/rate, arp/double,
 // lead/noteset. Missing signals degrade gracefully.
 // Lead layer (docs/architecture.md "Lead layer"): bus `mode` = the base (Chords / Arp), `layer` = "lead" | null.
@@ -47,7 +47,7 @@ const LOST_GRACE_MS = 250; // a hand must be gone this long before it shows as l
 const SIDE_LOCK_MS = 600; // the chord hand must stay on the other side this long before the tracks swap
 
 function newHand() {
-  return { pos: null, height: null, size: null, pinch: false, tilt: null, seen: false, lastPos: null, goneAt: null };
+  return { pos: null, height: null, size: null, pinch: false, tilt: null, seen: false, lastPos: null, goneAt: null, zone: null, x: null };
 }
 
 /**
@@ -101,6 +101,7 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
     now: 0,
     /** name -> {value, hand:"left"|"right", ref:number|null} (screen control wins until the hand moves). */
     overrides: new Map(),
+    lostGraceMs: LOST_GRACE_MS,
     lost(side) {
       const h = this.hands[side];
       return !h.pos && h.seen && h.goneAt != null && this.now - h.goneAt > LOST_GRACE_MS;
@@ -161,6 +162,8 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
         h.goneAt = performance.now();
       }
       updateChordSide();
+    } else if (field === "zone") {
+      if (v) h.zone = v; // the last known reach zone stays while the hand is lost (tracks don't jump)
     } else h[field] = v;
   }
 
@@ -199,6 +202,7 @@ export function mountModeUI({ bus, ctx, registry, router = null, canvas, output 
     "left/height": ["left", "height"], "right/height": ["right", "height"],
     "left/size": ["left", "size"], "right/size": ["right", "size"],
     "right/pinch": ["right", "pinch"], "right/tilt": ["right", "tilt"], "right/top": ["right", "top"],
+    "left/zone": ["left", "zone"], "right/zone": ["right", "zone"], "left/x": ["left", "x"], "right/x": ["right", "x"],
   };
 
   // Subscribe only to what needs a push (mode changes, beat events); everything else is read with

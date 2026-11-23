@@ -2,6 +2,7 @@
 // right hand to the active mode.
 //   - left hand  -> chord (via the harmony service) + master volume (left height, every mode, menu open too)
 //   - right hand -> radial menu first (if one is plugged in), then the active mode
+//   - both hands sideways -> the reach axes (src/core/axes.js: right x = Drive, left x = Space, every mode)
 //
 // Right-hand rules (spec "Decided changes to hand roles", "Mode selection flow"):
 //   - A right fist is the menu gesture, never a mode input: while the right hand is a fist the mode
@@ -87,7 +88,7 @@ const smooth = (k) => k * k * (3 - 2 * k);
  * @param {{ bus, registry, harmony, ctx, controlsContainer?: HTMLElement|null,
  *           aspect?: () => number }} opts  aspect = canvas width / height (menu geometry units)
  */
-export function createRouter({ bus, registry, harmony, ctx, controlsContainer = null, aspect = () => 1 }) {
+export function createRouter({ bus, registry, harmony, ctx, controlsContainer = null, aspect = () => 1, axes = null }) {
   let active = null;
   let menu = null;
   let cleanupControls = null;
@@ -305,6 +306,9 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
       held = menu.isHoldingRight();
     }
     bus.set("right/held", held);
+    // ---- Sideways axes (every mode; right-hand axes hold while the menu holds the right hand, and under the Lead
+    // layer: Drive is a base value there, like the base's other right-hand values; Space (left) stays live) ----
+    axes?.update(left, right ? (right.fist ? lastOpenRight : right) : null, { now, rightHeld: held || !!layer });
     if (!active) return;
 
     if (held) {
@@ -375,6 +379,8 @@ export function createRouter({ bus, registry, harmony, ctx, controlsContainer = 
     get rightMode() { return layer || active; },
     get rightModeId() { return (layer || active)?.id ?? null; },
     get masterVolume() { return master.value; },
+    /** Reach axes (src/core/axes.js) or null. */
+    get axes() { return axes; },
     /** true while the menu holds the right hand (mode values locked). */
     get rightHeld() { return !!(menu && menu.isHoldingRight()); },
   };

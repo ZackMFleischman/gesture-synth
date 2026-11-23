@@ -233,6 +233,9 @@ test.describe("2.2 note cursor", () => {
   test("the cursor does not flicker between two notes when the hand is still (seeded jitter at an edge)", async ({ lab: page }) => {
     for (const set of [1, 4]) {
       await setNoteSet(page, set);
+      // The ladder spans the right hand's reach zone (src/input/reach-zones.js): read its lines with the hand in view.
+      await setHands(page, preview(0.5));
+      await settle(page, 300);
       const d0 = await dbg(page);
       const lines = d0.lines;
       // boundary between two middle notes

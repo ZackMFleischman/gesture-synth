@@ -9,13 +9,113 @@
 // Also exports small canvas helpers modes can use for their own at-hand feedback (Arp x2 pill, the
 // big BPM plate during a pinch) so they share one look.
 
-import { COLORS, FONT, STROKE, deg, drawArc, drawPill, drawPlate } from "./theme.js";
+import { COLORS, FONT, STROKE, deg, drawArc, drawPill, drawPlate, drawLabel, withAlpha } from "./theme.js";
+import { AXES } from "../core/axes.js";
+
+// Sideways axes (src/core/axes.js: right x = Drive, left x = Space): a short horizontal tick scale under each palm,
+// running from the band's inner end (towards the screen middle) to its outer end. Middle segment = the neutral dead
+// zone; the outer half is the effect range (ticks at 1/4..4/4), filled from the middle to the dot in the axis color.
+// States: neutral (dot hollow, scale quiet) | active (dot solid, fill, name next to the outer end) | held (menu or Arp
+// pinch holds the right hand: 45 %, hollow dot) | off / hand lost / menu open (right) / hand under a panel: hidden.
+/** Scale below the palm, in hand spans: just under the wrist (0.42 hs), well above the Arp x2 pill (0.9 hs). */
+const AXIS_DROP = 0.48;
+const AXIS_DEAD = 0.16; // drawn dead-zone width, fraction of the scale (= ZONE.DEAD_ZONE)
 
 /** Gap between the highest fingertip and the arc's lowest points, in hand spans. */
 const ARC_CLEARANCE = 0.12;
 
-export function createHandOverlays({ S }) {
+export function createHandOverlays({ S, bus }) {
+  function drawAxis(g, G, a) {
+    if (bus?.get?.(`${a.id}/on`) === false) return;
+    const side = a.hand;
+    const h = S.hands[side];
+    const pos = S.drawPos(side);
+    if (!pos || typeof h.x !== "number" || !h.zone) return;
+    if (side === "right" && S.menu.state !== "closed") return;
+    const p = G.toPx(pos);
+    if (S.palmCovered(p, G.hs)) return;
+    const phone = G.W < 600 || G.H < 500;
+    const w = Math.max(40, Math.min(G.hs * (phone ? 0.6 : 0.72), phone ? 80 : 120));
+    const dir = h.zone.outer >= h.zone.inner ? 1 : -1; // screen direction of "outward"
+    const y = p.y + G.hs * AXIS_DROP;
+    const x0 = p.x - (dir * w) / 2; // inner end
+    const at = (u) => x0 + dir * u * w;
+    const amount = Math.max(0, Math.min(1, Number(bus?.get?.(a.param)) || 0));
+    const held = side === "right" && (S.rightHeld || S.rightReturn);
+    const active = amount > 0.001;
+    const color = side === "right" ? S.color : COLORS.ink;
+    g.save();
+    g.globalAlpha *= held ? 0.45 : 1;
+    g.lineCap = "round";
+    // halo + base line
+    g.beginPath();
+    g.moveTo(at(0), y);
+    g.lineTo(at(1), y);
+    g.strokeStyle = COLORS.halo;
+    g.lineWidth = 5;
+    g.stroke();
+    g.strokeStyle = COLORS.faint;
+    g.lineWidth = STROKE.thin;
+    g.stroke();
+    // dead zone (neutral) segment + effect-range ticks
+    g.beginPath();
+    g.moveTo(at(0.5 - AXIS_DEAD / 2), y);
+    g.lineTo(at(0.5 + AXIS_DEAD / 2), y);
+    g.strokeStyle = COLORS.quiet;
+    g.lineWidth = 3;
+    g.stroke();
+    g.beginPath();
+    for (const u of [0.5 + AXIS_DEAD / 2, 0.68, 0.79, 0.89, 1]) {
+      const tx = at(u);
+      g.moveTo(tx, y - 3);
+      g.lineTo(tx, y + 3);
+    }
+    g.strokeStyle = COLORS.quiet;
+    g.lineWidth = STROKE.hair;
+    g.stroke();
+    // fill from the dead zone to the amount, then the dot at the hand's position across the band
+    const dotU = Math.max(0, Math.min(1, h.x));
+    if (active) {
+      g.beginPath();
+      g.moveTo(at(0.5 + AXIS_DEAD / 2), y);
+      g.lineTo(at(0.5 + AXIS_DEAD / 2 + amount * (0.5 - AXIS_DEAD / 2)), y);
+      g.strokeStyle = withAlpha(color, 0.9);
+      g.lineWidth = 3;
+      g.stroke();
+    }
+    const dx = at(dotU);
+    g.beginPath();
+    g.arc(dx, y, 4.5, 0, Math.PI * 2);
+    g.fillStyle = COLORS.halo;
+    g.fill();
+    g.beginPath();
+    g.arc(dx, y, 3.5, 0, Math.PI * 2);
+    if (active && !held) {
+      g.fillStyle = color;
+      g.fill();
+    } else {
+      g.strokeStyle = active ? color : COLORS.ink;
+      g.lineWidth = STROKE.thin;
+      g.stroke();
+    }
+    let box = { x: Math.min(at(0), at(1)) - 5, y: y - 6, w: w + 10, h: 12 };
+    if (active && !phone) {
+      const lx = at(1) + dir * 8;
+      const r = drawLabel(g, a.label, lx, y, { size: 11, weight: 600, color, align: dir > 0 ? "left" : "right" });
+      const x1 = Math.min(box.x, r.x);
+      box = { x: x1, y: Math.min(box.y, r.y), w: Math.max(box.x + box.w, r.x + r.w) - x1, h: Math.max(box.h, r.h) };
+    }
+    g.restore();
+    G.reg(`axis-${a.id}`, "hand", { ...box, dot: { x: dx, y }, value: amount, active, held });
+  }
+
+  /** Drive / Space tick scales (separate from the filter arc below). */
+  function drawAxes(g, G) {
+    for (const a of AXES) drawAxis(g, G, a);
+  }
+
   function draw(g, G) {
+    drawAxes(g, G);
     const pos = S.drawPos("right");
     if (!pos || S.menu.state !== "closed") return;
     if (S.filter == null) return;

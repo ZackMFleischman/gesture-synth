@@ -1,6 +1,6 @@
 import { test as base, expect } from "@playwright/test";
 import { AUDIO_TAP_SCRIPT } from "./helpers/audio.js";
-import { results } from "./helpers/hands.js";
+import { results, setPlacementView, viewFor } from "./helpers/hands.js";
 
 export const SCREENS_DIR = "test-results/screens";
 
@@ -10,6 +10,9 @@ export const SCREENS_DIR = "test-results/screens";
  */
 export const test = base.extend({
   page: async ({ page }, use) => {
+    // Hand builders place `volume` (= HandFrame.height over the reach zone) in this page's view.
+    const vp = page.viewportSize() || { width: 1280, height: 800 };
+    setPlacementView(viewFor(vp.width, vp.height));
     await page.addInitScript(AUDIO_TAP_SCRIPT);
     // The mobile UI shows its tray open once on a first visit (docs/mobile-ui.md M1); tests start as a returning
     // player. tests/mobile-ui.spec.js clears this to test the first visit.

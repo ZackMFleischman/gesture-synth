@@ -209,6 +209,51 @@ menu.isHoldingRight()  // true from fist-entry until countdown end (router uses 
   beat grid carries `rate`/`double` and is re-sent on every scheduled beat. Chip: hidden while output is off, pressing it
   opens Controls (`setPressHandler`, `newRoom`, `onStatus`), `data-gs-kind="status"`.
 - Hand input publishes `left|right/top`: the highest fingertip in display space (the filter arc anchors above it).
+- Radial menu sub-menus + settings (ws/sound-menu, generic, `src/menu/*` only):
+  - Item types: `mode`, `submenu` (`{…, items: SettingItem[] | () => SettingItem[], current?: () => id, setting?: key}`),
+    `setting` (`{id, label, icon?, color? (default: the submenu's color), value? (default: id)}`). Max 2 levels (a submenu
+    inside a submenu is dropped; at most `MAX_SUB_ITEMS` 8 children). Children are resolved when the sub-ring opens.
+  - Sub-ring: opens when a selected submenu arc has the fist past its outer edge (`SELECT_R`) for `SUB_OPEN_MS` 150 ms
+    (dipping back inside restarts the timer); center = the fist at that moment; same radii as the main ring. Children
+    form a fan over 360° minus the back sector (`BACK_SPAN_DEG` 60°, pointing at the parent): list order starts next to
+    the back sector, counter-clockwise on screen. 6 children under a down arc -> 50° sectors centered at -145 (up-left),
+    165, 115, 65, 15, -35 (up-right); none straight down. Sector hysteresis = min(10°, 20% of the span).
+    The fist reaching `BACK_R` (0.6) inside the back sector = back one level (main ring re-grows at its own entry point,
+    selection cleared). The parent ring shrinks to a breadcrumb beyond the back sector ("Back" caption).
+  - `update()` result adds `level` (0|1), `path` ([] | [submenuId]), `entered` (submenu id, frame the sub-ring opens),
+    `back` (true), `setting: {key, submenu, id, value}` (open hand on a setting; `key` = `submenu.setting ?? submenu.id`),
+    reason `"submenu"` (open hand on a submenu arc = no change), state `"flash"` (setting confirm: FLASH_MS only, no
+    countdown — the right hand's controls don't change; then `finished`). `confirmed` stays mode-only. hoverId/selectedId
+    are ids within the active ring. Snapshot: active ring at top level + `level`, `slots`, `back`, `host`, `hoverBack`,
+    `subPending` (0..1), `parent` (main ring + `hostId`), `levelAt`, `levelFrom`, `confirmKind`, `confirmedItem`.
+  - Pure helpers exported: `fanLayout(n, backAngle, backSpan)`, `pickSlot(angle, slots, prevKey, hyst)`, `BACK_ID`.
+  - Drawing: an arc with a sub-menu has an outward chevron on its outer edge (slides out while passing through; hint
+    "Keep going to open"); the sub-ring's back sector is a short dashed neutral arc; a setting confirm shows the picked
+    value pill at the hand (~0.4 s) instead of the countdown ring. Lab: `labs/menu-lab.html` (down = "Sound", 6 instruments).
+- Reach zones + sideways axes (ws/reach-zones, user feedback "my hand starts to get cut off"):
+  - HandFrame `height` = the palm's position over the hand's vertical reach zone (display space; 0 bottom .. 1 top), no
+    longer the wrist over 90 % of the camera image (that is now `rawHeight`). Zone (`src/input/reach-zones.js`, pure):
+    palm y limits where the whole hand stays in frame = max(preset top, up + 3 %) .. min(preset bottom, 1 − down − 3 %),
+    up/down = the hand's extent above/below the palm (max of the 21 landmarks and 1.3 / 0.9 hand sizes); band never shorter
+    than 0.12 (centered when a hand is too big). Presets (`reach/range`, Controls "Range"): comfort 20–80 % (default), wide
+    10–90 %, compact 30–70 %. Extents smoothed per hand (one-pole 400 ms, changes < 12 % ignored, so a tilt / pinch / fist
+    never moves the value of a still hand); reset when the hand is lost.
+  - HandFrame adds `x` (0 inner .. 0.5 neutral .. 1 outer of a horizontal band on the side the hand is DISPLAYED on, from
+    `ui/sides`, else guessed from the palms; dead zone 16 % of the band around its middle), `zone`
+    ({top, bottom, inner, outer, side, range}), `extents`, `rawHeight`. Bus (hand input): `left|right/x` (null when lost),
+    `left|right/zone` (state, quantized to 1/1000); `reach/range` (state, ui).
+  - Edge tracks span their hand's zone (marker = palm y, clamped to the band; hollow markers on the band). Lead's ladder
+    spans the right hand's zone: arrows at the band ends, lines between (`ladderGeometry(..., band)`), DOM clearance still wins.
+  - `src/core/axes.js` = THE mapping table (one line per axis): right x -> `drive`, left x -> `space`, curve `outward`
+    (0 up to the neutral middle, 1 at the outer end); `<id>/on` switches (state, default true). The router calls
+    `axes.update(left, right, {now, rightHeld})` every frame (right axes hold while the menu holds the right hand; lost
+    hands hold). ctx.axes, router.axes.
+  - Audio graph: `out` is a GainNode bus -> driveIn -> waveshaper (fixed tanh curve, null until Drive is first used) ->
+    driveOut -> filter -> dry -> master; reverb send after the filter (`spaceSend` 0..0.8 -> ConvolverNode with a generated
+    2.8 s IR, RT60 2.4 s, created on first use) -> master; dry trimmed by up to 22 % as Space rises. Drive = makeup ·
+    tanh(g·x), g 0.05..9 (squared), makeup keeps a 0.3 reference peak (× 0.62 at full drive for the RMS rise):
+    loudness within ±2 dB, limiter input falls as Drive rises. `audio.setDrive/setSpace`, `audio.drive/space`.
+  - Wire: `/gs/drive`, `/gs/space`, `/gs/left/x`, `/gs/right/x` (ADDRESS_TABLE).
 - Lead layer (ws/lead-layer; spec note "Decided after real-camera testing: Lead plays on top of the current mode"):
   - Modes split into BASE modes (Chords, Arp: accompaniment, left hand) and LAYERS (mode plugin `layer: true`: Lead). The
     router keeps `active` = the base and `layer` = Lead or null. Bus: `mode` = the base id (unchanged meaning for

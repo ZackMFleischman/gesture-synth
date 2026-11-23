@@ -3,15 +3,28 @@
 //   chord oscillators -> chord instance gain (attack/release) -> chordGain (Chords' right-height volume) ─┐
 //   arp / lead / noteOn() voices ─────────────────────────────────────────────────────────────────────────┤
 //                                                                                                         v
-//   out (waveshaper, pass-through; the PRE-FILTER bus) -> lowpass filter -> baseGain -> masterGain (left height, all modes)
+//   out (GainNode 1, the PRE-FILTER bus) -> driveIn -> waveshaper (Drive) -> driveOut -> lowpass filter
+//     -> baseGain (1; eased down under the Lead layer) -> mix (GainNode 1)
+//   lead voice -> layerIn -> layerFilter (Lead's own tilt filter, same curve) ---------> mix
+//   mix -> dry (GainNode) ──────────────────────────────────────────┐
+//   mix -> spaceSend (0..SPACE.WET) -> convolver (generated IR) ────┴-> masterGain (left height, all modes)
 //     -> limiter (DynamicsCompressor) -> clipper (soft-clip waveshaper, |y| < 0.98) -> destination
-//   lead voice -> layerIn -> layerFilter (Lead's own tilt filter, same curve) -> masterGain
 //
 // The Lead layer (docs/architecture.md "Lead layer"): Lead plays on top of a base mode (Chords / Arp). The base
 // keeps the shared filter at its HELD value while the right hand's tilt drives the lead voice's own filter, so
-// the two never fight over one filter and neither value jumps when the layer turns on or off.
+// the two never fight over one filter and neither value jumps when the layer turns on or off. The lead skips Drive
+// (a base value, held under the layer: the router holds the right-hand axes then) but gets Space (after `mix`).
 // While the layer is on, baseGain eases the base down by BASE_UNDER_LAYER (-1.9 dB, tau 0.12 s): room for the lead,
 // and the loudest base (worst chord 0.67 at the limiter input) + lead stays under the limiter threshold.
+//
+// Drive (right hand sideways, src/core/axes.js): y = makeup * tanh(g * x). The waveshaper curve is fixed (tanh over
+// its input range, DRIVE.CURVE_K); driveIn scales the input (g / CURVE_K) and driveOut is the makeup gain that keeps
+// a signal at the reference level DRIVE.REF where it was (DRIVE.COMP trims the RMS rise of the squarer wave), so
+// turning Drive up adds harmonics, not level, and steady playing stays under the limiter. Before Drive is first used
+// the curve is null and both gains are 1: the graph is bit-identical to the original pass-through.
+// Space (left hand sideways): a reverb send after the filter (ConvolverNode, IR generated here: decaying stereo
+// noise, no assets). Created on first use; at space 0 the send is 0 and the dry path is untouched (gain 1). As the
+// wet level rises the dry is trimmed by up to SPACE.DUCK so the sum keeps the same headroom.
 //
 // Gain staging (docs/architecture.md, "Accepted amendments"): normal playing never reaches the limiter.
 // Worst steady state = master 1, right volume 1, sawtooth, filter fully open (tilt +1: 5 kHz, Q 5.2), every
@@ -46,6 +59,47 @@ export const BASE_UNDER_LAYER = 0.8;
 const LAYER_MIX_TAU = 0.12;
 /** Master limiter: a safety net for transients only (steady playing stays below the threshold). */
 export const LIMITER = Object.freeze({ threshold: -2, knee: 1, ratio: 20, attack: 0.001, release: 0.1 });
+/**
+ * Drive (0..1 -> saturation). G_MIN..G_MAX = tanh pre-gain (curve ~linear at G_MIN); REF = level (peak, at the
+ * waveshaper input) kept constant by the makeup gain: a loud chord at full right volume peaks ~0.3-0.5 there;
+ * COMP = makeup trim at full drive (a saturated wave is squarer: more RMS for the same peak).
+ */
+export const DRIVE = Object.freeze({ G_MIN: 0.05, G_MAX: 9, REF: 0.3, COMP: 0.62, CURVE_K: 4, TAU: 0.03 });
+/** Space (0..1 -> reverb). WET = send level at 1; DUCK = dry trim at 1; IR length (s) and decay (s to -60 dB). */
+export const SPACE = Object.freeze({ WET: 0.8, DUCK: 0.22, IR_S: 2.8, RT60: 2.4, PREDELAY_S: 0.012, TAU: 0.05 });
+
+/** Drive stage gains for an amount 0..1: { pre, post } (pre = driveIn, post = driveOut). Pure. */
+export function driveGains(amount) {
+  const d = Math.max(0, Math.min(1, amount));
+  const g = DRIVE.G_MIN + (DRIVE.G_MAX - DRIVE.G_MIN) * d * d; // squared: fine control at the low end
+  const comp = 1 - (1 - DRIVE.COMP) * d;
+  return { pre: g / DRIVE.CURVE_K, post: (comp * DRIVE.REF) / Math.tanh(g * DRIVE.REF), g };
+}
+
+function tanhCurve(n = 8193) {
+  const c = new Float32Array(n);
+  for (let i = 0; i < n; i++) c[i] = Math.tanh(DRIVE.CURVE_K * ((i / (n - 1)) * 2 - 1));
+  return c;
+}
+
+/** Reverb impulse response: stereo noise with an exponential decay (RT60), short predelay, soft onset. */
+function makeImpulse(ac) {
+  const sr = ac.sampleRate;
+  const len = Math.round(SPACE.IR_S * sr);
+  const buf = ac.createBuffer(2, len, sr);
+  const pre = Math.round(SPACE.PREDELAY_S * sr);
+  let seed = 12345;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 4294967296) * 2 - 1; // deterministic
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = pre; i < len; i++) {
+      const t = (i - pre) / sr;
+      const onset = Math.min(1, t / 0.008);
+      d[i] = rnd() * onset * Math.pow(10, (-3 * t) / SPACE.RT60);
+    }
+  }
+  return buf;
+}
 
 let noteIdCounter = 0;
 /** Globally unique note id (pairs note/on with note/off or note/cancel across all voices). */
@@ -71,6 +125,7 @@ export class SynthEngine {
     this.layerIn = null; // Lead layer bus (see header)
     this.layerFilter = null;
     this.baseGain = null; // base modes' level (eased down under the Lead layer)
+    this.mix = null;
     this.waveShaper = null;
     this.chordGain = null;
     this.masterGain = null;
@@ -84,6 +139,9 @@ export class SynthEngine {
     this.onFirstSound = onFirstSound;
     this.hasPlayedFirstSound = false;
     this.masterVolume = 0;
+    this.drive = 0;
+    this.space = 0;
+    this.spaceSend = null; // reverb send (created on first use)
     this.bus = bus;
     bus.declare("note/on", { type: "event", owner: "audio" });
     bus.declare("note/off", { type: "event", owner: "audio" });
@@ -94,16 +152,20 @@ export class SynthEngine {
     if (this.ctx) return;
     const ac = (this.ctx = new (window.AudioContext || window.webkitAudioContext)());
 
+    this.inBus = ac.createGain(); // `out`: every voice connects here
+    this.driveIn = ac.createGain();
+    this.driveOut = ac.createGain();
     this.waveShaper = ac.createWaveShaper();
-    this.waveShaper.curve = null;
+    this.waveShaper.curve = null; // pass-through until Drive is first used
     this.waveShaper.oversample = "4x"; // Reduces aliasing harshness
+    this.dry = ac.createGain();
 
     this.filter = ac.createBiquadFilter();
     this.filter.type = "lowpass";
     this.filter.frequency.value = 1200;
     this.filter.Q.value = 0.7;
 
-    // Lead layer: its own tilt filter, straight into the master (after the shared filter).
+    // Lead layer: its own tilt filter into `mix` (after the shared filter and Drive, before Space).
     this.layerIn = ac.createGain();
     this.layerFilter = ac.createBiquadFilter();
     this.layerFilter.type = "lowpass";
@@ -115,6 +177,7 @@ export class SynthEngine {
 
     this.baseGain = ac.createGain();
     this.baseGain.gain.value = 1;
+    this.mix = ac.createGain(); // base + Lead layer, before dry / Space
 
     this.masterGain = ac.createGain();
     this.masterGain.gain.value = this.masterVolume;
@@ -128,12 +191,19 @@ export class SynthEngine {
     this.clipper.curve = softClipCurve();
     this.clipper.oversample = "2x";
 
-    this.chordGain.connect(this.waveShaper);
-    this.waveShaper.connect(this.filter);
+    this.chordGain.connect(this.inBus);
+    this.inBus.connect(this.driveIn);
+    this.driveIn.connect(this.waveShaper);
+    this.waveShaper.connect(this.driveOut);
+    this.driveOut.connect(this.filter);
     this.filter.connect(this.baseGain);
-    this.baseGain.connect(this.masterGain);
+    this.baseGain.connect(this.mix);
     this.layerIn.connect(this.layerFilter);
-    this.layerFilter.connect(this.masterGain);
+    this.layerFilter.connect(this.mix);
+    this.mix.connect(this.dry);
+    this.dry.connect(this.masterGain);
+    if (this.drive > 0) this.setDrive(this.drive, true);
+    if (this.space > 0) this.setSpace(this.space, true);
     this.masterGain.connect(this.limiter);
     this.limiter.connect(this.clipper);
     this.clipper.connect(ac.destination);
@@ -161,6 +231,48 @@ export class SynthEngine {
     this.masterVolume = v;
     if (!this.ctx) return;
     this.masterGain.gain.setTargetAtTime(v, this.ctx.currentTime, 0.02);
+  }
+
+  /** Drive 0..1 (saturation, level-compensated). See the header and DRIVE. */
+  setDrive(amount, force = false) {
+    const d = Math.max(0, Math.min(1, Number(amount) || 0));
+    if (d === this.drive && !force) return;
+    this.drive = d;
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const { pre, post } = driveGains(d);
+    if (!this.waveShaper.curve) {
+      if (d === 0) return; // never used: stay bit-identical pass-through
+      // First use: the fixed tanh curve, gains jump to the (near-linear) start values, then glide.
+      this.waveShaper.curve = tanhCurve();
+      const g0 = driveGains(0);
+      this.driveIn.gain.setValueAtTime(g0.pre, t);
+      this.driveOut.gain.setValueAtTime(g0.post, t);
+    }
+    this.driveIn.gain.setTargetAtTime(pre, t, DRIVE.TAU);
+    this.driveOut.gain.setTargetAtTime(post, t, DRIVE.TAU);
+  }
+
+  /** Space 0..1 (reverb send after the filter). See the header and SPACE. */
+  setSpace(amount, force = false) {
+    const v = Math.max(0, Math.min(1, Number(amount) || 0));
+    if (v === this.space && !force) return;
+    this.space = v;
+    if (!this.ctx) return;
+    const ac = this.ctx;
+    if (!this.spaceSend) {
+      if (v === 0) return; // never used: no convolver running
+      this.spaceSend = ac.createGain();
+      this.spaceSend.gain.value = 0;
+      this.convolver = ac.createConvolver();
+      this.convolver.buffer = makeImpulse(ac); // normalize (default) = equal-power IR
+      this.mix.connect(this.spaceSend); // base + Lead layer
+      this.spaceSend.connect(this.convolver);
+      this.convolver.connect(this.masterGain);
+    }
+    const t = ac.currentTime;
+    this.spaceSend.gain.setTargetAtTime(v * SPACE.WET, t, SPACE.TAU);
+    this.dry.gain.setTargetAtTime(1 - SPACE.DUCK * v, t, SPACE.TAU);
   }
 
   updateFilterSweep(tiltFactor, filter = this.filter) {
@@ -281,7 +393,7 @@ export class SynthEngine {
     env.gain.linearRampToValueAtTime(gain, t0 + 0.005);
     env.gain.setTargetAtTime(0, t1, 0.02);
     osc.connect(env);
-    env.connect(this.waveShaper);
+    env.connect(this.inBus);
     osc.start(t0);
     osc.stop(t1 + 0.2);
     osc.onended = () => { try { env.disconnect(); } catch {} };
@@ -320,9 +432,9 @@ export function createAudioFacade(synth) {
     get ac() { return synth.ctx; },
     /** Master volume GainNode (left height). */
     get master() { return synth.masterGain; },
-    /** PRE-FILTER input bus: every voice connects here (-> filter -> master -> limiter). */
-    get out() { return synth.waveShaper; },
-    /** Lead layer input: -> its own tilt filter (setLayerFilter) -> master. Lead's voice connects here. */
+    /** PRE-FILTER input bus: every voice connects here (-> drive -> filter -> master -> limiter). */
+    get out() { return synth.inBus; },
+    /** Lead layer input: -> its own tilt filter (setLayerFilter) -> mix (dry + Space) -> master. Lead's voice connects here. */
     get layerOut() { return synth.layerIn; },
     /** Chords' chord-voice GainNode (right-height volume in Chords). */
     get chordGain() { return synth.chordGain; },
@@ -345,6 +457,12 @@ export function createAudioFacade(synth) {
       synth.waveform = type;
       synth.currentKey = null; // forces sound refresh
     },
+    /** Drive 0..1 (src/core/axes.js: right hand sideways). */
+    setDrive: (v) => synth.setDrive(v),
+    /** Space 0..1 (reverb send; src/core/axes.js: left hand sideways). */
+    setSpace: (v) => synth.setSpace(v),
+    get drive() { return synth.drive; },
+    get space() { return synth.space; },
     /** Chord-voice level (Chords' right-hand volume). */
     setVolume: (v) => synth.setVolume(v),
     /** Master volume (left-hand height; the router calls this). */
